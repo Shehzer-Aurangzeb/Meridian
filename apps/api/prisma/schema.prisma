@@ -1,0 +1,39 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model TradeAnalysis {
+  id         String   @id @default(cuid())
+  coin       String
+  timeframe  String
+  entryPrice Float
+  tp1        Float
+  tp2        Float
+  tp3        Float
+  stopLoss   Float
+  leverage   Int
+  suggestion String   // LONG, SHORT, WAIT
+  reasoning  String   @db.Text
+
+  // Indicator values at time of analysis
+  rsiValue  Float?
+  bbUpper   Float?
+  bbMiddle  Float?
+  bbLower   Float?
+  atrValue  Float?
+
+  // Metadata
+  priceAtAnalysis Float
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([coin])
+  @@index([createdAt])
+}
