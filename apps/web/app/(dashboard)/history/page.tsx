@@ -10,8 +10,8 @@ import {
   Pagination,
   MOCK_SUMMARY_STATS,
   MOCK_HISTORY,
-} from '@/components/history';
-import type { HistoryFilters, HistoryEntry, PaginationState } from '@/components/history';
+} from '@/components/features/history';
+import type { HistoryFilters, HistoryEntry, PaginationState } from '@/components/features/history';
 
 /**
  * Disclaimer footer

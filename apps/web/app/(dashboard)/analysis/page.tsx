@@ -14,9 +14,9 @@ import {
   type SignalData,
   type IndicatorData,
   type ReasoningData,
-} from '@/components/analysis';
-import { Disclaimer } from '@/components/dashboard';
-import { useToast } from '@/components/ui/Toast';
+} from '@/components/features/analysis';
+import { Disclaimer } from '@/components/features/dashboard';
+import { useToast } from '@/components/ui/toast';
 import { API_URL } from '@/lib/constants';
 
 export default function AnalysisPage() {
