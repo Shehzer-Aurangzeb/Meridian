@@ -1,12 +1,17 @@
-import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Param } from '@nestjs/common';
 import { BinanceService } from '../services/binance.service';
 import { IndicatorsService } from '../services/indicators.service';
 import { ClaudeService } from '../services/claude.service';
+import { PerformanceService, AnalysisWithPerformance } from '../services/performance.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyzeRequestDto } from '../dto/analyze-request.dto';
 import { AnalyzeResponseDto, AnalysisData } from '../dto/analyze-response.dto';
+import { HistoryQueryDto } from '../dto/history-query.dto';
+import { HistoryResponseDto } from '../dto/history-response.dto';
+import { PerformanceResponseDto, PerformanceAnalysis } from '../dto/performance-response.dto';
 import { MarketData } from '../types/analysis.types';
 import { TimeInterval } from '../types/candle.types';
+import { Prisma } from '@prisma/client';
 
 @Controller('analysis')
 export class AnalysisController {
@@ -14,6 +19,7 @@ export class AnalysisController {
     private readonly binanceService: BinanceService,
     private readonly indicatorsService: IndicatorsService,
     private readonly claudeService: ClaudeService,
+    private readonly performanceService: PerformanceService,
     private readonly prismaService: PrismaService,
   ) {}
 
@@ -108,6 +114,204 @@ export class AnalysisController {
 
       // Return error response
       return AnalyzeResponseDto.failure(message);
+    }
+  }
+
+  @Get('history')
+  async getHistory(@Query() query: HistoryQueryDto): Promise<HistoryResponseDto> {
+    try {
+      const { limit = 50, startDate, endDate } = query;
+
+      const where: Prisma.TradeAnalysisWhereInput = {};
+
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+          where.createdAt.gte = new Date(startDate);
+        }
+        if (endDate) {
+          where.createdAt.lte = new Date(endDate);
+        }
+      }
+
+      const [analyses, total] = await Promise.all([
+        this.prismaService.tradeAnalysis.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        }),
+        this.prismaService.tradeAnalysis.count({ where }),
+      ]);
+
+      return HistoryResponseDto.success({
+        analyses,
+        total,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to fetch history';
+      return HistoryResponseDto.failure(message);
+    }
+  }
+
+  @Get('history/:coin')
+  async getHistoryByCoin(
+    @Param('coin') coin: string,
+    @Query() query: HistoryQueryDto,
+  ): Promise<HistoryResponseDto> {
+    try {
+      const { limit = 50, startDate, endDate } = query;
+      const normalizedCoin = coin.toUpperCase();
+
+      const where: Prisma.TradeAnalysisWhereInput = {
+        coin: normalizedCoin,
+      };
+
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+          where.createdAt.gte = new Date(startDate);
+        }
+        if (endDate) {
+          where.createdAt.lte = new Date(endDate);
+        }
+      }
+
+      const [analyses, total] = await Promise.all([
+        this.prismaService.tradeAnalysis.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        }),
+        this.prismaService.tradeAnalysis.count({ where }),
+      ]);
+
+      return HistoryResponseDto.success({
+        analyses,
+        total,
+        coin: normalizedCoin,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to fetch history';
+      return HistoryResponseDto.failure(message);
+    }
+  }
+
+  @Get('performance')
+  async getPerformance(
+    @Query() query: HistoryQueryDto,
+  ): Promise<PerformanceResponseDto> {
+    try {
+      const { limit = 100, startDate, endDate } = query;
+
+      const where: Prisma.TradeAnalysisWhereInput = {};
+
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+          where.createdAt.gte = new Date(startDate);
+        }
+        if (endDate) {
+          where.createdAt.lte = new Date(endDate);
+        }
+      }
+
+      const analyses = await this.prismaService.tradeAnalysis.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+
+      const analysesWithPerformance =
+        await this.performanceService.calculatePerformance(analyses);
+      const stats = this.performanceService.calculateWinRate(analysesWithPerformance);
+
+      const recentAnalyses: PerformanceAnalysis[] = analysesWithPerformance.map(
+        (a: AnalysisWithPerformance) => ({
+          id: a.id,
+          coin: a.coin,
+          suggestion: a.suggestion,
+          entryPrice: a.entryPrice,
+          stopLoss: a.stopLoss,
+          priceAtAnalysis: a.priceAtAnalysis,
+          currentPrice: a.currentPrice,
+          status: a.status,
+          priceChange: a.priceChange,
+          priceChangePercent: a.priceChangePercent,
+          createdAt: a.createdAt,
+        }),
+      );
+
+      return PerformanceResponseDto.success({
+        ...stats,
+        recentAnalyses,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to calculate performance';
+      return PerformanceResponseDto.failure(message);
+    }
+  }
+
+  @Get('performance/:coin')
+  async getPerformanceByCoin(
+    @Param('coin') coin: string,
+    @Query() query: HistoryQueryDto,
+  ): Promise<PerformanceResponseDto> {
+    try {
+      const { limit = 100, startDate, endDate } = query;
+      const normalizedCoin = coin.toUpperCase();
+
+      const where: Prisma.TradeAnalysisWhereInput = {
+        coin: normalizedCoin,
+      };
+
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+          where.createdAt.gte = new Date(startDate);
+        }
+        if (endDate) {
+          where.createdAt.lte = new Date(endDate);
+        }
+      }
+
+      const analyses = await this.prismaService.tradeAnalysis.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+
+      const analysesWithPerformance =
+        await this.performanceService.calculatePerformance(analyses);
+      const stats = this.performanceService.calculateWinRate(analysesWithPerformance);
+
+      const recentAnalyses: PerformanceAnalysis[] = analysesWithPerformance.map(
+        (a: AnalysisWithPerformance) => ({
+          id: a.id,
+          coin: a.coin,
+          suggestion: a.suggestion,
+          entryPrice: a.entryPrice,
+          stopLoss: a.stopLoss,
+          priceAtAnalysis: a.priceAtAnalysis,
+          currentPrice: a.currentPrice,
+          status: a.status,
+          priceChange: a.priceChange,
+          priceChangePercent: a.priceChangePercent,
+          createdAt: a.createdAt,
+        }),
+      );
+
+      return PerformanceResponseDto.success({
+        ...stats,
+        coin: normalizedCoin,
+        recentAnalyses,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to calculate performance';
+      return PerformanceResponseDto.failure(message);
     }
   }
 }

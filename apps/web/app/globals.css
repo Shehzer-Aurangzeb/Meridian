@@ -1,3 +1,179 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ==========================================================================
+   THEME SYSTEM
+   Uses CSS custom properties with RGB values for Tailwind alpha support.
+   Format: --color: R G B (space-separated, no commas)
+   Usage in Tailwind: rgb(var(--color) / <alpha-value>)
+   ========================================================================== */
+
+:root {
+  /* Light theme (Editorial) - Default */
+  --background: 244 239 231;        /* #F4EFE7 beige */
+  --surface: 250 247 242;           /* #FAF7F2 beige-2 */
+  --surface-hover: 255 255 255;     /* #FFFFFF white */
+  --primary: 17 51 41;              /* #113329 deep-green */
+  --primary-foreground: 244 239 231;/* #F4EFE7 light text on dark primary */
+  
+  --text-primary: 17 51 41;         /* #113329 */
+  --text-secondary: 17 51 41;       /* #113329 at 65% - handled via opacity */
+  --text-tertiary: 17 51 41;        /* #113329 at 45% - handled via opacity */
+  
+  --border: 17 51 41;               /* #113329 at 10% */
+  --border-hover: 17 51 41;         /* #113329 at 18% */
+  
+  /* Accent colors - Light theme */
+  --gold: 244 211 159;              /* #F4D39F */
+  --gold-ink: 184 146 78;           /* #B8924E darker gold for text */
+  --gold-dark: 138 106 62;          /* #8a6a3e darker gold for gradients */
+  --green: 34 197 94;               /* #22C55E bullish */
+  --red: 239 68 68;                 /* #EF4444 bearish */
+  --amber: 217 119 6;               /* #D97706 warnings */
+  --blue: 59 130 246;               /* #3B82F6 info */
+  
+  /* Sidebar (dark panel in light mode) */
+  --sidebar-bg: 17 51 41;           /* #113329 */
+  --sidebar-text: 233 226 213;      /* #E9E2D5 */
+  --sidebar-text-muted: 244 239 231;/* #F4EFE7 at 72% */
+  --sidebar-gold: 244 211 159;      /* #F4D39F at 55% */
+  
+  /* Semantic opacity values for borders/muted text */
+  --opacity-border: 0.10;
+  --opacity-border-hover: 0.18;
+  --opacity-muted: 0.65;
+  --opacity-muted-2: 0.45;
+}
+
+/* Dark theme (Professional Trading) */
+.dark {
+  --background: 15 20 25;           /* #0f1419 very dark gray */
+  --surface: 26 29 35;              /* #1a1d23 card surface */
+  --surface-hover: 34 38 46;        /* #22262e hover state */
+  --primary: 244 211 159;           /* #F4D39F gold as primary in dark */
+  --primary-foreground: 15 20 25;   /* #0f1419 dark text on gold primary */
+  
+  --text-primary: 225 228 232;      /* #e1e4e8 off-white */
+  --text-secondary: 139 148 158;    /* #8b949e muted gray */
+  --text-tertiary: 110 118 129;     /* #6e7681 subtle */
+  
+  --border: 48 54 61;               /* #30363d subtle border */
+  --border-hover: 72 79 88;         /* #484f58 hover border */
+  
+  /* Accent colors - Dark theme (desaturated for eye comfort) */
+  --gold: 244 211 159;              /* #F4D39F same gold */
+  --gold-ink: 244 211 159;          /* Same in dark mode */
+  --gold-dark: 138 106 62;          /* #8a6a3e same gradient endpoint */
+  --green: 63 185 80;               /* #3fb950 desaturated bullish */
+  --red: 248 81 73;                 /* #f85149 desaturated bearish */
+  --amber: 210 153 34;              /* #d29922 warnings */
+  --blue: 88 166 255;               /* #58a6ff info */
+  
+  /* Sidebar (blends with dark bg) */
+  --sidebar-bg: 15 20 25;           /* Same as background */
+  --sidebar-text: 225 228 232;      /* Same as text-primary */
+  --sidebar-text-muted: 139 148 158;/* Same as text-secondary */
+  --sidebar-gold: 244 211 159;      /* Full gold */
+  
+  /* Opacity values for dark mode */
+  --opacity-border: 1;
+  --opacity-border-hover: 1;
+  --opacity-muted: 1;
+  --opacity-muted-2: 1;
+}
+
+/* System preference fallback (when no explicit theme set) */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: 15 20 25;
+    --surface: 26 29 35;
+    --surface-hover: 34 38 46;
+    --primary: 244 211 159;
+    --primary-foreground: 15 20 25;
+    
+    --text-primary: 225 228 232;
+    --text-secondary: 139 148 158;
+    --text-tertiary: 110 118 129;
+    
+    --border: 48 54 61;
+    --border-hover: 72 79 88;
+    
+    --gold: 244 211 159;
+    --gold-ink: 244 211 159;
+    --green: 63 185 80;
+    --red: 248 81 73;
+    --amber: 210 153 34;
+    --blue: 88 166 255;
+    
+    --sidebar-bg: 15 20 25;
+    --sidebar-text: 225 228 232;
+    --sidebar-text-muted: 139 148 158;
+    --sidebar-gold: 244 211 159;
+    
+    --opacity-border: 1;
+    --opacity-border-hover: 1;
+    --opacity-muted: 1;
+    --opacity-muted-2: 1;
+  }
+}
+
+/* ==========================================================================
+   BASE STYLES
+   ========================================================================== */
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  
+  body {
+    @apply bg-background text-text-primary font-inter antialiased;
+    line-height: 1.6;
+  }
+
+  h1,
+  h2 {
+    @apply font-antonio uppercase tracking-headline;
+    line-height: 1.1;
+  }
+
+  h1 {
+    @apply text-5xl md:text-6xl lg:text-7xl font-bold;
+  }
+
+  h2 {
+    @apply text-3xl md:text-4xl lg:text-5xl font-semibold;
+  }
+
+  h3 {
+    @apply font-inter text-xl md:text-2xl font-semibold;
+  }
+
+  p {
+    @apply font-inter text-base;
+  }
+}
+
+/* ==========================================================================
+   COMPONENTS
+   ========================================================================== */
+
+@layer components {
+  .eyebrow {
+    @apply text-xs uppercase font-inter font-medium text-gold tracking-eyebrow;
+  }
+
+  .caption {
+    @apply text-sm text-text-secondary;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-surface border border-border/10 dark:border-border rounded-[12px];
+  }
+  
+  .card-hover {
+    @apply hover:bg-surface-hover hover:border-border-hover/18 dark:hover:border-border-hover transition-colors;
+  }
+}
