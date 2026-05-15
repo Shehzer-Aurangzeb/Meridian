@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meridian — Alerts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="meridian.css">
+<style>
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 24px;
+  }
+  .tab {
+    background: transparent;
+    border: 0;
+    padding: 12px 20px;
+    font-family: var(--ff-body);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 160ms ease, border-color 160ms ease;
+  }
+  .tab:hover { color: var(--green); }
+  .tab.on { color: var(--green); border-bottom-color: var(--gold); }
+  .tab .count {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    margin-left: 8px;
+    color: var(--muted-2);
+    letter-spacing: 0.04em;
+  }
+
+  .alert-list { display: flex; flex-direction: column; }
+  .alert-row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto auto;
+    gap: 20px;
+    align-items: center;
+    padding: 20px 24px;
+    background: var(--beige-2);
+    border: 1px solid var(--line);
+    margin-bottom: -1px;
+  }
+  .alert-row:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .alert-row:last-child { border-radius: 0 0 var(--radius) var(--radius); margin-bottom: 0; }
+  .alert-row:only-child { border-radius: var(--radius); }
+
+  .alert-coin {
+    font-family: var(--ff-display);
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .alert-rule { font-size: 14px; color: var(--green); }
+  .alert-rule code {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--gold-ink-2);
+    background: var(--gold-soft);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 4px;
+  }
+  .alert-sub { font-size: 12px; color: var(--muted-2); margin-top: 4px; font-family: var(--ff-mono); letter-spacing: 0.04em; }
+  .alert-status {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--muted-2);
+    letter-spacing: 0.04em;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .alert-status.fired { color: var(--green); }
+
+  .toggle {
+    width: 38px; height: 22px;
+    border-radius: 999px;
+    background: var(--green-08);
+    border: 1px solid var(--line-strong);
+    position: relative;
+    cursor: pointer;
+    transition: background 200ms ease, border-color 200ms ease;
+    flex-shrink: 0;
+  }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: left 200ms ease;
+  }
+  .toggle.on { background: var(--green); border-color: var(--green); }
+  .toggle.on::after { left: 18px; }
+
+  .triggered-row {
+    display: grid;
+    grid-template-columns: auto 64px 1fr auto;
+    gap: 20px;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .triggered-row:last-child { border-bottom: 0; }
+  .triggered-marker {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--gold);
+  }
+  .triggered-time {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--muted-2);
+    letter-spacing: 0.04em;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .triggered-action {
+    font-size: 12px;
+    color: var(--muted);
+    margin-left: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .triggered-action:hover { color: var(--green); }
+
+  @media (max-width: 820px) {
+    .alert-row { grid-template-columns: 1fr auto; gap: 12px; }
+    .alert-coin { grid-column: 1; }
+    .alert-row .toggle { grid-column: 2; grid-row: 1; }
+    .alert-row > div:nth-child(2) { grid-column: 1 / -1; }
+    .alert-status { grid-column: 1 / -1; text-align: left; }
+    .triggered-row { grid-template-columns: 1fr; gap: 6px; }
+    .triggered-time { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <aside class="sidebar" aria-label="Primary">
+    <a href="Dashboard.html" class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-name">Meridian</div>
+    </a>
+
+    <div class="nav-section-label">Workspace</div>
+    <nav class="nav">
+      <a href="Dashboard.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Dashboard
+      </a>
+      <a href="Analysis.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l6-6 4 4 8-8"/><path d="M21 4v6h-6"/></svg>
+        Analysis
+      </a>
+      <a href="History.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        History
+      </a>
+      <a href="Alerts.html" class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        Alerts
+        <span class="count">3</span>
+      </a>
+    </nav>
+
+    <div class="nav-section-label" style="margin-top: 24px;">Library</div>
+    <nav class="nav">
+      <a href="Strategies.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+        Strategies
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <a href="Settings.html" class="user" style="text-decoration:none;">
+        <div class="avatar">EM</div>
+        <div class="user-meta">
+          <span class="user-name">Elena Marchetti</span>
+          <span class="user-plan">Atelier · Pro</span>
+        </div>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <button class="menu-btn" id="menuBtn" aria-label="Open menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="crumbs">Workspace <span class="sep">/</span> <span class="now">Alerts</span></div>
+      </div>
+      <div class="top-actions">
+        <button class="btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>
+          New alert
+        </button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <header class="page-header">
+        <div class="eyebrow eyebrow-rule">Stay informed</div>
+        <h1 class="display">Alerts</h1>
+        <p class="subhead">Tell Meridian what's worth interrupting your day for — a price level, a fresh signal, or a technical condition reaching an extreme.</p>
+      </header>
+
+      <section class="tight">
+        <div class="tabs" role="tablist">
+          <button class="tab on" data-tab="active">Active <span class="count">8</span></button>
+          <button class="tab" data-tab="triggered">Triggered <span class="count">12</span></button>
+          <button class="tab" data-tab="paused">Paused <span class="count">2</span></button>
+        </div>
+
+        <div class="section-head" style="margin-bottom: 16px;">
+          <div>
+            <h2 class="section-title">Price alerts</h2>
+          </div>
+          <div class="section-meta">3 active</div>
+        </div>
+        <div class="alert-list">
+          <div class="alert-row">
+            <div class="alert-coin">BTC</div>
+            <div>
+              <div class="alert-rule">Price crosses above <code>$45,000</code></div>
+              <div class="alert-sub">Created 11 May · email + push</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="alert-row">
+            <div class="alert-coin">ETH</div>
+            <div>
+              <div class="alert-rule">Price crosses below <code>$2,300</code></div>
+              <div class="alert-sub">Created 09 May · email</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="alert-row">
+            <div class="alert-coin">SOL</div>
+            <div>
+              <div class="alert-rule">Price crosses above <code>$160.00</code></div>
+              <div class="alert-sub">Created 08 May · push</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin: 32px 0 16px;">
+          <div>
+            <h2 class="section-title">Signal alerts</h2>
+          </div>
+          <div class="section-meta">3 active</div>
+        </div>
+        <div class="alert-list">
+          <div class="alert-row">
+            <div class="alert-coin">BTC</div>
+            <div>
+              <div class="alert-rule">Any new <code>Long</code> signal on the 1D timeframe</div>
+              <div class="alert-sub">Created 12 May · email + push</div>
+            </div>
+            <div class="alert-status">Last fired 13 May</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="alert-row">
+            <div class="alert-coin">ETH</div>
+            <div>
+              <div class="alert-rule">Confidence on any signal exceeds <code>80%</code></div>
+              <div class="alert-sub">Created 04 May · email</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="alert-row">
+            <div class="alert-coin">Any</div>
+            <div>
+              <div class="alert-rule">New <code>Short</code> signal across the watchlist</div>
+              <div class="alert-sub">Created 02 May · push</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin: 32px 0 16px;">
+          <div>
+            <h2 class="section-title">Indicator alerts</h2>
+          </div>
+          <div class="section-meta">2 active</div>
+        </div>
+        <div class="alert-list">
+          <div class="alert-row">
+            <div class="alert-coin">BTC</div>
+            <div>
+              <div class="alert-rule"><code>RSI &lt; 30</code> on the 1D timeframe</div>
+              <div class="alert-sub">Created 28 Apr · email + push</div>
+            </div>
+            <div class="alert-status fired">Fired 13 May · 09:14</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="alert-row">
+            <div class="alert-coin">SOL</div>
+            <div>
+              <div class="alert-rule"><code>Price at lower Bollinger band</code> on 4H</div>
+              <div class="alert-sub">Created 30 Apr · email</div>
+            </div>
+            <div class="alert-status">Last check 09:42 · armed</div>
+            <div class="toggle on" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin: 48px 0 16px;">
+          <div>
+            <div class="eyebrow">Recent</div>
+            <h2 class="section-title">Triggered alerts</h2>
+          </div>
+          <a href="#" class="panel-link" style="font-family: var(--ff-mono); font-size: 12px; color: var(--muted); letter-spacing: 0.06em;">CLEAR ALL</a>
+        </div>
+
+        <div class="panel" style="background: var(--beige-2); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;">
+          <div class="triggered-row">
+            <div class="triggered-marker"></div>
+            <div class="alert-coin">BTC</div>
+            <div>
+              <div class="alert-rule"><code>RSI &lt; 30</code> on the 1D timeframe</div>
+              <div class="alert-sub">Indicator alert · email + push delivered</div>
+            </div>
+            <div class="triggered-time">13 May · 09:14<a href="Analysis.html" class="triggered-action">Run analysis</a></div>
+          </div>
+          <div class="triggered-row">
+            <div class="triggered-marker"></div>
+            <div class="alert-coin">BTC</div>
+            <div>
+              <div class="alert-rule">New <code>Long</code> signal on the 1D timeframe</div>
+              <div class="alert-sub">Signal alert · push delivered</div>
+            </div>
+            <div class="triggered-time">13 May · 09:42<a href="Analysis.html" class="triggered-action">View signal</a></div>
+          </div>
+          <div class="triggered-row">
+            <div class="triggered-marker" style="background: var(--muted-2); opacity: 0.4;"></div>
+            <div class="alert-coin">ETH</div>
+            <div>
+              <div class="alert-rule">Price crosses above <code>$2,500</code></div>
+              <div class="alert-sub">Price alert · email delivered</div>
+            </div>
+            <div class="triggered-time">12 May · 14:08<a href="Analysis.html" class="triggered-action">Run analysis</a></div>
+          </div>
+          <div class="triggered-row">
+            <div class="triggered-marker" style="background: var(--muted-2); opacity: 0.4;"></div>
+            <div class="alert-coin">SOL</div>
+            <div>
+              <div class="alert-rule">Confidence on any signal exceeds <code>75%</code></div>
+              <div class="alert-sub">Signal alert · email delivered</div>
+            </div>
+            <div class="triggered-time">11 May · 19:32<a href="Analysis.html" class="triggered-action">View signal</a></div>
+          </div>
+          <div class="triggered-row">
+            <div class="triggered-marker" style="background: var(--muted-2); opacity: 0.4;"></div>
+            <div class="alert-coin">LINK</div>
+            <div>
+              <div class="alert-rule"><code>RSI &gt; 70</code> on the 4H timeframe</div>
+              <div class="alert-sub">Indicator alert · email delivered</div>
+            </div>
+            <div class="triggered-time">10 May · 03:21<a href="Analysis.html" class="triggered-action">Run analysis</a></div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="disclaimer">
+        <div>Alerts are checked at the close of each candle on the chosen timeframe. Delivery may lag by a few minutes during exchange congestion.</div>
+        <div class="sig">Meridian</div>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<script src="meridian-shell.js"></script>
+<script>
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+      t.classList.add('on');
+    });
+  });
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => {
+      t.classList.toggle('on');
+      t.setAttribute('aria-checked', t.classList.contains('on') ? 'true' : 'false');
+    });
+  });
+</script>
+</body>
+</html>

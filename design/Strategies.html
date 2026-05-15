@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meridian — Strategies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="meridian.css">
+<style>
+  /* page-specific: strategies */
+  .strat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+
+  .strat {
+    background: var(--beige-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .strat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .strat-num {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--gold-ink);
+    letter-spacing: 0.16em;
+    margin-bottom: 8px;
+  }
+  .strat-name {
+    font-family: var(--ff-display);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0;
+    line-height: 1.02;
+    text-wrap: balance;
+  }
+  .strat-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 4px;
+    background: var(--green-08);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .strat-tag.contrarian { background: var(--sage-soft); color: var(--green); }
+  .strat-tag.directional { background: var(--gold-soft); color: var(--gold-ink-2); }
+  .strat-tag.volatility { background: var(--rust-soft); color: var(--rust); }
+
+  .strat-desc {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  .strat-divider { height: 1px; background: var(--line); margin: 4px 0; }
+
+  .strat-section h4 {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    font-weight: 600;
+    margin: 0 0 12px;
+  }
+  .strat-conds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .strat-conds li {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 12px;
+    align-items: baseline;
+    font-size: 14px;
+    color: var(--green);
+  }
+  .strat-conds li .dot {
+    width: 5px; height: 5px;
+    background: var(--gold);
+    box-shadow: none;
+    border-radius: 50%;
+    transform: translateY(-2px);
+    margin: 0 auto;
+  }
+  .strat-conds li code {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: transparent;
+  }
+
+  .strat-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin-top: 4px;
+  }
+  .strat-stat { padding: 16px 0 16px 0; border-right: 1px solid var(--line); }
+  .strat-stat:last-child { border-right: 0; }
+  .strat-stat:not(:first-child) { padding-left: 18px; }
+  .strat-stat .k { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted-2); font-weight: 500; }
+  .strat-stat .v { font-family: var(--ff-display); font-size: 22px; font-weight: 600; margin-top: 6px; letter-spacing: 0.02em; line-height: 1; }
+  .strat-stat .v .unit { font-size: 13px; color: var(--muted); margin-left: 2px; }
+
+  /* taxonomy filter */
+  .tax {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .tax-chip {
+    padding: 8px 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 160ms ease;
+    font-family: var(--ff-body);
+  }
+  .tax-chip:hover { color: var(--green); border-color: var(--line-strong); }
+  .tax-chip.on { background: var(--green); color: var(--beige); border-color: var(--green); }
+  .tax-chip .count {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    margin-left: 8px;
+    opacity: 0.55;
+  }
+
+  @media (max-width: 1100px) {
+    .strat-grid { grid-template-columns: 1fr; }
+    .strat-name { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <aside class="sidebar" aria-label="Primary">
+    <a href="Dashboard.html" class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-name">Meridian</div>
+    </a>
+
+    <div class="nav-section-label">Workspace</div>
+    <nav class="nav">
+      <a href="Dashboard.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Dashboard
+      </a>
+      <a href="Analysis.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l6-6 4 4 8-8"/><path d="M21 4v6h-6"/></svg>
+        Analysis
+      </a>
+      <a href="History.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        History
+      </a>
+      <a href="Alerts.html" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        Alerts
+        <span class="count">3</span>
+      </a>
+    </nav>
+
+    <div class="nav-section-label" style="margin-top: 24px;">Library</div>
+    <nav class="nav">
+      <a href="Strategies.html" class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+        Strategies
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <a href="Settings.html" class="user" style="text-decoration:none;">
+        <div class="avatar">EM</div>
+        <div class="user-meta">
+          <span class="user-name">Elena Marchetti</span>
+          <span class="user-plan">Atelier · Pro</span>
+        </div>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <button class="menu-btn" id="menuBtn" aria-label="Open menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="crumbs">Library <span class="sep">/</span> <span class="now">Strategies</span></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <header class="page-header">
+        <div class="eyebrow eyebrow-rule">The library</div>
+        <h1 class="display">Strategies</h1>
+        <p class="subhead">The professional playbooks Meridian draws on when forming a view. Each analysis is a weighted blend of these — never a single voice in isolation.</p>
+      </header>
+
+      <section class="tight">
+        <div class="tax">
+          <button class="tax-chip on">All <span class="count">6</span></button>
+          <button class="tax-chip">Contrarian <span class="count">2</span></button>
+          <button class="tax-chip">Directional <span class="count">3</span></button>
+          <button class="tax-chip">Volatility <span class="count">1</span></button>
+        </div>
+
+        <div class="strat-grid">
+
+          <!-- 1 Mean-reversion -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 01</div>
+                <h3 class="strat-name">Mean-Reversion at Support</h3>
+              </div>
+              <span class="strat-tag contrarian">Contrarian</span>
+            </div>
+            <p class="strat-desc">When price is statistically stretched into a known structural support, the most probable next move is a measured return toward the mean. Patience is the active ingredient.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>RSI prints below 30 on the analysis timeframe <code>· w 0.25</code></span></li>
+                <li><span class="dot"></span><span>Price touches lower Bollinger band <code>· w 0.20</code></span></li>
+                <li><span class="dot"></span><span>Higher-timeframe trend remains intact <code>· w 0.20</code></span></li>
+                <li><span class="dot"></span><span>Volume tapering on the descent <code>· w 0.15</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">71<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">1.9<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">14</div></div>
+            </div>
+          </article>
+
+          <!-- 2 Trend continuation -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 02</div>
+                <h3 class="strat-name">Trend Continuation Pullback</h3>
+              </div>
+              <span class="strat-tag directional">Directional</span>
+            </div>
+            <p class="strat-desc">In a confirmed trend, a shallow pullback to the 20-period EMA is not a reversal — it is the market resting. Re-entry on that exhale is among the highest-quality setups in the book.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>Higher highs and higher lows on weekly <code>· w 0.30</code></span></li>
+                <li><span class="dot"></span><span>Price pulls back to 20-period EMA <code>· w 0.22</code></span></li>
+                <li><span class="dot"></span><span>RSI between 40 – 50 (not oversold) <code>· w 0.18</code></span></li>
+                <li><span class="dot"></span><span>Pullback duration &lt; 5 sessions <code>· w 0.10</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">74<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">2.4<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">11</div></div>
+            </div>
+          </article>
+
+          <!-- 3 Range breakout -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 03</div>
+                <h3 class="strat-name">Range Breakout</h3>
+              </div>
+              <span class="strat-tag directional">Directional</span>
+            </div>
+            <p class="strat-desc">Compression precedes expansion. When volatility has contracted for long enough, the direction of the eventual release is often confirmed by the first close beyond the range with conviction.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>Bollinger bandwidth at 30d low <code>· w 0.28</code></span></li>
+                <li><span class="dot"></span><span>Range duration ≥ 12 sessions <code>· w 0.20</code></span></li>
+                <li><span class="dot"></span><span>Close beyond range with volume &gt; 1.5× mean <code>· w 0.22</code></span></li>
+                <li><span class="dot"></span><span>No major event window in next 24h <code>· w 0.10</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">62<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">2.7<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">8</div></div>
+            </div>
+          </article>
+
+          <!-- 4 Range fade -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 04</div>
+                <h3 class="strat-name">Range Fade at Extreme</h3>
+              </div>
+              <span class="strat-tag contrarian">Contrarian</span>
+            </div>
+            <p class="strat-desc">In an established range with no breakout catalysts, the edges are statistical magnets in reverse. Fade them with tight invalidation and modest targets — this is a high-frequency, low-conviction trade.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>Established range ≥ 15 sessions <code>· w 0.25</code></span></li>
+                <li><span class="dot"></span><span>Touch of range high/low <code>· w 0.22</code></span></li>
+                <li><span class="dot"></span><span>RSI extreme reading at the touch <code>· w 0.18</code></span></li>
+                <li><span class="dot"></span><span>No higher-timeframe trend in either direction <code>· w 0.15</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">63<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">1.2<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">19</div></div>
+            </div>
+          </article>
+
+          <!-- 5 Momentum ride -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 05</div>
+                <h3 class="strat-name">Momentum Continuation</h3>
+              </div>
+              <span class="strat-tag directional">Directional</span>
+            </div>
+            <p class="strat-desc">A coin breaking out with rare momentum — RSI &gt; 70 and accelerating — tends to extend further than mean-reversion intuition permits. Trail behind structure rather than predicting the top.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>RSI &gt; 70 with rising slope <code>· w 0.24</code></span></li>
+                <li><span class="dot"></span><span>Daily close above 20d high <code>· w 0.22</code></span></li>
+                <li><span class="dot"></span><span>Volume &gt; 2× 20d average <code>· w 0.18</code></span></li>
+                <li><span class="dot"></span><span>Broader market in risk-on regime <code>· w 0.12</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">58<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">3.1<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">6</div></div>
+            </div>
+          </article>
+
+          <!-- 6 Volatility expansion -->
+          <article class="strat">
+            <div class="strat-head">
+              <div>
+                <div class="strat-num">No. 06</div>
+                <h3 class="strat-name">Volatility Expansion</h3>
+              </div>
+              <span class="strat-tag volatility">Volatility</span>
+            </div>
+            <p class="strat-desc">ATR collapsing to a quarterly low is a regime signal. The expansion that follows is rarely modest — the trade is the regime change itself, sized small while volatility is honest.</p>
+            <div class="strat-section">
+              <h4>Activates when</h4>
+              <ul class="strat-conds">
+                <li><span class="dot"></span><span>ATR at 90d low <code>· w 0.30</code></span></li>
+                <li><span class="dot"></span><span>Realized volatility 1 standard deviation below mean <code>· w 0.22</code></span></li>
+                <li><span class="dot"></span><span>Compression visible on multiple timeframes <code>· w 0.18</code></span></li>
+              </ul>
+            </div>
+            <div class="strat-stats">
+              <div class="strat-stat"><div class="k">Hit rate</div><div class="v">66<span class="unit">%</span></div></div>
+              <div class="strat-stat"><div class="k">Avg R</div><div class="v">2.6<span class="unit">×</span></div></div>
+              <div class="strat-stat"><div class="k">Trades · 90d</div><div class="v">5</div></div>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
+      <footer class="disclaimer">
+        <div>Strategies and their weights are reviewed monthly. Statistics are out-of-sample, computed on 90-day rolling windows.</div>
+        <div class="sig">Meridian · Strategy library v4.2</div>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<script src="meridian-shell.js"></script>
+<script>
+  document.querySelectorAll('.tax-chip').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('.tax-chip').forEach(x => x.classList.remove('on'));
+      c.classList.add('on');
+    });
+  });
+</script>
+</body>
+</html>

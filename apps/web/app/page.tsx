@@ -1,12 +1,21 @@
+import { redirect } from 'next/navigation';
+
+/**
+ * Root page - redirects based on auth status
+ * 
+ * TODO: When auth is implemented, check session here:
+ * - If authenticated → redirect to /dashboard
+ * - If not authenticated → redirect to /sign-in
+ * 
+ * For now, redirects to sign-in (demo mode)
+ */
 export default function Home() {
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Meridian</h1>
-        <p className="text-gray-600">
-          AI-powered crypto trading analysis assistant
-        </p>
-      </div>
-    </main>
-  );
+  // TODO: Replace with actual auth check
+  const isAuthenticated = false;
+
+  if (isAuthenticated) {
+    redirect('/dashboard');
+  } else {
+    redirect('/sign-in');
+  }
 }
