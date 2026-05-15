@@ -7,7 +7,7 @@ import {
   ProfileCard,
   AccountCard,
   DangerZoneCard,
-} from '@/components/settings';
+} from '@/components/features/settings';
 
 /**
  * Disclaimer footer
@@ -68,26 +68,12 @@ export default function SettingsPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Handlers
-  const handleSaveProfile = () => {
-    console.log('Save profile');
-  };
-
-  const handleConnect = (id: string) => {
-    console.log('Connect', id);
-  };
-
-  const handleSignOut = () => {
-    console.log('Sign out');
-  };
-
-  const handleExport = () => {
-    console.log('Export data');
-  };
-
-  const handleDelete = () => {
-    console.log('Delete account');
-  };
+  // Handlers - TODO: Implement these
+  const handleSaveProfile = () => {};
+  const handleConnect = (_id: string) => {};
+  const handleSignOut = () => {};
+  const handleExport = () => {};
+  const handleDelete = () => {};
 
   return (
     <div className="p-5 md:p-8 lg:p-10">

@@ -12,8 +12,8 @@ import {
   MOCK_SIGNAL_ALERTS,
   MOCK_INDICATOR_ALERTS,
   MOCK_TRIGGERED_ALERTS,
-} from '@/components/alerts';
-import type { AlertTab, AlertData } from '@/components/alerts';
+} from '@/components/features/alerts';
+import type { AlertTab, AlertData } from '@/components/features/alerts';
 
 /**
  * Disclaimer footer
@@ -46,7 +46,6 @@ export default function AlertsPage() {
 
   const handleNewAlert = () => {
     // TODO: Open new alert modal
-    console.log('New alert');
   };
 
   const handleToggle = (id: string, enabled: boolean) => {
@@ -61,7 +60,6 @@ export default function AlertsPage() {
 
   const handleClearTriggered = () => {
     // TODO: Clear triggered alerts
-    console.log('Clear all triggered');
   };
 
   return (

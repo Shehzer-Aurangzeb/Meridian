@@ -7,7 +7,7 @@ import {
   StrategyGrid,
   TAXONOMY_OPTIONS,
   MOCK_STRATEGIES,
-} from '@/components/strategies';
+} from '@/components/features/strategies';
 
 /**
  * Disclaimer footer

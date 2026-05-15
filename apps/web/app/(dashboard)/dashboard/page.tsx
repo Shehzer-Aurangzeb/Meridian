@@ -7,8 +7,8 @@ import {
   Watchlist,
   ActiveAlerts,
   Disclaimer,
-  SectionHead,
-} from '@/components/dashboard';
+} from '@/components/features/dashboard';
+import { SectionHead } from '@/components/ui/section-head';
 
 export default function DashboardPage() {
   return (

@@ -4,7 +4,7 @@ import {
   HistoryIcon,
   AlertIcon,
   StrategiesIcon,
-} from '@/components/ui/Icons';
+} from '@/components/ui/icons';
 import { ComponentType, SVGProps } from 'react';
 
 /**
