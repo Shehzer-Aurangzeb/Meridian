@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Body } from '@/components/ui/typography';
+import { Body } from '@/components/ui/body';
 
 interface AnalysisErrorProps {
   message: string;

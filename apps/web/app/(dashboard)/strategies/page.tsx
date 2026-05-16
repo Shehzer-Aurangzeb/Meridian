@@ -1,29 +1,10 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import {
-  StrategiesPageHeader,
-  TaxonomyFilter,
-  StrategyGrid,
-  TAXONOMY_OPTIONS,
-  MOCK_STRATEGIES,
-} from '@/components/features/strategies';
-
-/**
- * Disclaimer footer
- */
-function Disclaimer() {
-  return (
-    <footer className="flex items-center justify-between text-xs text-text-tertiary mt-10 pt-6 border-t border-border/10 dark:border-border">
-      <div>
-        Strategies and their weights are reviewed monthly. Statistics are out-of-sample, computed on 90-day rolling windows.
-      </div>
-      <div className="font-display text-sm font-medium tracking-[0.04em]">
-        Meridian · Strategy library v4.2
-      </div>
-    </footer>
-  );
-}
+import { StrategiesPageHeader } from '@/components/features/strategies/strategies-page-header';
+import { TaxonomyFilter, TAXONOMY_OPTIONS } from '@/components/features/strategies/taxonomy-filter';
+import { StrategyGrid, MOCK_STRATEGIES } from '@/components/features/strategies/strategy-card';
+import { Disclaimer } from '@/components/ui/disclaimer';
 
 export default function StrategiesPage() {
   const [activeFilter, setActiveFilter] = useState('all');
@@ -50,7 +31,10 @@ export default function StrategiesPage() {
         <StrategyGrid strategies={filteredStrategies} />
       </section>
 
-      <Disclaimer />
+      <Disclaimer
+        text="Strategies and their weights are reviewed monthly. Statistics are out-of-sample, computed on 90-day rolling windows."
+        suffix="· Strategy library v4.2"
+      />
     </div>
   );
 }

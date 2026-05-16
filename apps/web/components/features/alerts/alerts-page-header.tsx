@@ -1,11 +1,7 @@
 'use client';
 
-import { PlusIcon } from '@/components/ui/icons';
+import { PlusIcon } from '@/assets/icons/plus-icon';
 
-/**
- * Header section for the Alerts page
- * Includes eyebrow, title, description, and "New alert" action button
- */
 interface AlertsPageHeaderProps {
   onNewAlert?: () => void;
 }

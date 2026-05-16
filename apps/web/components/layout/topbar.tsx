@@ -3,7 +3,8 @@
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { PAGE_TITLES } from '@/lib/navigation';
-import { SearchIcon, MenuIcon } from '@/components/ui/icons';
+import { SearchIcon } from '@/assets/icons/search-icon';
+import { MenuIcon } from '@/assets/icons/menu-icon';
 
 /**
  * Market status indicator pill

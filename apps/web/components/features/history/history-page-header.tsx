@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { PlusIcon } from '@/components/ui/icons';
+import { PlusIcon } from '@/assets/icons/plus-icon';
 
 /**
  * Header section for the History page

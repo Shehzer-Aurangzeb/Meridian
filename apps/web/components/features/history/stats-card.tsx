@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Eyebrow } from '@/components/ui/typography';
+import { Eyebrow } from '@/components/ui/eyebrow';
 import { AnimatedNumber } from '@/components/ui/animated-number';
 import { Skeleton } from '@/components/ui/skeleton';
 

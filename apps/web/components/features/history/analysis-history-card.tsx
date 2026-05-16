@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatDate, formatPrice, formatPercent } from '@/lib/format';
 import { SUGGESTION_STYLES, STATUS_STYLES, STATUS_LABELS } from '@/lib/constants';
-import { Eyebrow, Caption } from '@/components/ui/typography';
+import { Eyebrow } from '@/components/ui/eyebrow';
+import { Caption } from '@/components/ui/caption';
 import { AnimatedCollapse } from '@/components/ui/animated-collapse';
 import type { PerformanceAnalysis, AnalysisStatus } from '@/types/history';
 

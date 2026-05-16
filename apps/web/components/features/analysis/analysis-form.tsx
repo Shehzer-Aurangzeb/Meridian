@@ -3,7 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
-import { Spinner } from '@/components/ui/loading';
+import { Spinner } from '@/components/ui/spinner';
 
 interface AnalysisFormProps {
   onAnalyze: (coin: string) => void;

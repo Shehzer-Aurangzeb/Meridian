@@ -1,6 +1,6 @@
 'use client';
 
-import { SearchIcon } from '@/components/ui/icons';
+import { SearchIcon } from '@/assets/icons/search-icon';
 
 /**
  * Filter options for the history table
