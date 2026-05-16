@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BinanceService } from './binance.service';
 import { IndicatorsService } from './indicators.service';
 import { ClaudeService } from './claude.service';
+import { ClaudePromptService } from './claude-prompt.service';
 import { PerformanceService } from './performance.service';
 import { MultiTimeframeService } from './multi-timeframe.service';
 import { ChecklistService } from './checklist.service';
@@ -11,6 +12,7 @@ import { SupportResistanceService } from './support-resistance.service';
   providers: [
     BinanceService,
     IndicatorsService,
+    ClaudePromptService,
     ClaudeService,
     PerformanceService,
     MultiTimeframeService,
@@ -20,6 +22,7 @@ import { SupportResistanceService } from './support-resistance.service';
   exports: [
     BinanceService,
     IndicatorsService,
+    ClaudePromptService,
     ClaudeService,
     PerformanceService,
     MultiTimeframeService,

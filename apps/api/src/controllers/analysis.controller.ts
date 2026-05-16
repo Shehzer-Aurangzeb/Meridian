@@ -3,6 +3,7 @@ import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { BinanceService } from '../services/binance.service';
 import { IndicatorsService } from '../services/indicators.service';
 import { ClaudeService } from '../services/claude.service';
+import { ClaudePromptService } from '../services/claude-prompt.service';
 import { PerformanceService, AnalysisWithPerformance } from '../services/performance.service';
 import { MultiTimeframeService } from '../services/multi-timeframe.service';
 import { SupportResistanceService } from '../services/support-resistance.service';
@@ -32,6 +33,7 @@ export class AnalysisController {
     private readonly binanceService: BinanceService,
     private readonly indicatorsService: IndicatorsService,
     private readonly claudeService: ClaudeService,
+    private readonly claudePromptService: ClaudePromptService,
     private readonly performanceService: PerformanceService,
     private readonly multiTimeframeService: MultiTimeframeService,
     private readonly supportResistanceService: SupportResistanceService,
@@ -622,6 +624,171 @@ export class AnalysisController {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Indicator validation failed';
+      return {
+        success: false,
+        error: message,
+      };
+    }
+  }
+
+  /**
+   * Enhanced AI Analysis Endpoint
+   * Uses multi-timeframe analysis and 5-point checklist for Claude prompt
+   * Returns structured trade recommendation following Miraj's strategy
+   */
+  @Post('ai-analyze')
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute (uses Claude heavily)
+  async aiAnalyze(
+    @Body() dto: MultiTimeframeAnalysisDto,
+  ): Promise<{
+    success: boolean;
+    data?: any;
+    error?: string;
+    meta?: {
+      promptLength: number;
+      processingTime: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const { coin, tradeType = 'day' } = dto;
+
+    try {
+      // 1. Run multi-timeframe analysis
+      const mtfResult = await this.multiTimeframeService.analyzeMultipleTimeframes({
+        symbol: coin.toUpperCase(),
+        tradeType,
+        includeDetailedChecklist: true,
+      });
+
+      // 2. Get S/R levels
+      const srAnalysis = await this.supportResistanceService.getFullAnalysis(
+        coin.toUpperCase(),
+        mtfResult.currentPrice,
+      );
+
+      // 3. Ensure we have the 5-point checklist
+      if (!mtfResult.fivePointChecklist) {
+        throw new Error('5-point checklist not available');
+      }
+
+      // 4. Build prompt data
+      const promptData = {
+        coin: coin.toUpperCase(),
+        currentPrice: mtfResult.currentPrice,
+        multiTimeframeAnalysis: mtfResult,
+        checklist: mtfResult.fivePointChecklist,
+        srLevels: srAnalysis.levels,
+      };
+
+      // 5. Get Claude analysis
+      const analysis = await this.claudeService.analyzeWithChecklist(promptData);
+
+      const processingTime = Date.now() - startTime;
+
+      return {
+        success: true,
+        data: {
+          analysis,
+          checklist: mtfResult.fivePointChecklist,
+          htfBias: mtfResult.htfBias,
+          ltfEntry: mtfResult.ltfEntry,
+          currentPrice: mtfResult.currentPrice,
+          keyLevels: {
+            support: srAnalysis.levels
+              .filter((l: { type: string }) => l.type === 'support')
+              .slice(0, 3),
+            resistance: srAnalysis.levels
+              .filter((l: { type: string }) => l.type === 'resistance')
+              .slice(0, 3),
+          },
+        },
+        meta: {
+          promptLength: this.claudePromptService.buildAnalysisPrompt(promptData).length,
+          processingTime,
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'AI analysis failed';
+      console.error(`AI analysis failed for ${coin}:`, error);
+      return {
+        success: false,
+        error: message,
+        meta: {
+          promptLength: 0,
+          processingTime: Date.now() - startTime,
+        },
+      };
+    }
+  }
+
+  /**
+   * Test Prompt Endpoint (for debugging)
+   * Returns the prompt that would be sent to Claude without calling the API
+   */
+  @Post('test-prompt')
+  @SkipThrottle()
+  async testPrompt(
+    @Body() dto: MultiTimeframeAnalysisDto,
+  ): Promise<{
+    success: boolean;
+    prompt?: string;
+    promptLength?: number;
+    checklistSummary?: any;
+    error?: string;
+  }> {
+    const { coin, tradeType = 'day' } = dto;
+
+    try {
+      // 1. Run multi-timeframe analysis
+      const mtfResult = await this.multiTimeframeService.analyzeMultipleTimeframes({
+        symbol: coin.toUpperCase(),
+        tradeType,
+        includeDetailedChecklist: true,
+      });
+
+      // 2. Get S/R levels
+      const srAnalysis = await this.supportResistanceService.getFullAnalysis(
+        coin.toUpperCase(),
+        mtfResult.currentPrice,
+      );
+
+      // 3. Ensure we have the 5-point checklist
+      if (!mtfResult.fivePointChecklist) {
+        throw new Error('5-point checklist not available');
+      }
+
+      // 4. Build prompt data
+      const promptData = {
+        coin: coin.toUpperCase(),
+        currentPrice: mtfResult.currentPrice,
+        multiTimeframeAnalysis: mtfResult,
+        checklist: mtfResult.fivePointChecklist,
+        srLevels: srAnalysis.levels,
+      };
+
+      // 5. Generate prompt (without calling Claude)
+      const prompt = this.claudePromptService.buildAnalysisPrompt(promptData);
+
+      return {
+        success: true,
+        prompt,
+        promptLength: prompt.length,
+        checklistSummary: {
+          totalScore: mtfResult.fivePointChecklist.totalScore,
+          conditionsMet: mtfResult.fivePointChecklist.conditionsMet,
+          passed: mtfResult.fivePointChecklist.passed,
+          tradeType: mtfResult.fivePointChecklist.tradeType,
+          conditions: mtfResult.fivePointChecklist.conditions.map((c) => ({
+            name: c.name,
+            passed: c.passed,
+            score: c.score,
+          })),
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Prompt generation failed';
       return {
         success: false,
         error: message,
