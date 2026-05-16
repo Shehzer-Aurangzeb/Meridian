@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
-import { CloseIcon } from '@/components/ui/icons';
+import { CloseIcon } from '@/assets/icons/close-icon';
 
 function MobileSidebar({
   isOpen,

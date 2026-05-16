@@ -1,23 +1,18 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  AnalysisPageHeader,
-  AnalysisInput,
-  SignalCard,
-  IndicatorsSection,
-  ReasoningSection,
-  MOCK_SIGNAL,
-  MOCK_INDICATORS,
-  MOCK_REASONING,
-  type Timeframe,
-  type SignalData,
-  type IndicatorData,
-  type ReasoningData,
-} from '@/components/features/analysis';
-import { Disclaimer } from '@/components/features/dashboard';
+import { useState, useCallback } from 'react';
+import { AnalysisPageHeader } from '@/components/features/analysis/analysis-page-header';
+import { AnalysisInput } from '@/components/features/analysis/analysis-input';
+import type { Timeframe } from '@/components/features/analysis/analysis-input';
+import { AnalysisLoading } from '@/components/features/analysis/analysis-loading';
+import { SignalCard, MOCK_SIGNAL } from '@/components/features/analysis/signal-card';
+import type { SignalData } from '@/components/features/analysis/signal-card';
+import { IndicatorsSection, MOCK_INDICATORS } from '@/components/features/analysis/indicators-section';
+import type { IndicatorData } from '@/components/features/analysis/indicators-section';
+import { ReasoningSection, MOCK_REASONING } from '@/components/features/analysis/reasoning-section';
+import type { ReasoningData } from '@/components/features/analysis/reasoning-section';
+import { Disclaimer } from '@/components/ui/disclaimer';
 import { useToast } from '@/components/ui/toast';
-import { API_URL } from '@/lib/constants';
 
 export default function AnalysisPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -27,16 +22,14 @@ export default function AnalysisPage() {
   const [reasoning, setReasoning] = useState<ReasoningData | null>(null);
   const { addToast } = useToast();
 
-  const handleAnalyze = async (inputCoin: string, timeframe: Timeframe) => {
+  const handleAnalyze = useCallback(async (inputCoin: string, timeframe: Timeframe) => {
     setIsLoading(true);
     setCoin(inputCoin);
 
     try {
       // TODO: Replace with actual API call
-      // For now, use mock data with a simulated delay
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      // Update mock data with the selected coin
       const updatedSignal = {
         ...MOCK_SIGNAL,
         coin: inputCoin,
@@ -53,7 +46,7 @@ export default function AnalysisPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [addToast]);
 
   const hasResults = signal && indicators && reasoning;
 
@@ -65,14 +58,7 @@ export default function AnalysisPage() {
         <AnalysisInput onSubmit={handleAnalyze} isLoading={isLoading} />
       </div>
 
-      {isLoading && (
-        <div className="mt-14 text-center py-20">
-          <div className="inline-flex items-center gap-3">
-            <div className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-            <span className="text-text-secondary font-medium">Analyzing {coin}...</span>
-          </div>
-        </div>
-      )}
+      {isLoading && <AnalysisLoading coin={coin || undefined} />}
 
       {hasResults && !isLoading && (
         <>
@@ -82,7 +68,10 @@ export default function AnalysisPage() {
         </>
       )}
 
-      <Disclaimer />
+      <Disclaimer
+        text="For research purposes. Not investment advice. Always size positions to your own risk tolerance and conviction."
+        variant="hero"
+      />
     </>
   );
 }

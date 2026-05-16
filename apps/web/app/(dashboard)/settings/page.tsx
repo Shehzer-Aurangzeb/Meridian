@@ -1,27 +1,12 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  SettingsPageHeader,
-  SettingsRail,
-  ProfileCard,
-  AccountCard,
-  DangerZoneCard,
-} from '@/components/features/settings';
-
-/**
- * Disclaimer footer
- */
-function Disclaimer() {
-  return (
-    <footer className="flex items-center justify-between text-xs text-text-tertiary mt-10 pt-6 border-t border-border/10 dark:border-border">
-      <div>
-        Meridian stores your data on encrypted infrastructure. Read our privacy policy and security notes for the technical detail.
-      </div>
-      <div className="font-display text-sm font-medium tracking-[0.04em]">Meridian</div>
-    </footer>
-  );
-}
+import { SettingsPageHeader } from '@/components/features/settings/settings-page-header';
+import { SettingsRail } from '@/components/features/settings/settings-rail';
+import { ProfileCard } from '@/components/features/settings/profile-card';
+import { AccountCard } from '@/components/features/settings/account-card';
+import { DangerZoneCard } from '@/components/features/settings/danger-zone-card';
+import { Disclaimer } from '@/components/ui/disclaimer';
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState('profile');
@@ -69,11 +54,11 @@ export default function SettingsPage() {
   }, []);
 
   // Handlers - TODO: Implement these
-  const handleSaveProfile = () => {};
-  const handleConnect = (_id: string) => {};
-  const handleSignOut = () => {};
-  const handleExport = () => {};
-  const handleDelete = () => {};
+  const handleSaveProfile = useCallback(() => {}, []);
+  const handleConnect = useCallback((_id: string) => {}, []);
+  const handleSignOut = useCallback(() => {}, []);
+  const handleExport = useCallback(() => {}, []);
+  const handleDelete = useCallback(() => {}, []);
 
   return (
     <div className="p-5 md:p-8 lg:p-10">
@@ -97,7 +82,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <Disclaimer />
+      <Disclaimer text="Meridian stores your data on encrypted infrastructure. Read our privacy policy and security notes for the technical detail." />
     </div>
   );
 }

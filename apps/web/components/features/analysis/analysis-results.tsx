@@ -2,13 +2,11 @@
 
 import { cn } from '@/lib/utils';
 import { AnalysisData } from '@/types/analysis';
-import {
-  Eyebrow,
-  CardTitle,
-  Body,
-  Caption,
-} from '@/components/ui/typography';
-import { SuccessCheck } from '@/components/ui/loading';
+import { Eyebrow } from '@/components/ui/eyebrow';
+import { CardTitle } from '@/components/ui/card-title';
+import { Body } from '@/components/ui/body';
+import { Caption } from '@/components/ui/caption';
+import { SuccessCheck } from '@/components/ui/success-check';
 
 interface AnalysisResultsProps {
   data: AnalysisData;

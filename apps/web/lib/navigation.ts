@@ -1,10 +1,8 @@
-import {
-  DashboardIcon,
-  AnalysisIcon,
-  HistoryIcon,
-  AlertIcon,
-  StrategiesIcon,
-} from '@/components/ui/icons';
+import { DashboardIcon } from '@/assets/icons/dashboard-icon';
+import { AnalysisIcon } from '@/assets/icons/analysis-icon';
+import { HistoryIcon } from '@/assets/icons/history-icon';
+import { AlertIcon } from '@/assets/icons/alert-icon';
+import { StrategiesIcon } from '@/assets/icons/strategies-icon';
 import { ComponentType, SVGProps } from 'react';
 
 /**

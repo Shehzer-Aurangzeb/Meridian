@@ -1,8 +1,16 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  ReactNode,
+} from 'react';
 
-type Theme = 'light' | 'dark' | 'system';
+export type Theme = 'light' | 'dark' | 'system';
 
 interface ThemeContextType {
   theme: Theme;
@@ -13,10 +21,17 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'meridian-theme';
+const VALID_THEMES: Theme[] = ['light', 'dark', 'system'];
 
 function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyThemeToDOM(theme: 'light' | 'dark') {
+  const root = document.documentElement;
+  root.classList.remove('light', 'dark');
+  root.classList.add(theme);
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -27,7 +42,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Initialize theme from localStorage
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored && ['light', 'dark', 'system'].includes(stored)) {
+    if (stored && VALID_THEMES.includes(stored)) {
       setThemeState(stored);
     }
     setMounted(true);
@@ -39,11 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const resolved = theme === 'system' ? getSystemTheme() : theme;
     setResolvedTheme(resolved);
-
-    // Update HTML class
-    const root = document.documentElement;
-    root.classList.remove('light', 'dark');
-    root.classList.add(resolved);
+    applyThemeToDOM(resolved);
   }, [theme, mounted]);
 
   // Listen for system theme changes
@@ -54,18 +65,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const handleChange = () => {
       const systemTheme = mediaQuery.matches ? 'dark' : 'light';
       setResolvedTheme(systemTheme);
-      document.documentElement.classList.remove('light', 'dark');
-      document.documentElement.classList.add(systemTheme);
+      applyThemeToDOM(systemTheme);
     };
 
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme, mounted]);
 
-  const setTheme = (newTheme: Theme) => {
+  const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
     localStorage.setItem(STORAGE_KEY, newTheme);
-  };
+  }, []);
+
+  const contextValue = useMemo(
+    () => ({ theme, resolvedTheme, setTheme }),
+    [theme, resolvedTheme, setTheme]
+  );
 
   // Prevent flash of wrong theme
   if (!mounted) {
@@ -73,7 +88,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme }}>
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

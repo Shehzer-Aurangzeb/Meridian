@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Panel, PanelHead } from './panel';
-import { PlusIcon } from '@/components/ui/icons';
+import { PlusIcon } from '@/assets/icons/plus-icon';
 
 /**
  * Watchlist item type
