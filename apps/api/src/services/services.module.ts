@@ -7,6 +7,9 @@ import { PerformanceService } from './performance.service';
 import { MultiTimeframeService } from './multi-timeframe.service';
 import { ChecklistService } from './checklist.service';
 import { SupportResistanceService } from './support-resistance.service';
+import { PositionSizingService } from './position-sizing.service';
+import { LeverageService } from './leverage.service';
+import { CompleteAnalysisService } from './complete-analysis.service';
 
 @Module({
   providers: [
@@ -18,6 +21,9 @@ import { SupportResistanceService } from './support-resistance.service';
     MultiTimeframeService,
     ChecklistService,
     SupportResistanceService,
+    PositionSizingService,
+    LeverageService,
+    CompleteAnalysisService,
   ],
   exports: [
     BinanceService,
@@ -28,6 +34,9 @@ import { SupportResistanceService } from './support-resistance.service';
     MultiTimeframeService,
     ChecklistService,
     SupportResistanceService,
+    PositionSizingService,
+    LeverageService,
+    CompleteAnalysisService,
   ],
 })
 export class ServicesModule {}
