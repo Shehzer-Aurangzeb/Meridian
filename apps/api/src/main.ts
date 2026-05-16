@@ -7,6 +7,7 @@ dotenv.config({ path: `.env.${env}` });
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { PerformanceInterceptor } from './interceptors/performance.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,6 +21,9 @@ async function bootstrap() {
     }),
   );
 
+  // Enable performance monitoring
+  app.useGlobalInterceptors(new PerformanceInterceptor());
+
   // Enable CORS for frontend communication
   app.enableCors({
     origin: 'http://localhost:3000',
@@ -29,6 +33,7 @@ async function bootstrap() {
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`🚀 Meridian API running on http://localhost:${port}`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
 }
 
 bootstrap();

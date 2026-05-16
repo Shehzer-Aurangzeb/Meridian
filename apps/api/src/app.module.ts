@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
 import { Controller, Get } from '@nestjs/common';
+import { CacheModule } from '@nestjs/cache-manager';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { BinanceService } from './services/binance.service';
 import { IndicatorsService } from './services/indicators.service';
 import { ClaudeService } from './services/claude.service';
 import { AnalysisController } from './controllers/analysis.controller';
+import { HealthController } from './controllers/health.controller';
 import { MarketData } from './types/analysis.types';
 
 @Controller()
@@ -61,8 +65,33 @@ class AppController {
 }
 
 @Module({
-  imports: [ServicesModule, PrismaModule],
-  controllers: [AppController, AnalysisController],
-  providers: [],
+  imports: [
+    // In-memory cache for development
+    // For production, use Redis: cache-manager-redis-store
+    CacheModule.register({
+      isGlobal: true,
+      ttl: 300, // 5 minutes default TTL
+      max: 500, // Max items in cache
+    }),
+
+    // Rate limiting: 100 requests per 60 seconds per IP
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 100, // 100 requests
+      },
+    ]),
+
+    ServicesModule,
+    PrismaModule,
+  ],
+  controllers: [AppController, AnalysisController, HealthController],
+  providers: [
+    // Apply throttler globally
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

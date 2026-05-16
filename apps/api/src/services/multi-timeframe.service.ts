@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { BinanceService } from './binance.service';
 import { IndicatorsService } from './indicators.service';
 import { ChecklistService } from './checklist.service';
@@ -36,7 +38,11 @@ import { SupportResistanceLevel } from '../types/support-resistance.types';
 export class MultiTimeframeService {
   private readonly logger = new Logger(MultiTimeframeService.name);
 
+  // Cache TTL in seconds (1 minute for analysis results)
+  private readonly ANALYSIS_CACHE_TTL = 60;
+
   constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly binanceService: BinanceService,
     private readonly indicatorsService: IndicatorsService,
     private readonly checklistService: ChecklistService,
@@ -53,6 +59,19 @@ export class MultiTimeframeService {
     const timeframes: Timeframe[] =
       customTimeframes || [...ANALYSIS_TIMEFRAMES[tradeType]];
 
+    // Check cache first
+    const cacheKey = this.generateAnalysisCacheKey(symbol, tradeType, includeDetailedChecklist);
+    const cached = await this.cacheManager.get<MultiTimeframeAnalysisResult>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Analysis cache HIT: ${cacheKey}`);
+      // Reconstruct Date objects
+      return {
+        ...cached,
+        analyzedAt: new Date(cached.analyzedAt),
+      };
+    }
+
+    this.logger.debug(`Analysis cache MISS: ${cacheKey}`);
     this.logger.log(
       `Starting multi-timeframe analysis for ${symbol} (${tradeType} mode)`,
     );
@@ -121,7 +140,7 @@ export class MultiTimeframeService {
       fivePointChecklist,
     );
 
-    return {
+    const result: MultiTimeframeAnalysisResult = {
       symbol,
       analyzedAt: new Date(),
       currentPrice,
@@ -132,6 +151,22 @@ export class MultiTimeframeService {
       fivePointChecklist,
       tradeSuggestion,
     };
+
+    // Cache the result
+    await this.cacheManager.set(cacheKey, result, this.ANALYSIS_CACHE_TTL);
+
+    return result;
+  }
+
+  /**
+   * Generate cache key for analysis results
+   */
+  private generateAnalysisCacheKey(
+    symbol: string,
+    tradeType: TradeType,
+    includeDetailedChecklist: boolean,
+  ): string {
+    return `mtf-analysis:${symbol}:${tradeType}:${includeDetailedChecklist}`;
   }
 
   /**
