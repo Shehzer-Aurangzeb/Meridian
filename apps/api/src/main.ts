@@ -7,7 +7,7 @@ dotenv.config({ path: `.env.${env}` });
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { PerformanceInterceptor } from './interceptors/performance.interceptor';
+import { PerformanceInterceptor } from './common/interceptors/performance.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

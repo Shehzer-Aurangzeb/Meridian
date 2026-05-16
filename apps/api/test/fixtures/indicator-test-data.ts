@@ -15,7 +15,7 @@
  * Data Source: Binance BTC/USDT Daily
  */
 
-import { Candle } from '../../src/types/candle.types';
+import { Candle } from '../../src/common/types/candle.types';
 
 export interface TestDataFixture {
   symbol: string;

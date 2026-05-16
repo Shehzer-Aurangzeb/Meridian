@@ -1,7 +1,7 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { BinanceService } from '../services/binance.service';
+import { BinanceService } from '../market-data/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface HealthStatus {
