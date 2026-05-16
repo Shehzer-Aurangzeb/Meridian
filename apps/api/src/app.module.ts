@@ -5,12 +5,11 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
-import { BinanceService } from './services/binance.service';
-import { IndicatorsService } from './services/indicators.service';
-import { ClaudeService } from './services/claude.service';
-import { AnalysisController } from './controllers/analysis.controller';
+import { BinanceService } from './market-data/market-data.service';
+import { IndicatorsService } from './indicators/indicators.service';
+import { ClaudeService } from './ai/ai.service';
 import { HealthController } from './controllers/health.controller';
-import { MarketData } from './types/analysis.types';
+import { MarketData } from './analysis/interfaces/analysis.types';
 
 @Controller()
 class AppController {
@@ -82,10 +81,11 @@ class AppController {
       },
     ]),
 
+    // ServicesModule re-exports all feature modules
     ServicesModule,
     PrismaModule,
   ],
-  controllers: [AppController, AnalysisController, HealthController],
+  controllers: [AppController, HealthController],
   providers: [
     // Apply throttler globally
     {

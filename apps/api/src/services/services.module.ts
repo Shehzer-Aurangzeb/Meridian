@@ -1,42 +1,31 @@
 import { Module } from '@nestjs/common';
-import { BinanceService } from './binance.service';
-import { IndicatorsService } from './indicators.service';
-import { ClaudeService } from './claude.service';
-import { ClaudePromptService } from './claude-prompt.service';
-import { PerformanceService } from './performance.service';
-import { MultiTimeframeService } from './multi-timeframe.service';
-import { ChecklistService } from './checklist.service';
-import { SupportResistanceService } from './support-resistance.service';
-import { PositionSizingService } from './position-sizing.service';
-import { LeverageService } from './leverage.service';
-import { CompleteAnalysisService } from './complete-analysis.service';
+import { MarketDataModule } from '../market-data/market-data.module';
+import { IndicatorsModule } from '../indicators/indicators.module';
+import { AiModule } from '../ai/ai.module';
+import { AnalysisModule } from '../analysis/analysis.module';
+import { RiskManagementModule } from '../risk-management/risk-management.module';
+import { PerformanceModule } from '../performance/performance.module';
 
+/**
+ * ServicesModule - Convenience module that re-exports all feature modules
+ * Can be used to import all services at once
+ */
 @Module({
-  providers: [
-    BinanceService,
-    IndicatorsService,
-    ClaudePromptService,
-    ClaudeService,
-    PerformanceService,
-    MultiTimeframeService,
-    ChecklistService,
-    SupportResistanceService,
-    PositionSizingService,
-    LeverageService,
-    CompleteAnalysisService,
+  imports: [
+    MarketDataModule,
+    IndicatorsModule,
+    AiModule,
+    AnalysisModule,
+    RiskManagementModule,
+    PerformanceModule,
   ],
   exports: [
-    BinanceService,
-    IndicatorsService,
-    ClaudePromptService,
-    ClaudeService,
-    PerformanceService,
-    MultiTimeframeService,
-    ChecklistService,
-    SupportResistanceService,
-    PositionSizingService,
-    LeverageService,
-    CompleteAnalysisService,
+    MarketDataModule,
+    IndicatorsModule,
+    AiModule,
+    AnalysisModule,
+    RiskManagementModule,
+    PerformanceModule,
   ],
 })
 export class ServicesModule {}
