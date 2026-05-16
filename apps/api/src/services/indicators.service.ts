@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { RSI, BollingerBands, ATR } from 'technicalindicators';
+import { RSI, BollingerBands, ATR, EMA } from 'technicalindicators';
 import { Candle } from '../types/candle.types';
 import {
   IndicatorResults,
+  ExtendedIndicatorResults,
   BollingerBandsResult,
   SupportResistanceResult,
+  QQEResult,
+  KeyLevel,
 } from '../types/indicator.types';
 
 @Injectable()
@@ -187,6 +190,232 @@ export class IndicatorsService {
       atr,
       support,
       resistance,
+    };
+  }
+
+  /**
+   * Calculate QQE (Quantitative Qualitative Estimation)
+   * This is a proxy implementation based on RSI momentum and smoothing
+   * Green = bullish momentum, Red = bearish momentum
+   */
+  calculateQQE(closes: number[], period: number = 14): QQEResult {
+    if (closes.length < period * 2) {
+      return {
+        color: 'neutral',
+        value: 50,
+        previousColor: 'neutral',
+        trend: 'flat',
+      };
+    }
+
+    // Calculate RSI values
+    const rsiValues = RSI.calculate({ values: closes, period });
+
+    if (rsiValues.length < 5) {
+      return {
+        color: 'neutral',
+        value: 50,
+        previousColor: 'neutral',
+        trend: 'flat',
+      };
+    }
+
+    // Smooth RSI with EMA (QQE uses smoothed RSI)
+    const smoothingPeriod = 5;
+    const smoothedRSI = EMA.calculate({
+      values: rsiValues,
+      period: smoothingPeriod,
+    });
+
+    if (smoothedRSI.length < 2) {
+      return {
+        color: 'neutral',
+        value: rsiValues[rsiValues.length - 1],
+        previousColor: 'neutral',
+        trend: 'flat',
+      };
+    }
+
+    const currentSmoothedRSI = smoothedRSI[smoothedRSI.length - 1];
+    const previousSmoothedRSI = smoothedRSI[smoothedRSI.length - 2];
+    const olderSmoothedRSI = smoothedRSI.length > 2 ? smoothedRSI[smoothedRSI.length - 3] : previousSmoothedRSI;
+
+    // Determine trend
+    let trend: 'rising' | 'falling' | 'flat' = 'flat';
+    const trendThreshold = 0.5;
+
+    if (currentSmoothedRSI - previousSmoothedRSI > trendThreshold) {
+      trend = 'rising';
+    } else if (previousSmoothedRSI - currentSmoothedRSI > trendThreshold) {
+      trend = 'falling';
+    }
+
+    // Determine previous trend for color transition
+    let previousTrend: 'rising' | 'falling' | 'flat' = 'flat';
+    if (previousSmoothedRSI - olderSmoothedRSI > trendThreshold) {
+      previousTrend = 'rising';
+    } else if (olderSmoothedRSI - previousSmoothedRSI > trendThreshold) {
+      previousTrend = 'falling';
+    }
+
+    // Determine color based on RSI value and trend
+    // Green (bullish) when RSI is rising or above 50 with upward momentum
+    // Red (bearish) when RSI is falling or below 50 with downward momentum
+    let color: 'green' | 'red' | 'neutral' = 'neutral';
+    let previousColor: 'green' | 'red' | 'neutral' = 'neutral';
+
+    if (currentSmoothedRSI > 50 && trend === 'rising') {
+      color = 'green';
+    } else if (currentSmoothedRSI < 50 && trend === 'falling') {
+      color = 'red';
+    } else if (trend === 'rising') {
+      color = 'green';
+    } else if (trend === 'falling') {
+      color = 'red';
+    }
+
+    if (previousSmoothedRSI > 50 && previousTrend === 'rising') {
+      previousColor = 'green';
+    } else if (previousSmoothedRSI < 50 && previousTrend === 'falling') {
+      previousColor = 'red';
+    } else if (previousTrend === 'rising') {
+      previousColor = 'green';
+    } else if (previousTrend === 'falling') {
+      previousColor = 'red';
+    }
+
+    return {
+      color,
+      value: currentSmoothedRSI,
+      previousColor,
+      trend,
+    };
+  }
+
+  /**
+   * Calculate Bollinger Band width as a percentage
+   * Used to detect squeeze (low volatility) vs expansion
+   */
+  calculateBandWidth(bands: BollingerBandsResult): number {
+    const width = bands.upper - bands.lower;
+    return (width / bands.middle) * 100;
+  }
+
+  /**
+   * Identify key support and resistance levels with strength metrics
+   * Strength is measured by how many times price has tested the level
+   */
+  identifyKeyLevels(candles: Candle[], currentPrice: number, tolerance: number = 0.5): KeyLevel[] {
+    if (candles.length < 20) {
+      return [];
+    }
+
+    const levels: Map<number, { type: 'support' | 'resistance'; touches: number }> = new Map();
+
+    // Round price to create price zones (0.5% tolerance)
+    const roundToZone = (price: number): number => {
+      const zone = currentPrice * (tolerance / 100);
+      return Math.round(price / zone) * zone;
+    };
+
+    // Find swing highs and lows
+    for (let i = 2; i < candles.length - 2; i++) {
+      const current = candles[i];
+
+      // Swing high (resistance)
+      if (
+        current.high > candles[i - 1].high &&
+        current.high > candles[i - 2].high &&
+        current.high > candles[i + 1].high &&
+        current.high > candles[i + 2].high
+      ) {
+        const zone = roundToZone(current.high);
+        const existing = levels.get(zone);
+        if (existing && existing.type === 'resistance') {
+          existing.touches++;
+        } else {
+          levels.set(zone, { type: 'resistance', touches: 1 });
+        }
+      }
+
+      // Swing low (support)
+      if (
+        current.low < candles[i - 1].low &&
+        current.low < candles[i - 2].low &&
+        current.low < candles[i + 1].low &&
+        current.low < candles[i + 2].low
+      ) {
+        const zone = roundToZone(current.low);
+        const existing = levels.get(zone);
+        if (existing && existing.type === 'support') {
+          existing.touches++;
+        } else {
+          levels.set(zone, { type: 'support', touches: 1 });
+        }
+      }
+    }
+
+    // Convert to array and calculate distance
+    const keyLevels: KeyLevel[] = [];
+    levels.forEach((data, price) => {
+      const distance = ((price - currentPrice) / currentPrice) * 100;
+      keyLevels.push({
+        price,
+        type: data.type,
+        strength: data.touches,
+        distance,
+      });
+    });
+
+    // Sort by strength (descending) then distance (ascending)
+    return keyLevels.sort((a, b) => {
+      if (b.strength !== a.strength) return b.strength - a.strength;
+      return Math.abs(a.distance) - Math.abs(b.distance);
+    });
+  }
+
+  /**
+   * Find nearest support or resistance level
+   */
+  findNearestLevel(
+    keyLevels: KeyLevel[],
+    currentPrice: number,
+    type: 'support' | 'resistance' | 'any' = 'any',
+  ): KeyLevel | null {
+    const filtered =
+      type === 'any' ? keyLevels : keyLevels.filter((l) => l.type === type);
+
+    if (filtered.length === 0) return null;
+
+    // Find nearest by distance
+    return filtered.reduce((nearest, level) => {
+      const nearestDist = Math.abs(nearest.distance);
+      const levelDist = Math.abs(level.distance);
+      return levelDist < nearestDist ? level : nearest;
+    });
+  }
+
+  /**
+   * Extended timeframe analysis with QQE, band width, and key levels
+   */
+  analyzeTimeframeExtended(candles: Candle[]): ExtendedIndicatorResults {
+    // Get basic indicators
+    const basic = this.analyzeTimeframe(candles);
+
+    // Extract closes for QQE
+    const closes = candles.map((c) => c.close);
+    const currentPrice = closes[closes.length - 1];
+
+    // Calculate extended indicators
+    const qqe = this.calculateQQE(closes);
+    const bandWidth = this.calculateBandWidth(basic.bollingerBands);
+    const keyLevels = this.identifyKeyLevels(candles, currentPrice);
+
+    return {
+      ...basic,
+      qqe,
+      bandWidth,
+      keyLevels,
     };
   }
 }
