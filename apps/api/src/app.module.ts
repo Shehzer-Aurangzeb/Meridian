@@ -69,17 +69,17 @@ class AppController {
     // For production, use Redis: cache-manager-redis-store
     CacheModule.register({
       isGlobal: true,
-      ttl: 300, // 5 minutes default TTL
+      ttl: 300_000, // 5 minutes default TTL (in ms for cache-manager v7)
       max: 500, // Max items in cache
     }),
 
     // Rate limiting: 100 requests per 60 seconds per IP
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 60 seconds
-        limit: 100, // 100 requests
-      },
-    ]),
+    // Disabled in test environment to avoid intermittent failures
+    ThrottlerModule.forRoot(
+      process.env.NODE_ENV === 'test'
+        ? [{ ttl: 60000, limit: 10000 }] // Very high limit for tests
+        : [{ ttl: 60000, limit: 100 }],
+    ),
 
     // ServicesModule re-exports all feature modules
     ServicesModule,

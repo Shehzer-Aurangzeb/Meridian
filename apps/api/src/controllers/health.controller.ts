@@ -1,4 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { BinanceService } from '../market-data/market-data.service';
@@ -18,6 +19,7 @@ interface HealthStatus {
   };
 }
 
+@ApiTags('health')
 @Controller('health')
 export class HealthController {
   private readonly startTime = Date.now();
@@ -89,10 +91,19 @@ export class HealthController {
 
   private async checkCache(): Promise<number> {
     const start = Date.now();
-    await this.cacheManager.set('health-check', 'ok', 10);
-    const value = await this.cacheManager.get('health-check');
-    if (value !== 'ok') throw new Error('Cache not working');
-    return Date.now() - start;
+    try {
+      await this.cacheManager.set('health-check', 'ok', 10_000); // 10 seconds in ms
+      const value = await this.cacheManager.get('health-check');
+      console.log(`[Health] Cache test - set 'ok', got '${value}'`);
+      if (value !== 'ok') {
+        console.log(`[Health] Cache value mismatch! Expected 'ok', got '${value}'`);
+        throw new Error('Cache not working');
+      }
+      return Date.now() - start;
+    } catch (error) {
+      console.log(`[Health] Cache check failed:`, error);
+      throw error;
+    }
   }
 
   private async checkBinance(): Promise<number> {

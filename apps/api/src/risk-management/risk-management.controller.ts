@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PositionSizingService } from './services/position-sizing.service';
 import { LeverageService } from './services/leverage.service';
@@ -12,6 +13,7 @@ import {
   GetLeverageConstraintsDto,
 } from './dto/leverage.dto';
 
+@ApiTags('risk-management')
 @Controller('analysis')
 export class RiskManagementController {
   constructor(

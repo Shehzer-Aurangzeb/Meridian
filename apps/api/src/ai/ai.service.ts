@@ -13,7 +13,7 @@ import {
 @Injectable()
 export class ClaudeService {
   private readonly client: Anthropic;
-  private readonly model = 'claude-sonnet-4-6';
+  private readonly model = 'claude-opus-4-7';
   private readonly logger = new Logger(ClaudeService.name);
 
   constructor(private readonly promptService: ClaudePromptService) {
@@ -38,8 +38,7 @@ export class ClaudeService {
     try {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 2000,
-        temperature: 0.3, // Lower = more consistent
+        max_tokens: 8000,
         messages: [
           {
             role: 'user',

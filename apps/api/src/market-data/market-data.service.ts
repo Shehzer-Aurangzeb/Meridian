@@ -9,9 +9,14 @@ export class BinanceService {
   private readonly baseUrl = 'https://api.binance.com/api/v3';
   private readonly logger = new Logger(BinanceService.name);
 
-  // Cache TTLs in seconds
-  private readonly CANDLE_CACHE_TTL = 300; // 5 minutes
-  private readonly PRICE_CACHE_TTL = 30; // 30 seconds
+  // Cache TTLs in milliseconds (cache-manager v7)
+  private readonly CANDLE_CACHE_TTL = 300_000; // 5 minutes
+  private readonly PRICE_CACHE_TTL = 30_000; // 30 seconds
+  private readonly STALE_CACHE_TTL = 3_600_000; // 1 hour fallback for API failures
+
+  // Configurable request timeouts (in ms)
+  private readonly candleTimeout = parseInt(process.env.BINANCE_TIMEOUT_MS || '30000', 10);
+  private readonly priceTimeout = parseInt(process.env.BINANCE_PRICE_TIMEOUT_MS || '10000', 10);
 
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -40,13 +45,24 @@ export class BinanceService {
 
     this.logger.debug(`Cache MISS: ${cacheKey}`);
 
-    // Fetch from Binance
-    const candles = await this.fetchCandlesFromBinance(tradingPair, interval, limit);
-
-    // Cache the result
-    await this.cacheManager.set(cacheKey, candles, this.CANDLE_CACHE_TTL);
-
-    return candles;
+    // Fetch from Binance with retry; fall back to stale cache on total failure
+    const staleCacheKey = `stale:candles:${tradingPair}:${interval}:${limit}`;
+    try {
+      const candles = await this.fetchCandlesFromBinance(tradingPair, interval, limit);
+      await this.cacheManager.set(cacheKey, candles, this.CANDLE_CACHE_TTL);
+      // Also write a longer-lived stale copy for emergency fallback
+      await this.cacheManager.set(staleCacheKey, candles, this.STALE_CACHE_TTL);
+      return candles;
+    } catch (error) {
+      const stale = await this.cacheManager.get<Candle[]>(staleCacheKey);
+      if (stale) {
+        this.logger.warn(
+          `Binance fetch failed for ${tradingPair} ${interval}, serving stale cached candles`,
+        );
+        return this.deserializeCandles(stale);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -117,7 +133,7 @@ export class BinanceService {
             interval,
             limit,
           },
-          timeout: 10000, // 10 second timeout
+          timeout: this.candleTimeout,
         });
 
         // Binance returns array of arrays:
@@ -132,17 +148,24 @@ export class BinanceService {
         }));
       } catch (error) {
         if (axios.isAxiosError(error)) {
-          // Rate limited - wait and retry
-          if (error.response?.status === 429) {
-            this.logger.warn(`Rate limited by Binance, waiting before retry ${attempt}/${retries}`);
-            await this.sleep(1000 * attempt); // Exponential backoff
-            continue;
-          }
+          const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+          const isNetworkError = !error.response && (isTimeout || error.code === 'ECONNRESET' || error.code === 'ENOTFOUND');
+          const isRateLimited = error.response?.status === 429;
+          const isServerError = error.response?.status !== undefined && error.response.status >= 500;
 
-          // Server error - retry
-          if (error.response?.status && error.response.status >= 500) {
-            this.logger.warn(`Binance server error, retrying ${attempt}/${retries}`);
-            await this.sleep(500 * attempt);
+          // Retry on network errors, timeouts, rate limits, or server errors
+          if ((isNetworkError || isRateLimited || isServerError) && attempt < retries) {
+            const reason = isTimeout
+              ? 'timeout'
+              : isNetworkError
+                ? `network error (${error.code})`
+                : isRateLimited
+                  ? 'rate limited'
+                  : 'server error';
+            this.logger.warn(
+              `Binance ${reason} for ${tradingPair} ${interval}, retrying ${attempt}/${retries}`,
+            );
+            await this.sleep(1000 * attempt); // Exponential backoff
             continue;
           }
 
@@ -170,20 +193,28 @@ export class BinanceService {
       try {
         const response = await axios.get(`${this.baseUrl}/ticker/price`, {
           params: { symbol: tradingPair },
-          timeout: 5000, // 5 second timeout
+          timeout: this.priceTimeout,
         });
 
         return parseFloat(response.data.price);
       } catch (error) {
         if (axios.isAxiosError(error)) {
-          if (error.response?.status === 429) {
-            this.logger.warn(`Rate limited, waiting before retry ${attempt}/${retries}`);
-            await this.sleep(1000 * attempt);
-            continue;
-          }
+          const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+          const isNetworkError = !error.response && (isTimeout || error.code === 'ECONNRESET' || error.code === 'ENOTFOUND');
+          const isRateLimited = error.response?.status === 429;
+          const isServerError = error.response?.status !== undefined && error.response.status >= 500;
 
-          if (error.response?.status && error.response.status >= 500) {
-            this.logger.warn(`Binance server error, retrying ${attempt}/${retries}`);
+          if ((isNetworkError || isRateLimited || isServerError) && attempt < retries) {
+            const reason = isTimeout
+              ? 'timeout'
+              : isNetworkError
+                ? `network error (${error.code})`
+                : isRateLimited
+                  ? 'rate limited'
+                  : 'server error';
+            this.logger.warn(
+              `Binance price ${reason} for ${tradingPair}, retrying ${attempt}/${retries}`,
+            );
             await this.sleep(500 * attempt);
             continue;
           }

@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
@@ -22,6 +23,7 @@ import {
 import { MarketData } from './interfaces/analysis.types';
 import { TimeInterval } from '../common/types/candle.types';
 
+@ApiTags('analysis')
 @Controller('analysis')
 export class AnalysisController {
   constructor(
