@@ -1,10 +1,12 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { PerformanceService, AnalysisWithPerformance } from './performance.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PerformanceResponseDto, PerformanceAnalysis } from './dto/performance-response.dto';
 import { HistoryQueryDto } from '../analysis/dto/history-query.dto';
 import { Prisma } from '@prisma/client';
 
+@ApiTags('performance')
 @Controller('analysis/performance')
 export class PerformanceController {
   constructor(

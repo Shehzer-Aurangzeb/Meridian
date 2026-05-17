@@ -39,7 +39,7 @@ export class MultiTimeframeService {
   private readonly logger = new Logger(MultiTimeframeService.name);
 
   // Cache TTL in seconds (1 minute for analysis results)
-  private readonly ANALYSIS_CACHE_TTL = 60;
+  private readonly ANALYSIS_CACHE_TTL = 60_000; // 60 seconds in ms
 
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -59,11 +59,20 @@ export class MultiTimeframeService {
     const timeframes: Timeframe[] =
       customTimeframes || [...ANALYSIS_TIMEFRAMES[tradeType]];
 
+    console.log('\n=== MTF SERVICE: analyzeMultipleTimeframes ===');
+    console.log(`Symbol: ${symbol}, TradeType: ${tradeType}, DetailedChecklist: ${includeDetailedChecklist}`);
+    console.log(`Timeframes: ${timeframes.join(', ')}`);
+
     // Check cache first
     const cacheKey = this.generateAnalysisCacheKey(symbol, tradeType, includeDetailedChecklist);
+    console.log(`Cache key: ${cacheKey}`);
+    
     const cached = await this.cacheManager.get<MultiTimeframeAnalysisResult>(cacheKey);
     if (cached) {
       this.logger.debug(`Analysis cache HIT: ${cacheKey}`);
+      console.log(`✓ CACHE HIT - returning cached result`);
+      console.log(`  Cached HTF Bias: ${cached.htfBias.bias} (${cached.htfBias.confidence}%)`);
+      console.log(`  Cached Checklist: ${cached.fivePointChecklist?.totalScore || 'N/A'}/100`);
       // Reconstruct Date objects
       return {
         ...cached,
@@ -72,6 +81,7 @@ export class MultiTimeframeService {
     }
 
     this.logger.debug(`Analysis cache MISS: ${cacheKey}`);
+    console.log(`✗ CACHE MISS - calculating fresh`);
     this.logger.log(
       `Starting multi-timeframe analysis for ${symbol} (${tradeType} mode)`,
     );
@@ -151,6 +161,20 @@ export class MultiTimeframeService {
       fivePointChecklist,
       tradeSuggestion,
     };
+
+    console.log(`\n--- MTF RESULT ---`);
+    console.log(`HTF Bias: ${htfBias.bias} (${htfBias.confidence}%)`);
+    console.log(`Legacy Checklist: ${entryChecklist.score}/5 (passed: ${entryChecklist.passed})`);
+    if (fivePointChecklist) {
+      console.log(`5-Point Checklist: ${fivePointChecklist.totalScore}/100 (${fivePointChecklist.conditionsMet}/5 conditions)`);
+      console.log(`  RSI: ${fivePointChecklist.conditions.find(c => c.name.includes('RSI'))?.passed ? '✓' : '✗'}`);
+      console.log(`  QQE: ${fivePointChecklist.conditions.find(c => c.name.includes('QQE'))?.passed ? '✓' : '✗'}`);
+      console.log(`  BB: ${fivePointChecklist.conditions.find(c => c.name.includes('Bollinger'))?.passed ? '✓' : '✗'}`);
+      console.log(`  Structure: ${fivePointChecklist.conditions.find(c => c.name.includes('Structure'))?.passed ? '✓' : '✗'}`);
+      console.log(`  S/R: ${fivePointChecklist.conditions.find(c => c.name.includes('Support'))?.passed ? '✓' : '✗'}`);
+    }
+    console.log(`Trade Suggestion: ${tradeSuggestion.action}`);
+    console.log(`--- END MTF RESULT ---\n`);
 
     // Cache the result
     await this.cacheManager.set(cacheKey, result, this.ANALYSIS_CACHE_TTL);

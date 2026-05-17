@@ -10,3 +10,5 @@ dist/
 # Prisma
 *.db
 *.db-journal
+temp/
+test/manual/results/

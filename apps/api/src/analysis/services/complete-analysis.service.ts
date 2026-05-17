@@ -37,18 +37,28 @@ export class CompleteAnalysisService {
     const startTime = Date.now();
     this.logger.log(`Starting complete analysis for ${request.coin}`);
 
+    console.log('\n========== COMPLETE ANALYSIS START ==========');
+    console.log('Request:', JSON.stringify(request, null, 2));
+
     try {
       // 1. Get current price
-      const symbol = `${request.coin.toUpperCase()}USDT`;
+      const symbol = request.coin.toUpperCase();
       const currentPrice = await this.binanceService.getCurrentPrice(symbol);
+      console.log(`\n[1] Current price for ${symbol}: $${currentPrice}`);
 
       // 2. Multi-timeframe analysis with checklist
       const tradeType = request.tradeType || 'day';
+      console.log(`\n[2] Calling MultiTimeframeService with: symbol=${symbol}, tradeType=${tradeType}`);
+      
       const timeframeAnalysis = await this.multiTimeframeService.analyzeMultipleTimeframes({
         symbol,
         tradeType,
         includeDetailedChecklist: true,
       });
+
+      console.log(`\n[2] MTF Result received:`);
+      console.log(`    HTF Bias: ${timeframeAnalysis.htfBias.bias} (${timeframeAnalysis.htfBias.confidence}%)`);
+      console.log(`    5-Point Checklist: ${timeframeAnalysis.fivePointChecklist?.totalScore || 'N/A'}/100`);
 
       // Extract checklist from analysis
       const checklist = timeframeAnalysis.fivePointChecklist;
@@ -160,6 +170,17 @@ export class CompleteAnalysisService {
       // 7. Build response
       const processingTime = Date.now() - startTime;
       this.logger.log(`Complete analysis finished in ${processingTime}ms`);
+
+      console.log(`\n========== COMPLETE ANALYSIS RESULT ==========`);
+      console.log(`Checklist Score: ${checklist.totalScore}/100`);
+      console.log(`Conditions Met: ${checklist.conditionsMet}/5`);
+      console.log(`HTF Bias: ${timeframeAnalysis.htfBias.bias} (${timeframeAnalysis.htfBias.confidence}%)`);
+      console.log(`AI Action: ${aiAnalysis.action}`);
+      console.log(`Summary Action: ${summary.action}`);
+      console.log(`Summary Confidence: ${summary.confidence}`);
+      console.log(`Should Trade: ${summary.shouldTrade}`);
+      console.log(`Processing Time: ${processingTime}ms`);
+      console.log(`========== COMPLETE ANALYSIS END ==========\n`);
 
       return {
         coin: request.coin.toUpperCase(),
