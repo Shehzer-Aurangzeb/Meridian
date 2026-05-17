@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RSI, BollingerBands, ATR, EMA } from 'technicalindicators';
+import { RSI, BollingerBands, ATR, ADX, EMA } from 'technicalindicators';
 import { Candle } from '../common/types/candle.types';
 import {
   IndicatorResults,
@@ -8,6 +8,7 @@ import {
   SupportResistanceResult,
   QQEResult,
   KeyLevel,
+  ADXResult,
 } from './interfaces/indicator.types';
 
 @Injectable()
@@ -417,5 +418,112 @@ export class IndicatorsService {
       bandWidth,
       keyLevels,
     };
+  }
+
+  /**
+   * Calculate ADX (Average Directional Index) with +DI / -DI.
+   *
+   * Uses Wilder's smoothing via the `technicalindicators` library.
+   * Requires roughly 2 * period candles to produce a stable value.
+   *
+   * @param highs  - Array of high prices
+   * @param lows   - Array of low prices
+   * @param closes - Array of closing prices
+   * @param period - ADX period (default 14)
+   * @returns Latest ADX, +DI, -DI and DX values
+   */
+  calculateADX(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number = 14,
+  ): ADXResult {
+    const minRequired = period * 2 + 1;
+    if (
+      highs.length < minRequired ||
+      lows.length < minRequired ||
+      closes.length < minRequired
+    ) {
+      throw new Error(
+        `Insufficient data for ADX calculation. Need at least ${minRequired} candles, got ${Math.min(highs.length, lows.length, closes.length)}`,
+      );
+    }
+
+    const adxValues = ADX.calculate({
+      high: highs,
+      low: lows,
+      close: closes,
+      period,
+    });
+
+    if (adxValues.length === 0) {
+      throw new Error('ADX calculation returned no values');
+    }
+
+    const latest = adxValues[adxValues.length - 1];
+    if (
+      !latest ||
+      latest.adx === undefined ||
+      latest.pdi === undefined ||
+      latest.mdi === undefined ||
+      isNaN(latest.adx) ||
+      isNaN(latest.pdi) ||
+      isNaN(latest.mdi)
+    ) {
+      throw new Error('ADX calculation returned invalid values');
+    }
+
+    // DX is the pre-smoothed directional index for the latest bar.
+    const diSum = latest.pdi + latest.mdi;
+    const dx = diSum === 0 ? 0 : (Math.abs(latest.pdi - latest.mdi) / diSum) * 100;
+
+    return {
+      adx: latest.adx,
+      pdi: latest.pdi,
+      mdi: latest.mdi,
+      dx,
+    };
+  }
+
+  /**
+   * Calculate a rolling series of Bollinger Band widths (as percentages of
+   * the middle band) over the supplied closes. Used to derive the historical
+   * percentile distribution required by the regime classifier.
+   */
+  calculateBandWidthSeries(
+    closes: number[],
+    period: number = 20,
+    stdDev: number = 2,
+  ): number[] {
+    if (closes.length < period) return [];
+
+    const bbSeries = BollingerBands.calculate({ values: closes, period, stdDev });
+    const widths: number[] = [];
+    for (const bb of bbSeries) {
+      if (
+        bb &&
+        bb.upper !== undefined &&
+        bb.lower !== undefined &&
+        bb.middle !== undefined &&
+        bb.middle !== 0 &&
+        !isNaN(bb.upper) &&
+        !isNaN(bb.lower) &&
+        !isNaN(bb.middle)
+      ) {
+        widths.push(((bb.upper - bb.lower) / bb.middle) * 100);
+      }
+    }
+    return widths;
+  }
+
+  /**
+   * Compute the percentile rank (0-100) of `value` within `series`,
+   * using the inclusive (<=) definition.
+   */
+  percentileRank(value: number, series: number[]): number {
+    if (series.length === 0) return 0;
+    let countLE = 0;
+    for (const v of series) if (v <= value) countLE++;
+    return (countLE / series.length) * 100;
   }
 }

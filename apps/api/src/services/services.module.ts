@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MarketDataModule } from '../market-data/market-data.module';
 import { IndicatorsModule } from '../indicators/indicators.module';
+import { MarketRegimeModule } from '../market-regime/market-regime.module';
 import { AiModule } from '../ai/ai.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { RiskManagementModule } from '../risk-management/risk-management.module';
@@ -14,6 +15,7 @@ import { PerformanceModule } from '../performance/performance.module';
   imports: [
     MarketDataModule,
     IndicatorsModule,
+    MarketRegimeModule,
     AiModule,
     AnalysisModule,
     RiskManagementModule,
@@ -22,6 +24,7 @@ import { PerformanceModule } from '../performance/performance.module';
   exports: [
     MarketDataModule,
     IndicatorsModule,
+    MarketRegimeModule,
     AiModule,
     AnalysisModule,
     RiskManagementModule,

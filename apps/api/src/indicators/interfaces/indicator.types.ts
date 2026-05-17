@@ -48,3 +48,17 @@ export interface ExtendedIndicatorResults extends IndicatorResults {
   bandWidth: number; // Bollinger band width as percentage
   keyLevels: KeyLevel[];
 }
+
+/**
+ * ADX (Average Directional Index) result
+ * adx  - Trend strength (0-100). >25 indicates a trending market.
+ * pdi  - Positive Directional Indicator (+DI)
+ * mdi  - Negative Directional Indicator (-DI)
+ * dx   - Directional Index (latest, pre-smoothed)
+ */
+export interface ADXResult {
+  adx: number;
+  pdi: number;
+  mdi: number;
+  dx: number;
+}
