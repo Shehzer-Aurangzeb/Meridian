@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
 import { TimeInterval } from '../common/types/candle.types';
+import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
   MarketRegime,
   MarketRegimeResult,
@@ -14,13 +15,15 @@ import {
  * (compression / trending / mean-reversion) so downstream strategy logic
  * can pick the appropriate playbook.
  *
- * This service is intentionally an orchestrator: it fetches candles via
- * BinanceService and applies pure indicator math from IndicatorsService.
- * Keeping the classification rules here (and out of IndicatorsService)
- * preserves the single-responsibility boundary between
- *   - pure math (IndicatorsService)
- *   - market I/O (BinanceService)
- *   - strategy classification (this service)
+ * Two entry points:
+ *   - `classifyMarketRegime(symbol, timeframe)` — legacy convenience:
+ *     fetches its own candles and builds an `IndicatorContext` internally.
+ *     Kept for direct callers that don't yet share a context.
+ *   - `classifyFromContext(ctx)` — preferred path used by
+ *     `AnalysisCoordinatorService`. Pure transform on a pre-built
+ *     context, no I/O, no re-computation.
+ *
+ * Mathematically identical between the two paths.
  */
 @Injectable()
 export class MarketRegimeService {
@@ -31,7 +34,7 @@ export class MarketRegimeService {
 
   // Default candle window. Large enough to build a reliable BB-width
   // distribution (~230 BB(20) samples).
-  private static readonly REGIME_CANDLE_LIMIT = 250;
+  public static readonly REGIME_CANDLE_LIMIT = 250;
 
   // ADX threshold above which the market is considered trending.
   private static readonly ADX_TREND_THRESHOLD = 25;
@@ -51,12 +54,9 @@ export class MarketRegimeService {
   /**
    * Classify the current market regime for a given symbol / timeframe.
    *
-   * Rules (evaluated in order):
-   *   1. COMPRESSION    -> BB-width is in the bottom 15% of its historical
-   *                       range. If we don't yet have enough history we
-   *                       fall back to the strict rule: bandWidth < 1.5%.
-   *   2. TRENDING       -> ADX(14) > 25.
-   *   3. MEAN_REVERSION -> Otherwise (ADX <= 25 and not compressed).
+   * Convenience wrapper: fetches candles, builds an `IndicatorContext`,
+   * and delegates to `classifyFromContext`. Use this only when the caller
+   * does not already have a shared context.
    */
   async classifyMarketRegime(
     symbol: string,
@@ -68,29 +68,42 @@ export class MarketRegimeService {
       MarketRegimeService.REGIME_CANDLE_LIMIT,
     );
 
+    const context = this.indicatorsService.buildContext(
+      symbol,
+      timeframe,
+      candles,
+    );
+
+    return this.classifyFromContext(context);
+  }
+
+  /**
+   * Classify the market regime from a pre-built `IndicatorContext`.
+   *
+   * Pure synchronous transform — no I/O, no recomputation. This is the
+   * preferred entry point from `AnalysisCoordinatorService`, which
+   * builds the context once and shares it across all downstream
+   * services.
+   *
+   * Rules (evaluated in order):
+   *   1. COMPRESSION    -> BB-width is in the bottom 15% of its historical
+   *                       range. If we don't yet have enough history we
+   *                       fall back to the strict rule: bandWidth < 1.5%.
+   *   2. TRENDING       -> ADX(14) > 25.
+   *   3. MEAN_REVERSION -> Otherwise (ADX <= 25 and not compressed).
+   */
+  classifyFromContext(context: IndicatorContext): MarketRegimeResult {
+    const { symbol, timeframe, candles, bandWidth, bandWidthSeries, adx, rsi, atr, bollingerBands } =
+      context;
+
     if (candles.length < 30) {
       throw new Error(
         `Insufficient candle data to classify regime for ${symbol} ${timeframe}: got ${candles.length}`,
       );
     }
 
-    const closes = candles.map((c) => c.close);
-    const highs = candles.map((c) => c.high);
-    const lows = candles.map((c) => c.low);
-
-    // Core indicators.
-    const rsi = this.indicatorsService.calculateRSI(closes);
-    const bollingerBands = this.indicatorsService.calculateBollingerBands(closes);
-    const atr = this.indicatorsService.calculateATR(highs, lows, closes);
-    const adx = this.indicatorsService.calculateADX(highs, lows, closes);
-
-    // Current bandwidth (% of middle band).
-    const bandWidth = this.indicatorsService.calculateBandWidth(bollingerBands);
-
     // Historical bandwidth distribution (excludes the current sample so the
     // percentile reflects "where am I relative to the past?").
-    const bandWidthSeries =
-      this.indicatorsService.calculateBandWidthSeries(closes);
     const historical = bandWidthSeries.slice(0, -1);
 
     const hasReliableHistory =
@@ -103,7 +116,7 @@ export class MarketRegimeService {
     if (hasReliableHistory) {
       bandWidthPercentile = this.indicatorsService.percentileRank(
         bandWidth,
-        historical,
+        historical as number[],
       );
       const sorted = [...historical].sort((a, b) => a - b);
       const idx = Math.max(

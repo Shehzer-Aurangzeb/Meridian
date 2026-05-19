@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RSI, BollingerBands, ATR, ADX, EMA } from 'technicalindicators';
 import { Candle } from '../common/types/candle.types';
+import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
   IndicatorResults,
   ExtendedIndicatorResults,
@@ -525,5 +526,72 @@ export class IndicatorsService {
     let countLE = 0;
     for (const v of series) if (v <= value) countLE++;
     return (countLE / series.length) * 100;
+  }
+
+  /**
+   * Build an `IndicatorContext` from a candle series.
+   *
+   * Computes every baseline indicator needed by downstream strategy
+   * services (regime classifier, squeeze breakout, checklist) exactly
+   * once, so the coordinator can share a single context object across
+   * the entire analysis pipeline.
+   *
+   * Pure function: no I/O, no caching, no side effects. The returned
+   * object is mathematically identical to what each service would have
+   * computed on its own from the same candle dataset.
+   *
+   * @param symbol    Base symbol (uppercased for the context).
+   * @param timeframe Candle interval used for the fetch.
+   * @param candles   Raw OHLCV series (already fetched by BinanceService).
+   *
+   * @throws If the supplied candle series is too small to compute the
+   *         core indicators (RSI / BB / ADX require >= 30 candles).
+   */
+  buildContext(
+    symbol: string,
+    timeframe: string,
+    candles: Candle[],
+  ): IndicatorContext {
+    if (candles.length < 30) {
+      throw new Error(
+        `Insufficient candles to build IndicatorContext for ${symbol} ${timeframe}: ` +
+          `got ${candles.length}, need at least 30`,
+      );
+    }
+
+    const closes = candles.map((c) => c.close);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const volumes = candles.map((c) => c.volume);
+
+    const rsi = this.calculateRSI(closes);
+    const bollingerBands = this.calculateBollingerBands(closes);
+    const bandWidth = this.calculateBandWidth(bollingerBands);
+    const bandWidthSeries = this.calculateBandWidthSeries(closes);
+    const atr = this.calculateATR(highs, lows, closes);
+    const adx = this.calculateADX(highs, lows, closes);
+    const qqe = this.calculateQQE(closes);
+
+    // Trailing closes window used by the checklist for Z-score input.
+    // Matches the legacy coordinator behaviour exactly.
+    const rsiHistory = closes.length >= 100 ? closes.slice(-100) : closes.slice();
+
+    return {
+      symbol: symbol.toUpperCase(),
+      timeframe,
+      candles,
+      closes,
+      highs,
+      lows,
+      volumes,
+      rsi,
+      rsiHistory,
+      adx,
+      atr,
+      bollingerBands,
+      bandWidth,
+      bandWidthSeries,
+      qqe,
+    };
   }
 }

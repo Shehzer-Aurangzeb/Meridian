@@ -32,12 +32,30 @@ export interface ClaudeLeverage {
   rationale: string;
 }
 
-export interface ClaudeReasoning {
-  checklistAnalysis: string;
-  timeframeConfluence: string;
+/**
+ * Reasoning fields shared by every Claude response (LONG / SHORT / WAIT).
+ * Matches Schema A/B emitted by `ClaudePromptService.buildCoordinatorOutputSchema`.
+ */
+export interface ClaudeBaseReasoning {
+  strategyAnalysis: string;
+  regimeContext: string;
   keyLevels: string;
+}
+
+/**
+ * Reasoning block for trade signals — adds invalidation + risks on top of
+ * the base set. WAIT responses are not required to populate these.
+ */
+export interface ClaudeTradeReasoning extends ClaudeBaseReasoning {
+  invalidation: string;
   risks: string;
 }
+
+/**
+ * Legacy alias retained for any external consumer. New code should prefer
+ * `ClaudeBaseReasoning` / `ClaudeTradeReasoning` directly.
+ */
+export type ClaudeReasoning = ClaudeTradeReasoning;
 
 /**
  * Full Claude analysis response for trade signals (LONG/SHORT)
@@ -51,9 +69,8 @@ export interface ClaudeTradeAnalysis {
   leverage: ClaudeLeverage;
   riskReward: number;
   summary: string;
-  reasoning: ClaudeReasoning;
+  reasoning: ClaudeTradeReasoning;
   warnings: string[];
-  conditionsMet: string;
 }
 
 /**
@@ -63,9 +80,8 @@ export interface ClaudeWaitAnalysis {
   action: 'WAIT';
   confidence: number;
   summary: string;
-  reasoning: ClaudeReasoning;
+  reasoning: ClaudeBaseReasoning;
   warnings: string[];
-  conditionsMet: string;
 }
 
 /**

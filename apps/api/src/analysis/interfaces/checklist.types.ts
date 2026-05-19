@@ -1,14 +1,16 @@
 /**
  * 5-Point Entry Checklist Types
  * Based on Miraj's trading strategy
- * Each condition scores 0 or 20 points, total 100 points max
- * Minimum 60 points (3/5 conditions) required for trade signal
+ * Tiered scoring system with dynamic relative thresholds
+ * Scoring tiers: WATCHING (0-39) | TACTICAL_SETUP (40-59) | STRATEGIC_TRADE (60-79) | APEX_SETUP (80-100)
  */
+
+export type ChecklistStatus = 'WATCHING' | 'TACTICAL_SETUP' | 'STRATEGIC_TRADE' | 'APEX_SETUP';
 
 export interface ChecklistCondition {
   name: string;
   passed: boolean;
-  score: 0 | 20;
+  score: number; // 0-20 (supports partial credit)
   value?: number | string;
   threshold?: string;
   reason: string;
@@ -54,6 +56,7 @@ export interface SupportResistanceConditionParams {
 export interface EntryChecklistParams {
   tradeType: 'long' | 'short';
   rsi: number;
+  rsiHistory?: number[]; // Last 100 RSI values for Z-score calculation
   qqeColor: 'green' | 'red' | 'neutral';
   previousQQEColor?: 'green' | 'red' | 'neutral';
   currentPrice: number;
@@ -68,7 +71,9 @@ export interface EntryChecklistParams {
     price: number;
     type: 'support' | 'resistance';
     strength: number;
+    volumeAtTouch?: number[]; // Volume at each test touch
   } | null;
+  volumeAtNearestLevel?: number; // Current volume for volume confirmation
 }
 
 export interface EntryChecklistResult {
@@ -82,7 +87,8 @@ export interface EntryChecklistResult {
   // Summary
   totalScore: number; // 0-100
   conditionsMet: number; // 0-5
-  passed: boolean; // totalScore >= 60
+  status: ChecklistStatus; // WATCHING | TACTICAL_SETUP | STRATEGIC_TRADE | APEX_SETUP
+  passed: boolean; // true if status !== 'WATCHING'
   tradeType: 'long' | 'short';
 
   // All conditions as array for iteration
@@ -90,21 +96,25 @@ export interface EntryChecklistResult {
 }
 
 /**
- * RSI Thresholds for entry conditions
+ * RSI Thresholds for entry conditions (with dynamic relative bands)
  */
 export const RSI_ENTRY_THRESHOLDS = {
   LONG: {
-    MIN: 15,
-    MAX: 35,
-    EXTREME_MIN: 15,
-    EXTREME_MAX: 20,
+    STRICT_MAX: 40,      // RSI must be <= 40 OR meet Z-score criterion
+    ZSCORE_THRESHOLD: -1.5, // 1.5 std dev below 100-period MA
   },
   SHORT: {
-    MIN: 65,
-    MAX: 85,
-    EXTREME_MIN: 80,
-    EXTREME_MAX: 95,
+    STRICT_MIN: 60,      // RSI must be >= 60 OR meet Z-score criterion
+    ZSCORE_THRESHOLD: 1.5,  // 1.5 std dev above 100-period MA
   },
+} as const;
+
+/**
+ * RSI Z-score constants
+ */
+export const RSI_ZSCORE_CONFIG = {
+  LOOKBACK_PERIOD: 100,  // 100-period MA for relative calculation
+  STD_DEV_THRESHOLD: 1.5, // 1.5 standard deviations
 } as const;
 
 /**
@@ -116,9 +126,25 @@ export const BB_THRESHOLDS = {
 } as const;
 
 /**
- * Support/Resistance thresholds
+ * Support/Resistance thresholds (with partial credit)
  */
 export const SR_THRESHOLDS = {
-  PROXIMITY_PERCENT: 2, // Within 2% of level
-  MIN_TESTS: 3, // Minimum tests for strong level
+  // Full credit (20 points)
+  STRONG_PROXIMITY_PERCENT: 2, // Within 2% of level
+  STRONG_MIN_TESTS: 3,         // Minimum 3 touches
+
+  // Partial credit (15 points)
+  PARTIAL_PROXIMITY_PERCENT: 1.5, // Within 1.5% of level
+  PARTIAL_MIN_TESTS: 2,           // Exactly 2 touches
+  PARTIAL_VOLUME_MULTIPLIER: 1.2, // 2nd touch must be above-average volume
+} as const;
+
+/**
+ * Checklist scoring tiers
+ */
+export const CHECKLIST_SCORE_TIERS = {
+  WATCHING: { min: 0, max: 39 },
+  TACTICAL_SETUP: { min: 40, max: 59 },
+  STRATEGIC_TRADE: { min: 60, max: 79 },
+  APEX_SETUP: { min: 80, max: 100 },
 } as const;

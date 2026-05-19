@@ -29,39 +29,49 @@ export class PerformanceService {
   async calculatePerformance(
     analyses: TradeAnalysis[],
   ): Promise<AnalysisWithPerformance[]> {
-    const results: AnalysisWithPerformance[] = [];
-    const priceCache = new Map<string, number | null>();
+    if (analyses.length === 0) {
+      return [];
+    }
 
-    for (const analysis of analyses) {
-      let currentPrice = priceCache.get(analysis.coin);
+    // ─── Batch price resolution ──────────────────────────────────────
+    // Deduplicate coins so we issue at most one network call per symbol,
+    // then resolve them all concurrently. A rejected fetch maps to
+    // `null` so a single failing symbol cannot fail the whole batch.
+    const uniqueCoins = [...new Set(analyses.map((a) => a.coin))];
 
-      if (currentPrice === undefined) {
-        try {
-          currentPrice = await this.binanceService.getCurrentPrice(analysis.coin);
-          priceCache.set(analysis.coin, currentPrice);
-        } catch {
-          priceCache.set(analysis.coin, null);
-          currentPrice = null;
-        }
-      }
+    const priceResults = await Promise.all(
+      uniqueCoins.map((coin) =>
+        this.binanceService
+          .getCurrentPrice(coin)
+          .then((price) => [coin, price] as const)
+          .catch(() => [coin, null] as const),
+      ),
+    );
+
+    const priceMap = new Map<string, number | null>(priceResults);
+
+    // ─── O(1) lookup per analysis — no I/O inside the loop ───────────
+    return analyses.map((analysis) => {
+      const currentPrice = priceMap.get(analysis.coin) ?? null;
 
       const status = this.determineStatus(analysis, currentPrice);
-      const priceChange = currentPrice !== null ? currentPrice - analysis.priceAtAnalysis : null;
+      const priceChange =
+        currentPrice !== null ? currentPrice - analysis.priceAtAnalysis : null;
       const priceChangePercent =
         currentPrice !== null && analysis.priceAtAnalysis > 0
-          ? ((currentPrice - analysis.priceAtAnalysis) / analysis.priceAtAnalysis) * 100
+          ? ((currentPrice - analysis.priceAtAnalysis) /
+              analysis.priceAtAnalysis) *
+            100
           : null;
 
-      results.push({
+      return {
         ...analysis,
         currentPrice,
         status,
         priceChange,
         priceChangePercent,
-      });
-    }
-
-    return results;
+      };
+    });
   }
 
   private determineStatus(

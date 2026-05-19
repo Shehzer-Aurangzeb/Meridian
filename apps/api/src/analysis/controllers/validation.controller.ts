@@ -1,114 +1,158 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
-import { BinanceService } from '../../market-data/market-data.service';
-import { IndicatorsService } from '../../indicators/indicators.service';
-import { TimeInterval } from '../../common/types/candle.types';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+} from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 
+const COIN_PATTERN = /^[A-Z0-9]{2,15}$/;
+
+@ApiTags('validation')
 @Controller('analysis/validate')
 export class ValidationController {
-  constructor(
-    private readonly binanceService: BinanceService,
-    private readonly indicatorsService: IndicatorsService,
-  ) {}
+  constructor(private readonly prismaService: PrismaService) {}
 
   /**
-   * Validate Indicators Against TradingView
-   * Returns calculated indicator values for manual comparison
+   * Summary validation profile for recent historical trade triggers.
+   * Aggregates CoordinatorRun records (per-symbol) for the FE validation panel.
    */
   @Get(':coin')
-  async validateIndicators(
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Summary validation profile for recent triggers of an asset',
+    description:
+      'Aggregates the most recent CoordinatorRun records for the given coin: ' +
+      'counts by AI action, average confidence, average duration, error rate, ' +
+      'and a compact list of the latest triggers.',
+  })
+  @ApiParam({ name: 'coin', example: 'BTC' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    example: 100,
+    description: 'Window size of recent runs to summarise (1-500).',
+  })
+  @ApiResponse({ status: 200, description: 'Validation profile returned.' })
+  @ApiResponse({ status: 400, description: 'Invalid coin or limit.' })
+  @ApiResponse({ status: 404, description: 'No runs found for symbol.' })
+  async validateRecentTriggers(
     @Param('coin') coin: string,
-    @Query('timeframe') timeframe: string = '1d',
+    @Query('limit') limitRaw?: string,
   ) {
+    const symbol = (coin ?? '').trim().toUpperCase();
+    if (!COIN_PATTERN.test(symbol)) {
+      throw new HttpException('Invalid coin symbol', HttpStatus.BAD_REQUEST);
+    }
+
+    const limit = this.parseLimit(limitRaw);
+
     try {
-      const symbol = `${coin.toUpperCase()}USDT`;
-      const tf = (timeframe || '1d') as TimeInterval;
+      const where: Prisma.CoordinatorRunWhereInput = { symbol };
+      const runs = await this.prismaService.coordinatorRun.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          timeframe: true,
+          regime: true,
+          strategyRoute: true,
+          checklistStatus: true,
+          totalScore: true,
+          shouldInvokeAI: true,
+          aiAction: true,
+          aiConfidence: true,
+          durationMs: true,
+          errorMessage: true,
+          createdAt: true,
+        },
+      });
 
-      const candles = await this.binanceService.getCandles(symbol, tf, 100);
+      if (runs.length === 0) {
+        throw new HttpException(
+          `No runs found for ${symbol}`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
 
-      const closePrices = candles.map((c) => c.close);
-      const highPrices = candles.map((c) => c.high);
-      const lowPrices = candles.map((c) => c.low);
+      const actionCounts: Record<string, number> = {};
+      const regimeCounts: Record<string, number> = {};
+      const routeCounts: Record<string, number> = {};
+      let aiInvocations = 0;
+      let errorCount = 0;
+      let durationSum = 0;
+      let confidenceSum = 0;
+      let confidenceCount = 0;
 
-      const rsi = this.indicatorsService.calculateRSI(closePrices, 14);
-      const bb = this.indicatorsService.calculateBollingerBands(closePrices, 20, 2);
-      const atr = this.indicatorsService.calculateATR(highPrices, lowPrices, closePrices, 14);
-      const qqe = this.indicatorsService.calculateQQE(closePrices, 14);
-      const bandWidth = this.indicatorsService.calculateBandWidth(bb);
-
-      const last20Closes = closePrices.slice(-20);
-      const manualSMA = last20Closes.reduce((a, b) => a + b, 0) / 20;
-
-      const lastCandle = candles[candles.length - 1];
-      const currentPrice = lastCandle.close;
+      for (const run of runs) {
+        const action = run.aiAction ?? 'NONE';
+        actionCounts[action] = (actionCounts[action] ?? 0) + 1;
+        regimeCounts[run.regime] = (regimeCounts[run.regime] ?? 0) + 1;
+        routeCounts[run.strategyRoute] =
+          (routeCounts[run.strategyRoute] ?? 0) + 1;
+        if (run.shouldInvokeAI) aiInvocations++;
+        if (run.errorMessage) errorCount++;
+        durationSum += run.durationMs;
+        if (run.aiConfidence !== null) {
+          confidenceSum += run.aiConfidence;
+          confidenceCount++;
+        }
+      }
 
       return {
         success: true,
         data: {
           symbol,
-          timeframe: tf,
-          candleCount: candles.length,
-          lastCandle: {
-            time: lastCandle.time,
-            open: lastCandle.open,
-            high: lastCandle.high,
-            low: lastCandle.low,
-            close: lastCandle.close,
-            volume: lastCandle.volume,
+          window: runs.length,
+          summary: {
+            actionCounts,
+            regimeCounts,
+            routeCounts,
+            aiInvocationRate: round(aiInvocations / runs.length),
+            errorRate: round(errorCount / runs.length),
+            avgDurationMs: Math.round(durationSum / runs.length),
+            avgAiConfidence:
+              confidenceCount > 0
+                ? round(confidenceSum / confidenceCount)
+                : null,
           },
-          indicators: {
-            rsi: {
-              value: Number(rsi.toFixed(2)),
-              period: 14,
-              description: 'RSI(14) - Compare with TradingView RSI indicator',
-            },
-            bollingerBands: {
-              upper: Number(bb.upper.toFixed(2)),
-              middle: Number(bb.middle.toFixed(2)),
-              lower: Number(bb.lower.toFixed(2)),
-              period: 20,
-              stdDev: 2,
-              description: 'BB(20,2) - Compare with TradingView Bollinger Bands',
-            },
-            atr: {
-              value: Number(atr.toFixed(2)),
-              period: 14,
-              description: 'ATR(14) - Compare with TradingView ATR indicator',
-            },
-            qqe: {
-              color: qqe.color,
-              value: Number(qqe.value.toFixed(2)),
-              trend: qqe.trend,
-              previousColor: qqe.previousColor,
-              description: 'QQE Mod - Custom indicator based on smoothed RSI',
-            },
-            bandWidth: {
-              value: Number(bandWidth.toFixed(2)),
-              description: 'Bollinger Band Width as percentage',
-            },
-          },
-          verification: {
-            manualSMA20: Number(manualSMA.toFixed(2)),
-            bbMiddleMatchesSMA: Math.abs(bb.middle - manualSMA) < 0.01,
-            currentPrice: Number(currentPrice.toFixed(2)),
-          },
-          instructions: [
-            '1. Open TradingView and load ' + symbol + ' chart',
-            '2. Set timeframe to ' + tf,
-            '3. Add RSI(14) indicator and compare with rsi.value above',
-            '4. Add Bollinger Bands(20,2) and compare with bollingerBands values',
-            '5. Add ATR(14) and compare with atr.value above',
-            '6. Document any differences in INDICATOR_VALIDATION.md',
-          ],
+          recentTriggers: runs,
         },
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       const message =
-        error instanceof Error ? error.message : 'Indicator validation failed';
-      return {
-        success: false,
-        error: message,
-      };
+        error instanceof Error ? error.message : 'Validation summary failed';
+      throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  private parseLimit(raw?: string): number {
+    if (raw === undefined || raw === '') return 100;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 500) {
+      throw new HttpException(
+        'Invalid limit. Must be an integer between 1 and 500.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return parsed;
+  }
+}
+
+function round(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
