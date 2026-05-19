@@ -5,6 +5,7 @@ import { ClaudeService } from '../../ai/ai.service';
 import { PositionSizingService } from '../../risk-management/services/position-sizing.service';
 import { LeverageService } from '../../risk-management/services/leverage.service';
 import { BinanceService } from '../../market-data/market-data.service';
+import { CacheTelemetryService } from '../../market-data/cache-telemetry.service';
 import {
   CompleteAnalysisRequest,
   CompleteAnalysisResponse,
@@ -25,6 +26,7 @@ export class CompleteAnalysisService {
     private readonly positionSizingService: PositionSizingService,
     private readonly leverageService: LeverageService,
     private readonly binanceService: BinanceService,
+    private readonly cacheTelemetry: CacheTelemetryService,
   ) {}
 
   /**
@@ -32,6 +34,28 @@ export class CompleteAnalysisService {
    * Coordinates all services to produce complete analysis
    */
   async analyzeComplete(
+    request: CompleteAnalysisRequest,
+  ): Promise<CompleteAnalysisResponse> {
+    const { value, stats } = await this.cacheTelemetry.run(() =>
+      this.analyzeCompleteInner(request),
+    );
+    const totalLookups = stats.hits + stats.misses;
+    const cacheHit = stats.hits > 0;
+    const dataFreshness =
+      totalLookups === 0
+        ? 'Real-time'
+        : stats.misses === 0
+          ? 'Fully cached'
+          : cacheHit
+            ? `Partial cache (${stats.hits}/${totalLookups})`
+            : 'Real-time';
+    return {
+      ...value,
+      meta: { ...value.meta, cacheHit, dataFreshness },
+    };
+  }
+
+  private async analyzeCompleteInner(
     request: CompleteAnalysisRequest,
   ): Promise<CompleteAnalysisResponse> {
     const startTime = Date.now();
@@ -194,7 +218,8 @@ export class CompleteAnalysisService {
         summary,
         meta: {
           processingTimeMs: processingTime,
-          cacheHit: false, // TODO: Set based on actual cache usage
+          // Overridden by analyzeComplete() wrapper based on actual cache stats.
+          cacheHit: false,
           dataFreshness: 'Real-time',
         },
       };

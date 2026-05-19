@@ -1,6 +1,5 @@
 import * as dotenv from 'dotenv';
 
-// Load environment variables based on NODE_ENV
 const env = process.env.NODE_ENV ?? 'local';
 dotenv.config({ path: `.env.${env}` });
 
@@ -13,7 +12,6 @@ import { PerformanceInterceptor } from './common/interceptors/performance.interc
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable global validation
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -22,26 +20,34 @@ async function bootstrap() {
     }),
   );
 
-  // Enable performance monitoring
   app.useGlobalInterceptors(new PerformanceInterceptor());
 
-  // Enable CORS for frontend communication
+  // CORS — env-driven, comma-separated. Required for SSE EventSource.
+  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: 'http://localhost:3000',
+    origin: corsOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Cache-Control'],
+    exposedHeaders: ['Content-Type', 'X-Request-Id'],
+    maxAge: 86_400,
   });
 
-  // Setup Swagger documentation
   const config = new DocumentBuilder()
     .setTitle('Meridian API')
     .setDescription('Trading analysis API with AI-powered insights')
     .setVersion('1.0')
     .addTag('health', 'Health check endpoints')
     .addTag('analysis', 'Market analysis endpoints')
+    .addTag('analysis-coordinator', 'Strategy coordination & SSE streaming')
     .addTag('risk-management', 'Risk management calculations')
     .addTag('performance', 'Performance tracking')
     .build();
-  
+
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document, {
     jsonDocumentUrl: 'docs-json',

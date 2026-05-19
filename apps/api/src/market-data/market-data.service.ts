@@ -3,6 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import axios from 'axios';
 import { Candle, TimeInterval } from '../common/types/candle.types';
+import { CacheTelemetryService } from './cache-telemetry.service';
 
 @Injectable()
 export class BinanceService {
@@ -20,6 +21,7 @@ export class BinanceService {
 
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly cacheTelemetry: CacheTelemetryService,
   ) {}
 
   /**
@@ -40,10 +42,12 @@ export class BinanceService {
     const cached = await this.cacheManager.get<Candle[]>(cacheKey);
     if (cached) {
       this.logger.debug(`Cache HIT: ${cacheKey}`);
+      this.cacheTelemetry.recordHit();
       return this.deserializeCandles(cached);
     }
 
     this.logger.debug(`Cache MISS: ${cacheKey}`);
+    this.cacheTelemetry.recordMiss();
 
     // Fetch from Binance with retry; fall back to stale cache on total failure
     const staleCacheKey = `stale:candles:${tradingPair}:${interval}:${limit}`;
@@ -77,10 +81,12 @@ export class BinanceService {
     const cached = await this.cacheManager.get<number>(cacheKey);
     if (cached !== undefined && cached !== null) {
       this.logger.debug(`Price cache HIT: ${tradingPair}`);
+      this.cacheTelemetry.recordHit();
       return cached;
     }
 
     this.logger.debug(`Price cache MISS: ${tradingPair}`);
+    this.cacheTelemetry.recordMiss();
 
     // Fetch from Binance
     const price = await this.fetchPriceFromBinance(tradingPair);
@@ -92,18 +98,20 @@ export class BinanceService {
   }
 
   /**
-   * Generate cache key for candles
-   * Includes time bucket to ensure cache invalidates every 5 minutes
+   * Generate a deterministic cache key for a candle request.
+   *
+   * The key intentionally contains ONLY the request parameters so it can
+   * be reused by every identical call. Expiry is owned exclusively by the
+   * global `CacheModule` TTL configuration — adding an artificial time
+   * bucket here would short-circuit that TTL and cause spurious misses
+   * around bucket boundaries.
    */
   private generateCandleCacheKey(
     symbol: string,
     interval: string,
     limit: number,
   ): string {
-    // Round to 5-minute buckets for cache key
-    const now = Date.now();
-    const timeBucket = Math.floor(now / (5 * 60 * 1000));
-    return `candles:${symbol}:${interval}:${limit}:${timeBucket}`;
+    return `candles:${symbol.toUpperCase()}:${interval}:${limit}`;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { ClaudePromptService, PromptData } from './ai-prompt.service';
 import { MultiTimeframeAnalysisResult, HTFBiasResult, LTFEntryResult, TimeframeAnalysis } from '../analysis/interfaces/multi-timeframe.types';
-import { EntryChecklistResult, ChecklistCondition } from '../analysis/interfaces/checklist.types';
+import { EntryChecklistResult, ChecklistCondition, ChecklistStatus } from '../analysis/interfaces/checklist.types';
 import { SupportResistanceLevel } from '../analysis/interfaces/support-resistance.types';
 
 describe('ClaudePromptService', () => {
@@ -40,6 +40,15 @@ describe('ClaudePromptService', () => {
     const conditionsMet = conditionsPassed.filter(Boolean).length;
     const totalScore = conditionsMet * 20;
 
+    // Derive status from score to mirror ChecklistService.determineStatus tiers
+    const deriveStatus = (score: number): ChecklistStatus => {
+      if (score >= 80) return 'APEX_SETUP';
+      if (score >= 60) return 'STRATEGIC_TRADE';
+      if (score >= 40) return 'TACTICAL_SETUP';
+      return 'WATCHING';
+    };
+    const status = deriveStatus(totalScore);
+
     return {
       rsi: conditions[0],
       qqe: conditions[1],
@@ -48,7 +57,8 @@ describe('ClaudePromptService', () => {
       supportResistance: conditions[4],
       totalScore,
       conditionsMet,
-      passed: totalScore >= 60,
+      status,
+      passed: status !== 'WATCHING',
       tradeType,
       conditions,
     };

@@ -3,6 +3,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import { MarketData, TradeAnalysisResult, TradeAction } from '../analysis/interfaces/analysis.types';
 import { ClaudePromptService, PromptData } from './ai-prompt.service';
 import {
+  CoordinatorAnalysisResult,
+  StrategyRoute,
+} from '../analysis-coordinator/interfaces/coordinator.types';
+import {
   ClaudeAnalysisResponse,
   ClaudeTradeAnalysis,
   ClaudeWaitAnalysis,
@@ -25,26 +29,35 @@ export class ClaudeService {
   }
 
   /**
-   * Enhanced market analysis using multi-timeframe data and 5-point checklist
-   * @param data - Complete market data including MTF analysis and checklist
-   * @returns Structured trade analysis from Claude
+   * Enhanced market analysis using either the new CoordinatorAnalysisResult
+   * contract (preferred) or the legacy PromptData shape (deprecated).
+   *
+   * The method is fully fail-soft: any parse, validation, or API error
+   * results in a structured WAIT payload being returned so the caller's
+   * pipeline can continue executing without throwing.
+   *
+   * @param data - Coordinator result or legacy prompt data
+   * @returns Structured trade analysis from Claude (never throws)
    */
-  async analyzeWithChecklist(data: PromptData): Promise<ClaudeAnalysisResponse> {
-    const prompt = this.promptService.buildAnalysisPrompt(data);
+  async analyzeWithChecklist(
+    data: CoordinatorAnalysisResult | PromptData,
+  ): Promise<ClaudeAnalysisResponse> {
+    const strategyRoute = this.resolveStrategyRoute(data);
+    const symbol = this.resolveSymbol(data);
 
-    this.logger.log(`Sending enhanced analysis prompt to Claude...`);
-    this.logger.debug(`Prompt length: ${prompt.length} characters`);
+    const prompt = this.isCoordinatorResult(data)
+      ? this.promptService.buildAnalysisPrompt(data)
+      : this.promptService.buildAnalysisPrompt(data);
+
+    this.logger.log(
+      `Sending Claude prompt | symbol=${symbol} | route=${strategyRoute} | length=${prompt.length}`,
+    );
 
     try {
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 8000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
+        messages: [{ role: 'user', content: prompt }],
       });
 
       const textContent = response.content.find((block) => block.type === 'text');
@@ -52,26 +65,58 @@ export class ClaudeService {
         throw new Error('No text response from Claude');
       }
 
-      // Parse and validate the response
       const analysis = this.parseEnhancedResponse(textContent.text);
-      this.validateClaudeResponse(analysis);
+      this.validateClaudeResponse(analysis, strategyRoute);
 
       this.logger.log(
-        `Claude analysis complete: ${analysis.action} (${analysis.confidence}% confidence)`,
+        `Claude analysis complete | symbol=${symbol} | route=${strategyRoute} | action=${analysis.action} | confidence=${analysis.confidence}%`,
       );
 
       return analysis;
     } catch (error) {
-      if (error instanceof Anthropic.APIError) {
-        this.logger.error(`Claude API error: ${error.message}`);
-        throw new Error(`Claude API error: ${error.message}`);
-      }
-      if (error instanceof ClaudeResponseValidationError) {
-        this.logger.error(`Validation error: ${error.message}`);
-        throw error;
-      }
-      throw error;
+      return this.buildFallbackWait(error, symbol, strategyRoute);
     }
+  }
+
+  /**
+   * Build a structured WAIT payload when the upstream call fails for any
+   * reason. Logs descriptive tracking info so failures remain observable.
+   */
+  private buildFallbackWait(
+    error: unknown,
+    symbol: string,
+    strategyRoute: StrategyRoute,
+  ): ClaudeWaitAnalysis {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    if (error instanceof Anthropic.APIError) {
+      this.logger.error(
+        `Claude API failure | symbol=${symbol} | route=${strategyRoute} | status=${error.status} | message=${error.message}`,
+      );
+    } else if (error instanceof ClaudeResponseValidationError) {
+      this.logger.error(
+        `Claude validation failure | symbol=${symbol} | route=${strategyRoute} | field=${error.field} | value=${JSON.stringify(error.receivedValue)} | message=${error.message}`,
+      );
+    } else {
+      this.logger.error(
+        `Claude pipeline failure | symbol=${symbol} | route=${strategyRoute} | message=${message}`,
+      );
+    }
+
+    return {
+      action: 'WAIT',
+      confidence: 0,
+      summary: `AI analysis unavailable for ${symbol} on ${strategyRoute} route — defaulting to WAIT.`,
+      reasoning: {
+        strategyAnalysis: `Pipeline error: ${message}`,
+        regimeContext: 'Not evaluated due to upstream failure.',
+        keyLevels: 'Not evaluated due to upstream failure.',
+      },
+      warnings: [
+        'AI pipeline returned a synthetic WAIT payload.',
+        'Do NOT use this response to enter a trade.',
+      ],
+    };
   }
 
   /**
@@ -103,10 +148,22 @@ export class ClaudeService {
   }
 
   /**
-   * Validate Claude's response structure and values
+   * Validate Claude's response structure and values, with route-aware rules.
+   *
+   * - WAIT: requires `summary`, `confidence`, and a descriptive `reasoning`
+   *   block. Does NOT enforce the "X/5" conditionsMet format (a squeeze
+   *   breakout WAIT has no checklist).
+   * - LONG / SHORT on SQUEEZE_BREAKOUT: validates entry, stop loss, take
+   *   profits, leverage, risk/reward. The reasoning block must reflect the
+   *   volatility breakout context (keyLevels must be present).
+   * - LONG / SHORT on CONFLUENCE_CHECKLIST: full trade validation PLUS the
+   *   strict "X/5" conditionsMet format.
    */
-  validateClaudeResponse(response: ClaudeAnalysisResponse): void {
-    // Check required fields
+  validateClaudeResponse(
+    response: ClaudeAnalysisResponse,
+    strategyRoute: StrategyRoute = 'CONFLUENCE_CHECKLIST',
+  ): void {
+    // --- Shared field validation -------------------------------------------
     if (!response.action || !['LONG', 'SHORT', 'WAIT'].includes(response.action)) {
       throw new ClaudeResponseValidationError(
         'Invalid or missing action',
@@ -135,22 +192,83 @@ export class ClaudeService {
       );
     }
 
-    if (!response.conditionsMet || typeof response.conditionsMet !== 'string') {
-      throw new ClaudeResponseValidationError(
-        'Missing or invalid conditionsMet',
-        'conditionsMet',
-        response.conditionsMet,
-      );
-    }
+    this.validateReasoningBlock(response);
 
-    // If LONG/SHORT, validate trade-specific fields
+    // --- Route-specific validation ----------------------------------------
     if (isTradeSignal(response)) {
       this.validateTradeResponse(response);
+
+      if (strategyRoute === 'SQUEEZE_BREAKOUT') {
+        this.validateSqueezeBreakoutReasoning(response);
+      }
     }
   }
 
   /**
-   * Validate trade-specific response fields
+   * Validate the structured reasoning block is present and descriptive.
+   *
+   * Aligned with the schemas emitted by
+   * `ClaudePromptService.buildCoordinatorOutputSchema`:
+   *  - Every response must carry `strategyAnalysis`, `regimeContext`,
+   *    `keyLevels` (base reasoning block).
+   *  - Trade signals (LONG / SHORT) additionally require `invalidation`
+   *    and `risks`.
+   *  - WAIT signals legitimately omit `invalidation` / `risks`.
+   */
+  private validateReasoningBlock(response: ClaudeAnalysisResponse): void {
+    const reasoning = response.reasoning as unknown as
+      | Record<string, unknown>
+      | undefined;
+    if (!reasoning || typeof reasoning !== 'object') {
+      throw new ClaudeResponseValidationError(
+        'Missing or invalid reasoning block',
+        'reasoning',
+        reasoning,
+      );
+    }
+
+    const baseFields = ['strategyAnalysis', 'regimeContext', 'keyLevels'];
+    const tradeFields = isTradeSignal(response)
+      ? ['invalidation', 'risks']
+      : [];
+
+    for (const field of [...baseFields, ...tradeFields]) {
+      const value = reasoning[field];
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new ClaudeResponseValidationError(
+          `Reasoning block missing descriptive "${field}"`,
+          `reasoning.${field}`,
+          value,
+        );
+      }
+    }
+  }
+
+  /**
+   * Verify that a SQUEEZE_BREAKOUT trade response anchors its reasoning in
+   * the volatility breakout context (key levels / trigger zone must be
+   * referenced in the reasoning block).
+   */
+  private validateSqueezeBreakoutReasoning(response: ClaudeTradeAnalysis): void {
+    const keyLevels = response.reasoning?.keyLevels?.toLowerCase() ?? '';
+    const hasBreakoutContext =
+      keyLevels.includes('breakout') ||
+      keyLevels.includes('squeeze') ||
+      keyLevels.includes('trigger') ||
+      keyLevels.includes('compression') ||
+      keyLevels.includes('volatility');
+
+    if (!hasBreakoutContext) {
+      throw new ClaudeResponseValidationError(
+        'SQUEEZE_BREAKOUT reasoning must reference breakout/squeeze/trigger context',
+        'reasoning.keyLevels',
+        response.reasoning?.keyLevels,
+      );
+    }
+  }
+
+  /**
+   * Validate trade-specific response fields (entry, stop loss, TPs, leverage, R:R).
    */
   private validateTradeResponse(response: ClaudeTradeAnalysis): void {
     // Entry validation
@@ -172,7 +290,11 @@ export class ClaudeService {
     }
 
     // Take profit validation
-    if (!response.takeProfit?.tp1?.price || !response.takeProfit?.tp2?.price || !response.takeProfit?.tp3?.price) {
+    if (
+      !response.takeProfit?.tp1?.price ||
+      !response.takeProfit?.tp2?.price ||
+      !response.takeProfit?.tp3?.price
+    ) {
       throw new ClaudeResponseValidationError(
         'Missing take profit levels',
         'takeProfit',
@@ -197,6 +319,41 @@ export class ClaudeService {
         response.riskReward,
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Input discrimination helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Discriminate between the new CoordinatorAnalysisResult contract and the
+   * legacy PromptData shape using the unique `strategyRoute` field.
+   */
+  private isCoordinatorResult(
+    input: CoordinatorAnalysisResult | PromptData,
+  ): input is CoordinatorAnalysisResult {
+    return (
+      typeof (input as CoordinatorAnalysisResult).strategyRoute === 'string' &&
+      typeof (input as CoordinatorAnalysisResult).symbol === 'string'
+    );
+  }
+
+  /**
+   * Resolve the active strategy route for downstream validation. Legacy
+   * PromptData callers always validate as CONFLUENCE_CHECKLIST.
+   */
+  private resolveStrategyRoute(
+    input: CoordinatorAnalysisResult | PromptData,
+  ): StrategyRoute {
+    return this.isCoordinatorResult(input) ? input.strategyRoute : 'CONFLUENCE_CHECKLIST';
+  }
+
+  /**
+   * Resolve a symbol identifier for logging and fallback payloads.
+   */
+  private resolveSymbol(input: CoordinatorAnalysisResult | PromptData): string {
+    if (this.isCoordinatorResult(input)) return input.symbol;
+    return (input as PromptData)?.coin ?? 'UNKNOWN';
   }
 
   /**

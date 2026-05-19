@@ -3,15 +3,18 @@ import {
   ChecklistCondition,
   EntryChecklistParams,
   EntryChecklistResult,
+  ChecklistStatus,
   RSI_ENTRY_THRESHOLDS,
+  RSI_ZSCORE_CONFIG,
   BB_THRESHOLDS,
   SR_THRESHOLDS,
+  CHECKLIST_SCORE_TIERS,
 } from '../interfaces/checklist.types';
 
 /**
  * ChecklistService implements Miraj's 5-Point Entry Checklist
- * Each condition scores 0 or 20 points, total 100 max
- * Minimum 60 points (3/5 conditions) required for trade signal
+ * Dynamic relative thresholds with tiered scoring output
+ * Scoring tiers: WATCHING (0-39) | TACTICAL_SETUP (40-59) | STRATEGIC_TRADE (60-79) | APEX_SETUP (80-100)
  */
 @Injectable()
 export class ChecklistService {
@@ -19,7 +22,7 @@ export class ChecklistService {
    * Evaluate all 5 checklist conditions
    */
   evaluateChecklist(params: EntryChecklistParams): EntryChecklistResult {
-    const rsi = this.evaluateRSI(params.tradeType, params.rsi);
+    const rsi = this.evaluateRSI(params.tradeType, params.rsi, params.rsiHistory);
     const qqe = this.evaluateQQE(
       params.tradeType,
       params.qqeColor,
@@ -39,11 +42,13 @@ export class ChecklistService {
       params.tradeType,
       params.currentPrice,
       params.nearestLevel,
+      params.volumeAtNearestLevel,
     );
 
     const conditions = [rsi, qqe, bollingerBand, marketStructure, supportResistance];
     const totalScore = conditions.reduce((sum, c) => sum + c.score, 0);
     const conditionsMet = conditions.filter((c) => c.passed).length;
+    const status = this.determineStatus(totalScore);
 
     return {
       rsi,
@@ -53,42 +58,112 @@ export class ChecklistService {
       supportResistance,
       totalScore,
       conditionsMet,
-      passed: totalScore >= 60,
+      status,
+      passed: status !== 'WATCHING',
       tradeType: params.tradeType,
       conditions,
     };
   }
 
   /**
-   * 1. RSI Condition (20 points)
-   * Long: RSI between 15-35 (best 15-20)
-   * Short: RSI between 65-85 (best 80-95)
+   * Determine tiered status based on total score
    */
-  private evaluateRSI(tradeType: 'long' | 'short', rsi: number): ChecklistCondition {
+  private determineStatus(score: number): ChecklistStatus {
+    if (score >= CHECKLIST_SCORE_TIERS.APEX_SETUP.min) return 'APEX_SETUP';
+    if (score >= CHECKLIST_SCORE_TIERS.STRATEGIC_TRADE.min) return 'STRATEGIC_TRADE';
+    if (score >= CHECKLIST_SCORE_TIERS.TACTICAL_SETUP.min) return 'TACTICAL_SETUP';
+    return 'WATCHING';
+  }
+
+  /**
+   * Calculate mean of an array
+   */
+  private calculateMean(values: number[]): number {
+    if (values.length === 0) return 0;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }
+
+  /**
+   * Calculate Z-score (how many standard deviations away from the mean).
+   *
+   * Single helper computes mean + variance in two linear passes instead
+   * of recomputing the mean inside a separate `calculateStdDev` call.
+   */
+  private calculateZScore(value: number, values: number[]): number {
+    const n = values.length;
+    if (n < 2) return 0;
+
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += values[i];
+    const mean = sum / n;
+
+    let varianceSum = 0;
+    for (let i = 0; i < n; i++) {
+      const d = values[i] - mean;
+      varianceSum += d * d;
+    }
+    const stdDev = Math.sqrt(varianceSum / n);
+
+    if (stdDev === 0) return 0;
+    return (value - mean) / stdDev;
+  }
+
+  /**
+   * 1. RSI Condition (20 points) - Dynamic Relative Thresholds
+   *
+   * LONG: RSI <= 40 OR RSI Z-Score <= -1.5 (at least 1.5 std dev BELOW 100-period MA)
+   * SHORT: RSI >= 60 OR RSI Z-Score >= 1.5 (at least 1.5 std dev ABOVE 100-period MA)
+   *
+   * If rsiHistory is not provided, falls back to strict thresholds.
+   */
+  private evaluateRSI(
+    tradeType: 'long' | 'short',
+    rsi: number,
+    rsiHistory?: number[],
+  ): ChecklistCondition {
     const thresholds = tradeType === 'long' 
       ? RSI_ENTRY_THRESHOLDS.LONG 
       : RSI_ENTRY_THRESHOLDS.SHORT;
 
-    const inRange = rsi >= thresholds.MIN && rsi <= thresholds.MAX;
-    const inExtremeRange =
-      rsi >= thresholds.EXTREME_MIN && rsi <= thresholds.EXTREME_MAX;
+    let meetsRelativeCriterion = false;
+    let zScore: number | null = null;
+
+    // Try to calculate Z-score if history available
+    if (rsiHistory && rsiHistory.length >= RSI_ZSCORE_CONFIG.LOOKBACK_PERIOD) {
+      const recentHistory = rsiHistory.slice(-RSI_ZSCORE_CONFIG.LOOKBACK_PERIOD);
+      zScore = this.calculateZScore(rsi, recentHistory);
+
+      if (tradeType === 'long') {
+        meetsRelativeCriterion = zScore <= RSI_ENTRY_THRESHOLDS.LONG.ZSCORE_THRESHOLD;
+      } else {
+        meetsRelativeCriterion = zScore >= RSI_ENTRY_THRESHOLDS.SHORT.ZSCORE_THRESHOLD;
+      }
+    }
+
+    // Check strict threshold
+    const meetsStrictCriterion = tradeType === 'long'
+      ? rsi <= RSI_ENTRY_THRESHOLDS.LONG.STRICT_MAX
+      : rsi >= RSI_ENTRY_THRESHOLDS.SHORT.STRICT_MIN;
+
+    const passed = meetsStrictCriterion || meetsRelativeCriterion;
 
     let reason: string;
-    if (inExtremeRange) {
-      reason = `RSI at ${rsi.toFixed(1)} is in extreme ${tradeType === 'long' ? 'oversold' : 'overbought'} zone (ideal entry)`;
-    } else if (inRange) {
-      reason = `RSI at ${rsi.toFixed(1)} is in ${tradeType === 'long' ? 'oversold' : 'overbought'} zone`;
+    if (passed && meetsRelativeCriterion && zScore !== null) {
+      reason = `RSI ${rsi.toFixed(1)} meets Z-score criterion (${zScore.toFixed(2)} std dev ${tradeType === 'long' ? 'below' : 'above'} 100-MA, threshold ${thresholds.ZSCORE_THRESHOLD})`;
+    } else if (passed && meetsStrictCriterion) {
+      reason = `RSI ${rsi.toFixed(1)} is ${tradeType === 'long' ? `<= ${RSI_ENTRY_THRESHOLDS.LONG.STRICT_MAX} (oversold)` : `>= ${RSI_ENTRY_THRESHOLDS.SHORT.STRICT_MIN} (overbought)`}`;
     } else {
-      const zone = tradeType === 'long' ? 'oversold (15-35)' : 'overbought (65-85)';
-      reason = `RSI at ${rsi.toFixed(1)} is NOT in ${zone} zone`;
+      reason = `RSI ${rsi.toFixed(1)} does not meet relative thresholds for ${tradeType} entry`;
     }
 
     return {
       name: 'RSI Condition',
-      passed: inRange,
-      score: inRange ? 20 : 0,
-      value: rsi,
-      threshold: tradeType === 'long' ? '15-35 (best 15-20)' : '65-85 (best 80-95)',
+      passed,
+      score: passed ? 20 : 0,
+      value: zScore !== null ? `${rsi.toFixed(1)} (Z: ${zScore.toFixed(2)})` : rsi,
+      threshold: tradeType === 'long' 
+        ? `<= ${RSI_ENTRY_THRESHOLDS.LONG.STRICT_MAX} OR Z-Score <= ${RSI_ENTRY_THRESHOLDS.LONG.ZSCORE_THRESHOLD}`
+        : `>= ${RSI_ENTRY_THRESHOLDS.SHORT.STRICT_MIN} OR Z-Score >= ${RSI_ENTRY_THRESHOLDS.SHORT.ZSCORE_THRESHOLD}`,
       reason,
     };
   }
@@ -225,10 +300,17 @@ export class ChecklistService {
   }
 
   /**
-   * 5. Support/Resistance Confluence (20 points)
-   * Long: Price at major support (within 2%)
-   * Short: Price at major resistance (within 2%)
-   * Level must have 3+ tests (strong level)
+   * 5. Support/Resistance Confluence (20 or 15 points with partial credit)
+   *
+   * Full Credit (20 points):
+   *   - Price within 2% of level AND level has >= 3 tests
+   *
+   * Partial Credit (15 points):
+   *   - Price within 1.5% of level AND level has exactly 2 tests
+   *   AND second touch was on above-average volume
+   *
+   * No Credit (0 points):
+   *   - Otherwise
    */
   private evaluateSupportResistance(
     tradeType: 'long' | 'short',
@@ -237,7 +319,9 @@ export class ChecklistService {
       price: number;
       type: 'support' | 'resistance';
       strength: number;
+      volumeAtTouch?: number[];
     } | null,
+    volumeAtNearestLevel?: number,
   ): ChecklistCondition {
     if (!nearestLevel) {
       return {
@@ -245,7 +329,7 @@ export class ChecklistService {
         passed: false,
         score: 0,
         value: 'No level found',
-        threshold: `${tradeType === 'long' ? 'support' : 'resistance'} within ${SR_THRESHOLDS.PROXIMITY_PERCENT}%, ${SR_THRESHOLDS.MIN_TESTS}+ tests`,
+        threshold: `${tradeType === 'long' ? 'support' : 'resistance'} within 2% (full) or 1.5% (partial), 3+ tests (full) or 2 tests with vol (partial)`,
         reason: 'No significant support/resistance level identified nearby',
       };
     }
@@ -255,24 +339,45 @@ export class ChecklistService {
       (Math.abs(currentPrice - nearestLevel.price) / currentPrice) * 100;
 
     const isCorrectType = nearestLevel.type === requiredType;
-    const isNearby = distancePercent <= SR_THRESHOLDS.PROXIMITY_PERCENT;
-    const isStrong = nearestLevel.strength >= SR_THRESHOLDS.MIN_TESTS;
 
-    const passed = isCorrectType && isNearby && isStrong;
+    // Check for full credit (20 points)
+    const fullCreditProximity = distancePercent <= SR_THRESHOLDS.STRONG_PROXIMITY_PERCENT;
+    const fullCreditStrength = nearestLevel.strength >= SR_THRESHOLDS.STRONG_MIN_TESTS;
+    const meetsFullCredit = isCorrectType && fullCreditProximity && fullCreditStrength;
+
+    // Check for partial credit (15 points)
+    let meetsPartialCredit = false;
+    let volumeConfirmed = false;
+
+    if (!meetsFullCredit && isCorrectType) {
+      const partialProximity = distancePercent <= SR_THRESHOLDS.PARTIAL_PROXIMITY_PERCENT;
+      const exactlyTwoTests = nearestLevel.strength === SR_THRESHOLDS.PARTIAL_MIN_TESTS;
+
+      if (partialProximity && exactlyTwoTests && nearestLevel.volumeAtTouch && volumeAtNearestLevel) {
+        const avgVolume = this.calculateMean(nearestLevel.volumeAtTouch);
+        volumeConfirmed = volumeAtNearestLevel > avgVolume * SR_THRESHOLDS.PARTIAL_VOLUME_MULTIPLIER;
+        meetsPartialCredit = volumeConfirmed;
+      }
+    }
+
+    const score = meetsFullCredit ? 20 : meetsPartialCredit ? 15 : 0;
+    const passed = score > 0;
 
     let reason: string;
-    if (passed) {
-      reason = `Price is ${distancePercent.toFixed(2)}% from strong ${nearestLevel.type} (${nearestLevel.strength} tests)`;
+    if (meetsFullCredit) {
+      reason = `Price is ${distancePercent.toFixed(2)}% from strong ${requiredType} (${nearestLevel.strength} tests, full credit)`;
+    } else if (meetsPartialCredit) {
+      reason = `Price is ${distancePercent.toFixed(2)}% from ${requiredType} with volume confirmation (2 tests on elevated volume, partial credit 15 pts)`;
     } else {
       const issues: string[] = [];
       if (!isCorrectType) {
         issues.push(`level is ${nearestLevel.type} (need ${requiredType})`);
       }
-      if (!isNearby) {
-        issues.push(`${distancePercent.toFixed(2)}% away (need < ${SR_THRESHOLDS.PROXIMITY_PERCENT}%)`);
+      if (!fullCreditProximity && !meetsPartialCredit) {
+        issues.push(`${distancePercent.toFixed(2)}% away`);
       }
-      if (!isStrong) {
-        issues.push(`only ${nearestLevel.strength} tests (need ${SR_THRESHOLDS.MIN_TESTS}+)`);
+      if (!fullCreditStrength && nearestLevel.strength !== SR_THRESHOLDS.PARTIAL_MIN_TESTS) {
+        issues.push(`${nearestLevel.strength} tests`);
       }
       reason = `Level not ideal: ${issues.join(', ')}`;
     }
@@ -280,11 +385,11 @@ export class ChecklistService {
     return {
       name: 'Support/Resistance Confluence',
       passed,
-      score: passed ? 20 : 0,
+      score,
       value: nearestLevel
         ? `${nearestLevel.type} at ${nearestLevel.price.toFixed(2)} (${nearestLevel.strength} tests)`
         : 'None',
-      threshold: `${requiredType} within ${SR_THRESHOLDS.PROXIMITY_PERCENT}%, ${SR_THRESHOLDS.MIN_TESTS}+ tests`,
+      threshold: `${requiredType} within 2% (3+ tests, 20 pts) or 1.5% (2 tests + vol, 15 pts)`,
       reason,
     };
   }
@@ -293,18 +398,33 @@ export class ChecklistService {
    * Get a human-readable summary of the checklist
    */
   getSummary(result: EntryChecklistResult): string {
-    const status = result.passed ? '✅ PASSED' : '❌ NOT PASSED';
-    const action = result.passed ? result.tradeType.toUpperCase() : 'WAIT';
+    const statusEmoji = {
+      'WATCHING': '🔍',
+      'TACTICAL_SETUP': '⚡',
+      'STRATEGIC_TRADE': '✅',
+      'APEX_SETUP': '🎯',
+    };
+
+    const statusDescriptions = {
+      'WATCHING': 'Low-probability environment, preserve capital',
+      'TACTICAL_SETUP': 'Medium-probability, tight invalidation, lower leverage/sizing',
+      'STRATEGIC_TRADE': 'High-probability, standard rules apply',
+      'APEX_SETUP': 'Highest-probability confluence across structural layers',
+    };
+
+    const emoji = statusEmoji[result.status];
+    const description = statusDescriptions[result.status];
 
     const conditionLines = result.conditions
-      .map((c) => `  ${c.passed ? '✓' : '✗'} ${c.name}: ${c.reason}`)
+      .map((c) => `  ${c.passed ? '✓' : '✗'} ${c.name}: ${c.reason} (${c.score} pts)`)
       .join('\n');
 
     return `
-5-Point Entry Checklist: ${status}
+5-Point Entry Checklist: ${emoji} ${result.status}
+${description}
+
 Trade Type: ${result.tradeType.toUpperCase()}
 Score: ${result.totalScore}/100 (${result.conditionsMet}/5 conditions met)
-Recommended Action: ${action}
 
 Conditions:
 ${conditionLines}
