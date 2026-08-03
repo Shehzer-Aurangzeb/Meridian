@@ -19,18 +19,24 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 const COIN_PATTERN = /^[A-Z0-9]{2,15}$/;
 
+/**
+ * @deprecated Controller not consumed by frontend. Validation data is shown via history page.
+ * Retained for potential admin/debugging dashboards.
+ */
 @ApiTags('validation')
 @Controller('analysis/validate')
 export class ValidationController {
   constructor(private readonly prismaService: PrismaService) {}
 
   /**
+   * @deprecated Not consumed by frontend. Use history page instead.
    * Summary validation profile for recent historical trade triggers.
    * Aggregates CoordinatorRun records (per-symbol) for the FE validation panel.
    */
   @Get(':coin')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiOperation({
+    deprecated: true,
     summary: 'Summary validation profile for recent triggers of an asset',
     description:
       'Aggregates the most recent CoordinatorRun records for the given coin: ' +

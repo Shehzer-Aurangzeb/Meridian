@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { NAVIGATION, type NavItem } from '@/lib/navigation';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 
 
 function Brand() {
@@ -69,20 +70,34 @@ function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
 
 
 function UserProfile() {
+  const showSettings = isFeatureEnabled('SETTINGS');
+  
+  const content = (
+    <>
+      <div 
+        className="w-[34px] h-[34px] rounded-full shrink-0 grid place-items-center text-text-primary font-semibold text-[13px] font-inter"
+        style={{ background: 'linear-gradient(135deg, rgb(var(--gold-ink)), rgb(var(--gold-dark)))' }}
+      >
+        EM
+      </div>
+      <div className="flex flex-col min-w-0">
+        <span className="text-[13px] text-sidebar-text font-medium truncate">Elena Marchetti</span>
+        <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Atelier · Pro</span>
+      </div>
+    </>
+  );
+  
   return (
     <div className="mt-auto pt-6 px-7 border-t border-gold/[0.08]">
-      <Link href="/settings" className="flex items-center gap-3 no-underline">
-        <div 
-          className="w-[34px] h-[34px] rounded-full shrink-0 grid place-items-center text-text-primary font-semibold text-[13px] font-inter"
-          style={{ background: 'linear-gradient(135deg, rgb(var(--gold-ink)), rgb(var(--gold-dark)))' }}
-        >
-          EM
+      {showSettings ? (
+        <Link href="/settings" className="flex items-center gap-3 no-underline">
+          {content}
+        </Link>
+      ) : (
+        <div className="flex items-center gap-3">
+          {content}
         </div>
-        <div className="flex flex-col min-w-0">
-          <span className="text-[13px] text-sidebar-text font-medium truncate">Elena Marchetti</span>
-          <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Atelier · Pro</span>
-        </div>
-      </Link>
+      )}
     </div>
   );
 }

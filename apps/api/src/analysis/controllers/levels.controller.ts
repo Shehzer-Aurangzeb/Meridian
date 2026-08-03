@@ -25,6 +25,10 @@ const COIN_PATTERN = /^[A-Z0-9]{2,15}$/;
 const ALLOWED_TIMEFRAMES: Timeframe[] = ['15m', '1h', '4h', '1d'];
 const ANALYSIS_CANDLE_LIMIT = 250;
 
+/**
+ * @deprecated Controller retained for potential future chart overlay features.
+ * Not currently consumed by the frontend. S/R data is embedded in coordinator pipeline responses.
+ */
 @ApiTags('levels')
 @Controller('analysis/levels')
 export class LevelsController {
@@ -35,12 +39,16 @@ export class LevelsController {
   ) {}
 
   /**
+   * @deprecated Not consumed by frontend. S/R is embedded in coordinator results.
    * Lightweight S/R list backed by stateless IndicatorsService.
    * Suitable for FE drawing tools that just need price levels.
    */
   @Get(':coin')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Get key support/resistance levels for an asset' })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get key support/resistance levels for an asset',
+  })
   @ApiParam({ name: 'coin', example: 'BTC' })
   @ApiQuery({
     name: 'timeframe',
@@ -106,11 +114,15 @@ export class LevelsController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Full S/R is embedded in coordinator results.
    * Full S/R analysis including Fibonacci and pivot levels.
    */
   @Get(':coin/full')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Get full S/R analysis (Fib + pivots + zones)' })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get full S/R analysis (Fib + pivots + zones)',
+  })
   @ApiParam({ name: 'coin', example: 'BTC' })
   @ApiQuery({ name: 'timeframe', required: false, enum: ALLOWED_TIMEFRAMES })
   @ApiResponse({ status: 200, type: SupportResistanceResponseDto })
@@ -140,11 +152,15 @@ export class LevelsController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Nearest levels embedded in coordinator results.
    * Nearest significant S/R level for quick UI hint.
    */
   @Get(':coin/nearest')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Get nearest support/resistance level' })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get nearest support/resistance level',
+  })
   @ApiParam({ name: 'coin', example: 'BTC' })
   @ApiQuery({
     name: 'type',

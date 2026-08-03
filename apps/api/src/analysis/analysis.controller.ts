@@ -37,8 +37,13 @@ export class AnalysisController {
     private readonly prismaService: PrismaService,
   ) {}
 
+  /** @deprecated Use POST /analysis-coordinator/coordinate or GET /analysis-coordinator/stream instead. */
   @Post('analyze')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Legacy single-pass analysis. Use /analysis-coordinator/coordinate.',
+  })
   async analyze(@Body() dto: AnalyzeRequestDto): Promise<AnalyzeResponseDto> {
     const { coin, timeframe = '4h' } = dto;
 
@@ -119,8 +124,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Use POST /analysis-coordinator/portfolio-scan or /coordinate instead. */
   @Post('multi-timeframe')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Legacy multi-timeframe analysis. Use /analysis-coordinator/portfolio-scan.',
+  })
   async analyzeMultiTimeframe(
     @Body() dto: MultiTimeframeAnalysisDto,
   ): Promise<MultiTimeframeResponseDto> {
@@ -142,8 +152,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Bias is now part of the coordinator regime classification. Use /analysis-coordinator/coordinate. */
   @Get('bias/:coin')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Use coordinator regime classification via /analysis-coordinator/coordinate.',
+  })
   async getQuickBias(
     @Param('coin') coin: string,
     @Query('tradeType') tradeType: 'swing' | 'day' | 'scalp' = 'day',
@@ -174,8 +189,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Coordinator pipeline now decides when to invoke AI. Use /analysis-coordinator/coordinate. */
   @Post('ai-analyze')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Use /analysis-coordinator/coordinate (AI is invoked conditionally).',
+  })
   async aiAnalyze(
     @Body() dto: MultiTimeframeAnalysisDto,
   ): Promise<{
@@ -247,8 +267,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Tied to the legacy prompt builder. No coordinator replacement; retained for offline inspection only. */
   @Post('test-prompt')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Legacy prompt-builder inspector. Retained for offline debugging only.',
+  })
   async testPrompt(
     @Body() dto: MultiTimeframeAnalysisDto,
   ): Promise<{
@@ -309,8 +334,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Use POST /analysis-coordinator/portfolio-scan (smart-TTL + risk sizing). */
   @Post('complete')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Use /analysis-coordinator/portfolio-scan instead.',
+  })
   async analyzeComplete(@Body() dto: CompleteAnalysisDto) {
     try {
       const result = await this.completeAnalysisService.analyzeComplete({
@@ -334,8 +364,13 @@ export class AnalysisController {
     }
   }
 
+  /** @deprecated Use POST /analysis-coordinator/coordinate. */
   @Post('quick')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Use /analysis-coordinator/coordinate.',
+  })
   async analyzeQuick(@Body() dto: QuickAnalysisDto) {
     try {
       const result = await this.completeAnalysisService.analyzeComplete({

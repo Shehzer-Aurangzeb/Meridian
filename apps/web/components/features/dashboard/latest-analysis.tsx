@@ -1,7 +1,12 @@
-import Link from 'next/link';
+'use client';
+
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Panel, PanelHead } from './panel';
+import { Skeleton } from '@/components/ui/skeleton';
+import { usePerformance } from '@/lib/hooks/use-performance';
+import { formatCurrency } from '@/lib/format';
+import type { PerformanceAnalysis } from '@/types';
 
 /**
  * Meta row for analysis details
@@ -37,46 +42,111 @@ function MetaRow({ items }: { items: MetaItem[] }) {
 }
 
 /**
- * Mock latest analysis data
+ * Loading skeleton
  */
-const MOCK_ANALYSIS = {
-  asset: 'BTC',
-  timeframe: '1D',
-  strategy: 'Mean-reversion',
-  time: '09:42 UTC',
-  direction: 'Long' as const,
-  confidence: 82,
-  meta: [
-    { label: 'Entry', value: '$43,250', variant: 'entry' as const },
-    { label: 'TP1', value: '$44,820', variant: 'default' as const },
-    { label: 'TP2', value: '$46,400', variant: 'default' as const },
-    { label: 'Stop', value: '$42,360', variant: 'stop' as const },
-  ],
-};
+function LatestAnalysisSkeleton() {
+  return (
+    <Panel>
+      <PanelHead title="Latest analysis" linkText="VIEW FULL →" linkHref="/analysis" />
+      <div className="p-6 md:p-8 flex flex-col gap-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Skeleton className="h-11 w-48 mb-2" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+          <Skeleton className="h-8 w-24 rounded-full" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-5 border-t border-border/10 dark:border-border">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i}>
+              <Skeleton className="h-3 w-12 mb-2" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * Empty state
+ */
+function EmptyState() {
+  return (
+    <Panel>
+      <PanelHead title="Latest analysis" linkText="RUN ANALYSIS →" linkHref="/analysis" />
+      <div className="p-6 md:p-8 text-center text-text-secondary">
+        <p>No analyses yet. Run your first analysis to see results here.</p>
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * Format analysis for display
+ */
+function formatAnalysis(analysis: PerformanceAnalysis) {
+  const timeAgo = new Date(analysis.createdAt).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  });
+
+  return {
+    asset: analysis.coin,
+    time: `${timeAgo} UTC`,
+    direction: analysis.suggestion as 'LONG' | 'SHORT' | 'WAIT',
+    status: analysis.status,
+    meta: [
+      { label: 'Entry', value: formatCurrency(analysis.entryPrice), variant: 'entry' as const },
+      { label: 'Current', value: analysis.currentPrice ? formatCurrency(analysis.currentPrice) : '—', variant: 'default' as const },
+      { label: 'Change', value: analysis.priceChangePercent ? `${analysis.priceChangePercent > 0 ? '+' : ''}${analysis.priceChangePercent.toFixed(2)}%` : '—', variant: 'default' as const },
+      { label: 'Stop', value: formatCurrency(analysis.stopLoss), variant: 'stop' as const },
+    ],
+  };
+}
 
 /**
  * Latest analysis panel
  */
 export function LatestAnalysis() {
-  const analysis = MOCK_ANALYSIS;
+  const { data, isLoading, error } = usePerformance();
+
+  if (isLoading) {
+    return <LatestAnalysisSkeleton />;
+  }
+
+  if (error || !data?.data?.recentAnalyses?.length) {
+    return <EmptyState />;
+  }
+
+  // Get the most recent non-WAIT analysis
+  const latestAnalysis = data.data.recentAnalyses.find(
+    (a) => a.suggestion !== 'WAIT'
+  ) || data.data.recentAnalyses[0];
+
+  const analysis = formatAnalysis(latestAnalysis);
+  const badgeType = analysis.direction === 'LONG' ? 'long' : analysis.direction === 'SHORT' ? 'short' : 'neutral';
 
   return (
     <Panel>
-      <PanelHead title="Latest analysis" linkText="VIEW FULL →" linkHref="/analysis" />
+      <PanelHead title="Latest analysis" linkText="VIEW FULL →" linkHref={`/analysis?coin=${analysis.asset}`} />
       
       <div className="p-6 md:p-8 flex flex-col gap-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="font-antonio text-[44px] font-bold tracking-[0.04em] uppercase leading-none">
-              {analysis.asset} · {analysis.timeframe}
+              {analysis.asset}
             </div>
             <div className="font-mono text-xs text-text-tertiary mt-1.5 tracking-[0.04em]">
-              {analysis.strategy} · {analysis.time}
+              {analysis.time}
             </div>
           </div>
-          <Badge type="long">
-            {analysis.direction} · {analysis.confidence}%
+          <Badge type={badgeType}>
+            {analysis.direction}
           </Badge>
         </div>
 

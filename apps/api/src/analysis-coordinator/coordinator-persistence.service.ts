@@ -15,6 +15,12 @@ export interface CoordinatorRunInput {
   aiResponse: ClaudeAnalysisResponse | null;
   durationMs: number;
   errorMessage?: string | null;
+  /**
+   * Optional smart-TTL expiry. When provided, persisted on the row so
+   * downstream consumers (UI countdown, cleanup jobs) can reason about
+   * signal freshness. Null/omitted ⇒ no TTL recorded.
+   */
+  expiresAt?: Date | null;
 }
 
 @Injectable()
@@ -79,7 +85,7 @@ export class CoordinatorPersistenceService {
   }
 
   private async write(input: CoordinatorRunInput): Promise<void> {
-    const { coordinatorResult, aiResponse, durationMs, errorMessage } = input;
+    const { coordinatorResult, aiResponse, durationMs, errorMessage, expiresAt } = input;
 
     await this.prisma.coordinatorRun.create({
       data: {
@@ -99,6 +105,7 @@ export class CoordinatorPersistenceService {
             : (aiResponse as unknown as Prisma.InputJsonValue),
         durationMs,
         errorMessage: errorMessage ?? null,
+        expiresAt: expiresAt ?? null,
       },
     });
   }
