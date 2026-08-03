@@ -45,13 +45,9 @@ export interface IndicatorContext {
   readonly rsi: number;
 
   /**
-   * Trailing closes used as the relative-momentum baseline for the
-   * checklist Z-score calculation. Length is up to 100.
-   *
-   * NOTE: This intentionally mirrors the legacy behaviour where the
-   * checklist input field named `rsiHistory` is fed with recent closes
-   * (not literal historical RSI values). Preserved verbatim to keep
-   * downstream math identical.
+   * Trailing RSI(14) values used as the relative-momentum baseline for the
+   * checklist Z-score calculation. Length is up to 100; the checklist falls
+   * back to strict RSI thresholds when fewer than 100 are available.
    */
   readonly rsiHistory: ReadonlyArray<number>;
 

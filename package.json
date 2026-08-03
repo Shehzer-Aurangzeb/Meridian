@@ -13,7 +13,9 @@
     "build:api": "pnpm --filter api build",
     "build:web": "pnpm --filter web build",
     "db:studio": "pnpm --filter api exec prisma studio",
-    "db:migrate": "pnpm --filter api exec prisma migrate dev"
+    "db:migrate": "pnpm --filter api exec prisma migrate dev",
+    "analyze": "pnpm --filter api analyze",
+    "backtest": "pnpm --filter api backtest"
   },
   "engines": {
     "node": ">=18.0.0",

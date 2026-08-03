@@ -68,7 +68,7 @@ export class ChecklistService {
   /**
    * Determine tiered status based on total score
    */
-  private determineStatus(score: number): ChecklistStatus {
+  protected determineStatus(score: number): ChecklistStatus {
     if (score >= CHECKLIST_SCORE_TIERS.APEX_SETUP.min) return 'APEX_SETUP';
     if (score >= CHECKLIST_SCORE_TIERS.STRATEGIC_TRADE.min) return 'STRATEGIC_TRADE';
     if (score >= CHECKLIST_SCORE_TIERS.TACTICAL_SETUP.min) return 'TACTICAL_SETUP';
@@ -89,7 +89,7 @@ export class ChecklistService {
    * Single helper computes mean + variance in two linear passes instead
    * of recomputing the mean inside a separate `calculateStdDev` call.
    */
-  private calculateZScore(value: number, values: number[]): number {
+  protected calculateZScore(value: number, values: number[]): number {
     const n = values.length;
     if (n < 2) return 0;
 
