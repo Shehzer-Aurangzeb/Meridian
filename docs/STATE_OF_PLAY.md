@@ -597,6 +597,153 @@ Note the §14 result (+0.117R, p=0.004) is a *degraded* version of this method �
 
 ---
 
+## 14c. ⛔ RETRACTION — §14 does not survive clustered inference, and is not reproducible
+
+*3 Aug 2026. External review (Kimi) flagged the independence assumption and the parameter count. Both objections land. Reproduce with the commands in this section — they are recorded here because §14's were not.*
+
+### Finding 1 — §14's exact configuration was never written down, and cannot be recovered
+
+Re-running 1d on the same 10 coins (`ARB,ADA,SOL,DOGE,BTC,ETH,LINK,XRP,AVAX,BNB`, `--limit 3300`) reproduces **nothing** in §14's table. Sweeping the stop width, which is the parameter §14's median cost of 0.006R implies was non-default:
+
+| `--atr` | trades | expectancy | median cost | avg hold |
+|---|---|---|---|---|
+| 1.5 (default) | 1482 | +0.065R | 0.015R | 12.0 bars |
+| 3 | 742 | **+0.194R** | 0.007R | 28.5 bars |
+| 4 | 619 | +0.147R | 0.006R | 34.6 bars |
+| 5 | 566 | +0.160R | 0.004R | 38.0 bars |
+| §14 as recorded | **942** | **+0.117R** | 0.006R | — |
+
+No setting lands on 942 trades or +0.117R. **§14's headline number is unreproducible**, and the true configuration is lost.
+
+### Finding 2 — "zero fitted parameters" was false, which invalidates why we trusted §14
+
+The claim that nothing is tuned was the entire reason §14's DSR of 0.972 was believable, and the reason external review said the result was worth building on. It does not hold: **stop width is a parameter, and expectancy varies 3× across it** (+0.065R → +0.194R). Target multiple (`--rr`), max hold, and squeeze arm window are three more. The 1d timeframe itself was selected *after* 4h/1h/15m failed.
+
+So the honest trial count is well above the 40 assumed in §14's DSR, and the DSR must be recomputed against the real count before it means anything.
+
+### Finding 3 — the p=0.0041 was an artefact of assuming trade independence
+
+The harness's Welch t-test treats 942 trades as 942 independent observations. They are ten correlated assets over one window with overlapping holds. `test/manual/bootstrap.ts` resamples **whole calendar months** with replacement, which preserves both cross-coin and serial correlation. 10,000 resamples, longs only:
+
+| config | strategy longs | random longs | **delta** | 95% CI on delta | P(≤0) |
+|---|---|---|---|---|---|
+| `--atr 1.5` | +0.125R (n=839) | +0.122R (n=491) | **+0.003R** | [−0.263, +0.166] | **0.61** |
+| `--atr 3` | +0.365R (n=398) | +0.176R (n=376) | **+0.189R** | [−0.026, +0.368] | **0.055** |
+
+**At default parameters the strategy's long edge over random longs is +0.003R — indistinguishable from nothing.** At the best swept configuration the delta is +0.189R but its confidence interval still includes zero, and that 0.055 is *before* any correction for having swept four stop widths to find it.
+
+Random longs alone measure +0.176R at `--atr 3` with CI [−0.020, +0.394]. Market drift over this window is large and itself barely distinguishable from zero — which is precisely why the control was necessary.
+
+### What actually replicates
+
+- **Shorts are zero.** −0.003R to −0.068R across every configuration tested. Robust, and the one part of §14 that holds.
+- **Cost scales inversely with stop distance**, exactly as modelled.
+- **Funding is noise**: corr(funding, R) = −0.0035 over 1,333 trades at 1d, reconfirming §13 on a different window.
+
+### One display bug found, no impact on results
+
+The run header prints `runs[0].stats.span` — **coin #1's span only**, not the basket's. §14's "2018-04 → 2026-08, 8.3 years" was BTC's history; with ARB listed first the identical run prints "2023-11 → 2026-08". Pooled coverage *is* 2018-04 → 2026-08 (~100 distinct months), so the claim was true by accident. Per-coin: BTC/ETH from 2018-04, ADA 2018-12, BNB 2018-07, XRP 2019-01, LINK 2019-09, DOGE 2020-03, SOL 2021-04, AVAX 2021-05, ARB 2023-11. **The pre-2021 years rest on five coins, so "multiple cycles" is thinner than it reads.**
+
+### Standing verdict after retraction
+
+There is **no configuration of the current system with a demonstrated edge over random long entries.** The 1d result was the best of a parameter sweep, evaluated with a test that assumed independence it does not have.
+
+This does not kill the §14b zone thesis — it removes the baseline the zone work was meant to beat. The bar is no longer "+0.117R"; it is **"beat random longs with month-clustered inference"**, which is harder and honest.
+
+### Methodology rules added
+
+6. **Record the exact command with every result.** A number whose configuration is lost is not a result. §14 cost us a day to discover was unreproducible.
+7. **Never claim "no fitted parameters" without listing them.** Defaults in a harness are still choices; sweeping them is still fitting.
+8. **Cluster-resample before believing any p-value.** The unit of evidence is the month, not the trade. `bootstrap.ts --self-check` verifies the estimator.
+9. **A result that exists at only one parameter value is drift, not edge**, until shown otherwise. The `--atr 3` delta vanishing at `--atr 1.5` is the tell.
+
+---
+
+## 14d. ⛔ LIGHT ZONE TEST — the §14b hypothesis is refuted
+
+*3 Aug 2026. Pre-registered, playbook parameters only, no sweep, month-clustered inference. Reproduce:*
+
+```
+npx ts-node test/manual/zonetest.ts --self-check
+npx ts-node test/manual/zonetest.ts x 1d --coins ARB,ADA,SOL,DOGE,BTC,ETH,LINK,XRP,AVAX,BNB \
+  --limit 3300 --csv zone.csv
+npx ts-node test/manual/zonetest.ts x 1d --coins <same> --limit 3300 --random --csv zrand.csv
+npx ts-node test/manual/bootstrap.ts zone.csv zrand.csv --direction long
+```
+
+### Parameters, all read from the playbook before the first run
+
+| parameter | value | source |
+|---|---|---|
+| Fib ratios | 0 / 0.25 / 0.5 / 0.75 / 1.0 | p8 — **not** 0.236/0.382/0.618 |
+| Fib anchor | swing low → swing high | p51 Step 1 |
+| stop | zone low − **1.0**×ATR(14) | p17 — anchored to the *level*, not entry |
+| target | first resistance above entry (TP1) | p14 |
+| confluence | ≥2 levels within 0.5% | p53; 0.5% is the existing `SR_DEFAULTS` |
+| arm window | 48 bars | ambiguous in playbook; fixed to the trade horizon |
+
+Note three corrections to §14b's reading of the playbook: scaled entries are **20/20/60** (p11), not 20/40/40; the entry minimum is **3 of 5** conditions (p12), i.e. 60/100 — *above* the TACTICAL_SETUP tier of 40 we had been trading; and the ATR stop multiplier is **1.0**, not 1.5.
+
+### Run 1 — with the playbook's 3/5 gate: unevaluable, and it exposed a third wiring bug
+
+Zero trades from 1,101 zone arrivals. The funnel located the cause:
+
+| stage | count |
+|---|---|
+| zones armed | 1,393 |
+| price reached zone | 1,101 (79%) |
+| expired unreached | 282 |
+| **failed the 3/5 gate** | **1,100** |
+| entered | **0** |
+
+**735 of 839 checklist-routed arrivals were evaluated as `short` — while price was arriving at a *support* zone.** The checklist derives its own direction and disagreed with the zone 88% of the time. Consequently:
+
+| condition | pass rate at zone arrival |
+|---|---|
+| RSI Condition | **0.0%** (0/839) — a short tests `rsi ≥ 60`; at support it is low |
+| Bollinger Band Extreme | **0.0%** (0/839) — a short tests the *upper* band |
+| Support/Resistance Confluence | **1.2%** (10/839) — while standing inside a confluence zone |
+| QQE Volume Bars | 69.4% |
+| Market Structure (HTF) | 86.1% |
+
+Max achievable score at a zone arrival is therefore ~40/100. The playbook's own minimum entry requirement is **structurally unreachable** by our checklist. The 1.2% S/R rate is the clearest signal: the checklist's price-anchored grid (finding D) and the zone engine are two level systems that disagree almost totally.
+
+**A confirmation filter must be told the direction of the setup it is confirming. Ours decides for itself, then vetoes.**
+
+### Run 2 — location alone, gate removed (pre-registered before running)
+
+Because run 1 was blocked by broken wiring rather than by evidence, the test was re-scoped to §14b's actual claim: does arriving at a pre-marked confluence zone beat entering at a random bar, given identical playbook exits? Long by construction, no gate.
+
+| | n | win% | median RR | expectancy | 95% CI (month blocks) |
+|---|---|---|---|---|---|
+| zone arrival | 886 | 63.1% | 0.25 | **−0.180R** | [−0.231, −0.115] |
+| random entry | 623 | 75.0% | 0.21 | −0.059R | [−0.109, −0.005] |
+| **DELTA** | | | | **−0.121R** | **[−0.166, −0.046]** |
+
+**The delta's confidence interval excludes zero on the negative side. Zone-arrival entries are significantly WORSE than random entries with identical exits.** Not "no edge" — negative edge. P(delta ≤ 0) = 1.0000 over 10,000 resamples of 95 months.
+
+### Why this is a clean refutation
+
+Both arms lose, because the level-to-level TP1 rule is degenerate as implemented: median RR 0.21–0.25 requires a **>80% win rate** to break even, and neither arm reaches it. That explains the levels of both results — but **not the delta**, because both arms share the identical exit rule. The delta isolates entry location, and location made outcomes worse.
+
+The intuition is unkind but obvious in hindsight: price arriving at support on a daily chart is price *falling*, and buying it caps upside at a nearby resistance while leaving the full stop exposed. The 63.1% win rate is real and useless.
+
+**One known implementation gap, which does not rescue the result.** Levels were taken as raw 2-bar swing pivots; the clustering + `MIN_TOUCHES ≥ 2` filter that `SR_DEFAULTS` and the playbook ("support that held multiple times", p52) both specify was not applied, so the level set is roughly 4–5× denser than a human would mark. A sparser set would widen TP1 for *both* arms. It cannot explain a negative delta, since the defect is shared. Testing it anyway would be a third run, which the pre-agreed stop rule forbids.
+
+### Standing verdict
+
+Three hypotheses have now been measured and none survives:
+
+1. **Checklist-as-scanner** (§14, §14c) — no edge over random longs once inference respects month correlation.
+2. **Checklist-as-confirmation-filter** (§14d run 1) — structurally unreachable; the filter is mis-wired.
+3. **Zone-arrival location** (§14d run 2) — significantly *worse* than random.
+
+The §14b diagnosis was a coherent story that fit every prior measurement, and it was wrong. That is what the harness is for.
+
+**The prediction claim should be dropped.** What remains defensible is the part that never depended on forecasting: level identification, position sizing, risk management, regime *description*, and trade journalling — option D of §15, and §8(h) of the review brief. The measurement infrastructure (`backtest.ts`, `zonetest.ts`, `bootstrap.ts`) is the durable asset and it did its job: it killed three ideas in one day for $0.
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |
