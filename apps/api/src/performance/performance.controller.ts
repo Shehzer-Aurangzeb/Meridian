@@ -1,6 +1,11 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { PerformanceService, AnalysisWithPerformance } from './performance.service';
+import { Throttle } from '@nestjs/throttler';
+import {
+  PerformanceService,
+  AnalysisWithPerformance,
+  CoordinatorRunEvaluation,
+} from './performance.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PerformanceResponseDto, PerformanceAnalysis } from './dto/performance-response.dto';
 import { HistoryQueryDto } from '../analysis/dto/history-query.dto';
@@ -14,7 +19,12 @@ export class PerformanceController {
     private readonly prismaService: PrismaService,
   ) {}
 
+  /** @deprecated Backed by legacy TradeAnalysis rows. Use GET /analysis/performance/coordinator-runs/:symbol (smart-TTL evaluator over CoordinatorRun). */
   @Get()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Legacy TradeAnalysis performance. Use /analysis/performance/coordinator-runs/:symbol.',
+  })
   async getPerformance(
     @Query() query: HistoryQueryDto,
   ): Promise<PerformanceResponseDto> {
@@ -70,7 +80,31 @@ export class PerformanceController {
     }
   }
 
+  @Get('coordinator-runs/:symbol')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Evaluate past polymorphic coordinator runs for an asset using historical kline fill-tracking validation',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Array of high-fidelity tracking metrics showing filling stages, dynamic expirations, and true market outcomes.',
+  })
+  async getCoordinatorRunsEvaluation(
+    @Param('symbol') symbol: string,
+  ): Promise<CoordinatorRunEvaluation[]> {
+    // Ensure symbol is upper-cased cleanly to match Binance conventions
+    const normalizedSymbol = symbol.toUpperCase();
+    return this.performanceService.evaluateCoordinatorRuns(normalizedSymbol);
+  }
+
+  /** @deprecated Backed by legacy TradeAnalysis rows. Use GET /analysis/performance/coordinator-runs/:symbol. */
   @Get(':coin')
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Legacy per-coin TradeAnalysis performance. Use /analysis/performance/coordinator-runs/:symbol.',
+  })
   async getPerformanceByCoin(
     @Param('coin') coin: string,
     @Query() query: HistoryQueryDto,

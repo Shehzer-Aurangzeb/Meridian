@@ -6,45 +6,7 @@ import { cn } from '@/lib/utils';
 import { ArrowRightIcon } from '@/assets/icons/arrow-right-icon';
 import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
-
-/**
- * Timeframe options
- */
-const TIMEFRAMES = ['1H', '4H', '1D', '1W'] as const;
-type Timeframe = typeof TIMEFRAMES[number];
-
-/**
- * Segmented control for timeframe selection
- */
-function TimeframeSelector({
-  value,
-  onChange,
-}: {
-  value: Timeframe;
-  onChange: (tf: Timeframe) => void;
-}) {
-  return (
-    <div className="inline-flex border border-border-hover/18 dark:border-border-hover rounded-full p-[3px] bg-background gap-0">
-      {TIMEFRAMES.map((tf) => (
-        <button
-          key={tf}
-          type="button"
-          onClick={() => onChange(tf)}
-          className={cn(
-            'border-0 bg-transparent px-3.5 py-[7px]',
-            'font-mono text-xs cursor-pointer rounded-full',
-            'transition-all duration-[160ms] whitespace-nowrap',
-            value === tf
-              ? 'bg-primary text-primary-foreground'
-              : 'text-text-secondary hover:text-text-primary'
-          )}
-        >
-          {tf}
-        </button>
-      ))}
-    </div>
-  );
-}
+import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
 
 /**
  * Quick analyze section for dashboard

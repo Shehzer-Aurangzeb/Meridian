@@ -6,9 +6,11 @@ import { MarketDataModule } from '../market-data/market-data.module';
 import { IndicatorsModule } from '../indicators/indicators.module';
 import { AiModule } from '../ai/ai.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RiskManagementModule } from '../risk-management/risk-management.module';
 import { AnalysisCoordinatorService } from './analysis-coordinator.service';
 import { AnalysisCoordinatorController } from './analysis-coordinator.controller';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
+import { MultiTimeframeScannerService } from './multi-timeframe-scanner.service';
 
 @Module({
   imports: [
@@ -19,9 +21,18 @@ import { CoordinatorPersistenceService } from './coordinator-persistence.service
     IndicatorsModule,
     AiModule,
     PrismaModule,
+    RiskManagementModule,
   ],
   controllers: [AnalysisCoordinatorController],
-  providers: [AnalysisCoordinatorService, CoordinatorPersistenceService],
-  exports: [AnalysisCoordinatorService, CoordinatorPersistenceService],
+  providers: [
+    AnalysisCoordinatorService,
+    CoordinatorPersistenceService,
+    MultiTimeframeScannerService,
+  ],
+  exports: [
+    AnalysisCoordinatorService,
+    CoordinatorPersistenceService,
+    MultiTimeframeScannerService,
+  ],
 })
 export class AnalysisCoordinatorModule {}

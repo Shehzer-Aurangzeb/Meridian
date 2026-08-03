@@ -10,6 +10,7 @@ import {
   ValidationPipe,
   HttpException,
   HttpStatus,
+  HttpCode,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,11 +31,16 @@ import {
   ANALYSIS_CANDLE_LIMIT,
 } from './analysis-coordinator.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
+import { MultiTimeframeScannerService } from './multi-timeframe-scanner.service';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 import {
   StreamAnalysisQueryDto,
   StreamAnalysisEvent,
 } from './dto/stream-analysis.dto';
+import {
+  MultiTimeframeScanResult,
+  PortfolioScanDto,
+} from './dto/portfolio-scan.dto';
 
 @ApiTags('analysis-coordinator')
 @Controller('analysis-coordinator')
@@ -48,6 +54,7 @@ export class AnalysisCoordinatorController {
     private readonly marketRegimeService: MarketRegimeService,
     private readonly claudeService: ClaudeService,
     private readonly persistence: CoordinatorPersistenceService,
+    private readonly multiTimeframeScannerService: MultiTimeframeScannerService,
   ) {}
 
   /**
@@ -332,5 +339,45 @@ export class AnalysisCoordinatorController {
 
       throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  /**
+   * @deprecated Not consumed by frontend. Use /coordinate for single-timeframe or implement FE integration.
+   * Aggregate multi-timeframe scanner. Runs the coordinator on 1d, 4h,
+   * and 1h in parallel, distils a macro bias + execution horizon, then
+   * — only when an active setup is detected — invokes Claude and sizes
+   * a risk profile against the supplied wallet balance.
+   *
+   * Validation, throttling, and fail-soft AI behaviour are inherited
+   * from the underlying service layer; this controller is a thin HTTP
+   * gateway over `MultiTimeframeScannerService.scanAssetWithRisk`.
+   */
+  @Post('portfolio-scan')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
+  @ApiOperation({
+    deprecated: true,
+    summary:
+      '[DEPRECATED] Run a parallel multi-timeframe macro and entry analysis scan on a target coin with risk profiling sizing',
+  })
+  @ApiBody({ type: PortfolioScanDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Aggregated macro bias, trigger execution tracking, risk dimensions, and AI evaluation response payload.',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request body.' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded.' })
+  async scanPortfolioAsset(
+    @Body() dto: PortfolioScanDto,
+  ): Promise<MultiTimeframeScanResult> {
+    return await this.multiTimeframeScannerService.scanAssetWithRisk(dto);
   }
 }

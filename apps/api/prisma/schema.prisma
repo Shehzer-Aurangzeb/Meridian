@@ -56,7 +56,9 @@ model CoordinatorRun {
   durationMs   Int
   errorMessage String?
 
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  entryFilledAt DateTime?
 
   @@index([symbol, createdAt])
   @@index([strategyRoute, createdAt])
