@@ -21,6 +21,22 @@ export class IndicatorsService {
    * @returns Latest RSI value
    */
   calculateRSI(closes: number[], period: number = 14): number {
+    const rsiValues = this.calculateRSISeries(closes, period);
+    return rsiValues[rsiValues.length - 1];
+  }
+
+  /**
+   * Calculate the full RSI series (not just the latest value).
+   *
+   * The checklist needs a trailing window of *RSI* values to compute a
+   * relative-momentum Z-score. `RSI.calculate` already produces the whole
+   * series, so exposing it costs nothing over `calculateRSI`.
+   *
+   * @param closes - Array of closing prices
+   * @param period - RSI period (default 14)
+   * @returns RSI values, oldest first. Last element is guaranteed finite.
+   */
+  calculateRSISeries(closes: number[], period: number = 14): number[] {
     if (closes.length < period + 1) {
       throw new Error(
         `Insufficient data for RSI calculation. Need at least ${period + 1} candles, got ${closes.length}`,
@@ -41,7 +57,7 @@ export class IndicatorsService {
       throw new Error('RSI calculation returned invalid value');
     }
 
-    return latestRSI;
+    return rsiValues;
   }
 
   /**
@@ -564,7 +580,8 @@ export class IndicatorsService {
     const lows = candles.map((c) => c.low);
     const volumes = candles.map((c) => c.volume);
 
-    const rsi = this.calculateRSI(closes);
+    const rsiSeries = this.calculateRSISeries(closes);
+    const rsi = rsiSeries[rsiSeries.length - 1];
     const bollingerBands = this.calculateBollingerBands(closes);
     const bandWidth = this.calculateBandWidth(bollingerBands);
     const bandWidthSeries = this.calculateBandWidthSeries(closes);
@@ -572,9 +589,14 @@ export class IndicatorsService {
     const adx = this.calculateADX(highs, lows, closes);
     const qqe = this.calculateQQE(closes);
 
-    // Trailing closes window used by the checklist for Z-score input.
-    // Matches the legacy coordinator behaviour exactly.
-    const rsiHistory = closes.length >= 100 ? closes.slice(-100) : closes.slice();
+    // Trailing window of RSI values, used by the checklist to Z-score the
+    // current RSI against its own recent distribution.
+    //
+    // This previously held the last 100 *closes*, so the checklist computed
+    // (rsi - mean(price)) / stdDev(price) — for BTC at ~$100k that yields
+    // Z ≈ -66 every run, which made every LONG pass condition 1 for free
+    // and every SHORT fail it.
+    const rsiHistory = rsiSeries.slice(-100);
 
     return {
       symbol: symbol.toUpperCase(),

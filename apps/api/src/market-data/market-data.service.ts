@@ -8,6 +8,7 @@ import { CacheTelemetryService } from './cache-telemetry.service';
 @Injectable()
 export class BinanceService {
   private readonly baseUrl = 'https://api.binance.com/api/v3';
+  private readonly fapiUrl = 'https://fapi.binance.com/fapi/v1';
   private readonly logger = new Logger(BinanceService.name);
 
   // Cache TTLs in milliseconds (cache-manager v7)
@@ -67,6 +68,131 @@ export class BinanceService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Fetch more than Binance's 1000-candle-per-request cap by walking
+   * backwards with `endTime`, then stitching the pages into one ascending
+   * series.
+   *
+   * Binance returns the `limit` candles ending at/before `endTime`, so each
+   * page asks for the candles immediately preceding the oldest one we hold.
+   *
+   * Used by the backtest harness (statistical power needs more than the
+   * 125 days a single 4h request yields) and available to
+   * `PerformanceService`, which currently over-fetches a recent window and
+   * slices in memory because it had no way to request a time range.
+   *
+   * @param symbol   Trading pair base (e.g. 'BTC')
+   * @param interval Candle timeframe
+   * @param total    How many candles to end up with
+   */
+  async getCandlesPaged(
+    symbol: string,
+    interval: TimeInterval,
+    total: number,
+  ): Promise<Candle[]> {
+    const tradingPair = `${symbol.toUpperCase()}USDT`;
+    const cacheKey = `candles:paged:${tradingPair}:${interval}:${total}`;
+
+    const cached = await this.cacheManager.get<Candle[]>(cacheKey);
+    if (cached) {
+      this.cacheTelemetry.recordHit();
+      return this.deserializeCandles(cached);
+    }
+    this.cacheTelemetry.recordMiss();
+
+    const PAGE = 1000; // Binance hard cap per klines request
+    const byTime = new Map<number, Candle>();
+    let endTime: number | undefined;
+
+    while (byTime.size < total) {
+      const page = await this.fetchCandlesFromBinance(
+        tradingPair,
+        interval,
+        Math.min(PAGE, total - byTime.size + 1),
+        3,
+        endTime,
+      );
+      if (page.length === 0) break;
+
+      const oldest = page[0].time.getTime();
+      for (const c of page) byTime.set(c.time.getTime(), c);
+
+      // Next page ends just before the oldest candle we now hold. If the
+      // window stopped advancing we've hit the start of listed history.
+      if (endTime !== undefined && oldest >= endTime) break;
+      endTime = oldest - 1;
+
+      this.logger.debug(
+        `Paged ${tradingPair} ${interval}: ${byTime.size}/${total}`,
+      );
+      await this.sleep(120); // stay well inside the klines weight budget
+    }
+
+    const candles = [...byTime.values()]
+      .sort((a, b) => a.time.getTime() - b.time.getTime())
+      .slice(-total);
+
+    await this.cacheManager.set(cacheKey, candles, this.CANDLE_CACHE_TTL);
+    return candles;
+  }
+
+  /**
+   * Funding-rate history for a perpetual future, paged forward from
+   * `startTime`. Free, no API key.
+   *
+   * Funding is the fee perp longs pay shorts (or vice versa) every 8h. It
+   * is a direct read on crowd positioning: strongly positive means the
+   * book is crowded long and paying to stay there. Unlike RSI/BB/ATR it is
+   * not another transform of price — which is why it is the first genuinely
+   * new input we've added.
+   *
+   * NOTE: the sibling endpoint `futures/data/openInterestHist` only retains
+   * ~30 days, so open interest cannot be backtested over a multi-month
+   * window and is deliberately not wired up here.
+   */
+  async getFundingRates(
+    symbol: string,
+    startTime: number,
+  ): Promise<Array<{ time: Date; rate: number }>> {
+    const tradingPair = `${symbol.toUpperCase()}USDT`;
+    const cacheKey = `funding:${tradingPair}:${startTime}`;
+
+    const cached =
+      await this.cacheManager.get<Array<{ time: string; rate: number }>>(cacheKey);
+    if (cached) {
+      this.cacheTelemetry.recordHit();
+      return cached.map((f) => ({ time: new Date(f.time), rate: f.rate }));
+    }
+    this.cacheTelemetry.recordMiss();
+
+    const out = new Map<number, number>();
+    let cursor = startTime;
+
+    for (;;) {
+      const res = await axios.get(`${this.fapiUrl}/fundingRate`, {
+        params: { symbol: tradingPair, startTime: cursor, limit: 1000 },
+        timeout: this.candleTimeout,
+      });
+      const rows = res.data as Array<{ fundingTime: number; fundingRate: string }>;
+      if (rows.length === 0) break;
+
+      for (const r of rows) out.set(r.fundingTime, parseFloat(r.fundingRate));
+
+      const newest = rows[rows.length - 1].fundingTime;
+      if (newest <= cursor) break; // no forward progress → end of history
+      cursor = newest + 1;
+      if (rows.length < 1000) break;
+      await this.sleep(120);
+    }
+
+    const funding = [...out.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([t, rate]) => ({ time: new Date(t), rate }));
+
+    await this.cacheManager.set(cacheKey, funding, this.CANDLE_CACHE_TTL);
+    return funding;
   }
 
   /**
@@ -132,6 +258,7 @@ export class BinanceService {
     interval: string,
     limit: number,
     retries: number = 3,
+    endTime?: number,
   ): Promise<Candle[]> {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -140,6 +267,7 @@ export class BinanceService {
             symbol: tradingPair,
             interval,
             limit,
+            ...(endTime !== undefined ? { endTime } : {}),
           },
           timeout: this.candleTimeout,
         });

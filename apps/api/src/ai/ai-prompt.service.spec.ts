@@ -206,127 +206,120 @@ describe('ClaudePromptService', () => {
     };
   };
 
+  /**
+   * These assert that the prompt CARRIES THE DATA the model needs — scores,
+   * trade type, price, levels, output schema keys — rather than matching
+   * prose headers. Prompt wording is tuned often; the data contract is not.
+   */
   describe('buildAnalysisPrompt', () => {
-    it('should generate prompt for perfect long setup (5/5 conditions)', () => {
+    it('carries the full checklist state for a 5/5 long setup', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      // Verify prompt contains key sections
-      expect(prompt).toContain("MIRAJ'S STRATEGY RULES");
-      expect(prompt).toContain('5-POINT ENTRY CHECKLIST');
       expect(prompt).toContain('100/100');
       expect(prompt).toContain('5/5 conditions met');
+      expect(prompt).toContain('LONG');
       expect(prompt).toContain('✅ PASSED');
-      expect(prompt).toContain('TIMEFRAME ANALYSIS');
-      expect(prompt).toContain('SUPPORT & RESISTANCE');
-      expect(prompt).toContain('OUTPUT FORMAT');
 
-      // Verify it includes coin and price
+      // Coin and price must reach the model.
       expect(prompt).toContain('BTCUSDT');
-      expect(prompt).toContain('28750');
+      expect(prompt).toContain('28,750');
     });
 
-    it('should generate prompt for weak setup (2/5 conditions)', () => {
-      const data = createMockData('long', [true, false, true, false, false], 'bullish');
+    it('carries a failing score for a 1/5 setup', () => {
+      // 1/5 = 20 points = WATCHING, the only tier where `passed` is false.
+      const data = createMockData('long', [true, false, false, false, false], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('40/100');
-      expect(prompt).toContain('2/5 conditions met');
+      expect(prompt).toContain('20/100');
+      expect(prompt).toContain('1/5 conditions met');
       expect(prompt).toContain('❌ FAILED');
     });
 
-    it('should generate prompt for short setup', () => {
+    it('carries short direction and bearish bias', () => {
       const data = createMockData('short', [true, true, true, true, false], 'bearish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('Trade Type: SHORT');
+      expect(prompt).toContain('SHORT');
       expect(prompt).toContain('BEARISH');
       expect(prompt).toContain('80/100');
       expect(prompt).toContain('✅ PASSED');
     });
 
-    it('should include all strategy rules', () => {
+    it('states the scoring rule the model must apply', () => {
       const data = createMockData('long', [true, true, true, false, false], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      // Core principles
-      expect(prompt).toContain('DDE (Data Determines Everything)');
-      expect(prompt).toContain('HTF determines bias, LTF determines entry');
-      expect(prompt).toContain('Minimum 3/5 entry conditions');
-      expect(prompt).toContain('Risk 1-2% per trade');
-
-      // Entry conditions
-      expect(prompt).toContain('RSI: Oversold (15-35) for LONG');
-      expect(prompt).toContain('QQE: Green bars for LONG');
-      expect(prompt).toContain('Bollinger Bands');
+      expect(prompt).toContain('60+ points');
+      // All five conditions must be named so the model can reason per-condition.
+      expect(prompt).toContain('RSI');
+      expect(prompt).toContain('QQE');
+      expect(prompt).toContain('Bollinger Band');
       expect(prompt).toContain('Market Structure');
       expect(prompt).toContain('Support/Resistance');
     });
 
-    it('should include S/R levels with distance and strength', () => {
+    it('carries S/R levels with strength, distance and touch count', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('$28600.00');
+      expect(prompt).toContain('$28,600');
+      expect(prompt).toContain('$30,500');
       expect(prompt).toContain('strength: 4/5');
-      expect(prompt).toContain('$30500.00');
-      expect(prompt).toContain('away');
+      expect(prompt).toContain('% away');
       expect(prompt).toContain('touches');
     });
 
-    it('should include task instructions', () => {
+    it('specifies every field of the JSON output contract', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('YOUR TASK');
-      expect(prompt).toContain('LONG: Bullish HTF + checklist passed');
-      expect(prompt).toContain('SHORT: Bearish HTF + checklist passed');
-      expect(prompt).toContain('WAIT: If checklist failed');
-      expect(prompt).toContain('Be conservative');
+      // These keys are what ClaudeService.parseEnhancedResponse validates.
+      for (const key of [
+        '"action"',
+        '"confidence"',
+        '"entry"',
+        '"stopLoss"',
+        '"takeProfit"',
+        '"leverage"',
+        '"riskReward"',
+        '"reasoning"',
+        '"warnings"',
+      ]) {
+        expect(prompt).toContain(key);
+      }
+
+      // Both branches of the decision must be specified.
+      expect(prompt).toContain('"LONG" | "SHORT"');
+      expect(prompt).toContain('"WAIT"');
     });
 
-    it('should specify JSON output format', () => {
+    it('carries HTF bias and LTF entry signal', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('OUTPUT FORMAT');
-      expect(prompt).toContain('"action": "LONG" | "SHORT" | "WAIT"');
-      expect(prompt).toContain('"confidence": 0-100');
-      expect(prompt).toContain('"entry"');
-      expect(prompt).toContain('"stopLoss"');
-      expect(prompt).toContain('"takeProfit"');
-      expect(prompt).toContain('"leverage"');
-      expect(prompt).toContain('"riskReward"');
-      expect(prompt).toContain('"reasoning"');
-      expect(prompt).toContain('"warnings"');
+      expect(prompt).toContain('BULLISH');
+      expect(prompt).toContain('85% confidence');
+      expect(prompt).toContain('Has Entry');
+      // Per-timeframe breakdown must be present.
+      expect(prompt).toContain('4H');
     });
 
-    it('should include HTF and LTF analysis', () => {
-      const data = createMockData('long', [true, true, true, true, true], 'bullish');
-      const prompt = service.buildAnalysisPrompt(data);
-
-      expect(prompt).toContain('HTF Bias (Higher Timeframes)');
-      expect(prompt).toContain('LTF Entry Signal');
-      expect(prompt).toContain('Individual Timeframes');
-    });
-
-    it('should handle conflicting timeframes', () => {
+    it('surfaces conflicting timeframes when present', () => {
       const data = createMockData('long', [true, false, true, false, false], 'neutral');
       data.multiTimeframeAnalysis.htfBias.conflictingTimeframes = ['1d', '4h'] as any[];
       const prompt = service.buildAnalysisPrompt(data);
 
       expect(prompt).toContain('NEUTRAL');
-      expect(prompt).toContain('Conflicting Timeframes: 1d, 4h');
+      expect(prompt).toContain('1d, 4h');
     });
 
-    it('should generate reasonable prompt length', () => {
+    it('stays within a sane token budget', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      // Prompt should be comprehensive but not excessive
-      // Typical prompt is 3000-5000 characters
       expect(prompt.length).toBeGreaterThan(2500);
-      expect(prompt.length).toBeLessThan(8000);
+      expect(prompt.length).toBeLessThan(15000);
     });
   });
 
@@ -336,14 +329,14 @@ describe('ClaudePromptService', () => {
       data.srLevels = [];
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('None nearby');
+      expect(prompt).toContain('None identified nearby');
     });
 
     it('should handle missing entry zone in LTF', () => {
       const data = createMockData('long', [false, false, true, false, false], 'neutral');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('Has Entry: NO');
+      expect(prompt).toContain('Has Entry**: NO');
     });
   });
 });

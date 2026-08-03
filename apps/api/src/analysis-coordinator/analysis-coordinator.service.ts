@@ -181,9 +181,17 @@ export class AnalysisCoordinatorService {
       );
     }
 
-    // Use the middle Bollinger band as the "current price" proxy — same
-    // value the previous implementation passed down.
-    const currentPrice = bollingerBands.middle;
+    // Last candle close. Indicators are computed on closes, so the price
+    // anchor must match them.
+    //
+    // This previously passed `bollingerBands.middle` (the 20-SMA), which
+    // silently broke three of the five checklist conditions: BB proximity
+    // is measured as (price - lower) / (upper - lower), and the bands are
+    // symmetric about the middle, so feeding it the middle scored exactly
+    // 50% on every single run against a 10% threshold — condition 3 could
+    // never pass. Market structure and S/R proximity were anchored to a
+    // lagging average rather than price.
+    const currentPrice = closes[closes.length - 1];
 
     // Support / resistance derived from the same candle series.
     const candlesArr = candles as ReadonlyArray<Candle> as Candle[];
