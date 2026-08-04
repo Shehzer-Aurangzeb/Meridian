@@ -814,6 +814,79 @@ Four families, four negatives, measured in one day for $0. The measurement stack
 
 ---
 
+## 14f. ⛔ FUNDING (positioning) — no edge · and a cashflow correction to §14e
+
+*3 Aug 2026. The "final cheap shot" run. Pre-registered before execution.*
+
+```
+npx ts-node test/manual/panel.ts --self-check
+npx ts-node test/manual/panel.ts --signal funding --out-dir <dir>
+npx ts-node test/manual/bootstrap.ts <dir>/fund_ls.csv <dir>/fund_flip.csv
+```
+
+### Design
+
+Perps have no literal term structure, so this tests the **cross-sectional positioning** read instead: rank by trailing 7-day mean funding and trade it **contrarian** — long the lowest-funding decile (crowded shorts), short the highest (crowded longs). Positioning data rather than price data, market-neutral, direction output. 360 of 399 coins had perp history.
+
+Funding **slope** (whether crowding is building or unwinding) remains untested. One hypothesis per run.
+
+### First run was invalid — it traded on funding without collecting it
+
+The first pass reported **−0.593%/week, Sharpe −1.65**. That number is discarded. The strategy ranks on funding but the backtest never applied the funding *cashflow*, and shorting the highest-funding decile **receives** that funding. For the momentum test that omission was minor conservatism; for a funding strategy it is disqualifying — the entire −0.63% swing turned out to be the missing cashflow.
+
+`holdFunding` now applies it to every arm. Because a short's return is exactly the negation of `price return − funding`, subtracting funding inside `basketReturn` makes all three arms correct with no other change. The self-check asserts the two directions separately: the **signal** looks backward and averages, the **cashflow** accrues forward and sums.
+
+Storage bug behind it: funding was cached as the daily *mean*, which makes the daily *total* unrecoverable. Now stored as `{s, n}`.
+
+### Result — funding, corrected, 166 weekly rebalances
+
+| book | mean/period | Sharpe (ann) | turnover cost |
+|---|---|---|---|
+| long/short contrarian | +0.037% | 0.10 | 0.079% |
+| random direction | +0.027% | 0.07 | 0.128% |
+| always long | −0.485% | −0.32 | 0.008% |
+
+Month-clustered delta vs random: **+0.0001, CI [−0.0051, +0.0053], P(≤0) = 0.48.** That is a coin flip. Funding positioning carries no cross-sectional edge. Breakeven round-trip cost 0.205%.
+
+### ⚠️ Correction to §14e — the momentum point estimate moves to the right side
+
+The same cashflow fix changes the momentum result, because it was run with funding excluded:
+
+| | §14e as committed | corrected |
+|---|---|---|
+| strategy | +0.081%/wk | **+0.273%/wk** |
+| random direction | +0.182%/wk | +0.183%/wk |
+| always long | −0.436%/wk | −0.408%/wk |
+| delta vs random | −0.0010 | **+0.0009** |
+| CI | [−0.0085, +0.0064] | [−0.0065, +0.0078] |
+| P(≤0) | 0.60 | **0.38** |
+
+**This matters procedurally.** The decision to stop extending the momentum test was explicitly premised on the point estimate sitting *below* its benchmark. After a correctness fix — not a sweep, not a re-look — it sits above. That premise no longer holds and should not be relied on.
+
+**It is still not an edge, on three independent grounds:**
+
+1. **Not significant.** P(≤0) = 0.38, CI comfortably spans zero.
+2. **Risk-adjusted it is WORSE than random.** Sharpe 0.45 vs random's 0.52 — momentum's higher mean comes with far higher volatility (4.35% vs 2.52% per period). For a book anyone would actually run, that is the relevant comparison and momentum loses it.
+3. **The improvement leans on the least trustworthy part of the data.** Universe funding is strongly negatively skewed: median daily total **+0.0269%** but mean **−0.0166%**, with **77.1% of days positive.** So the mean is set by a fat negative tail, and the funding P&L that lifted momentum comes disproportionately from rare extreme episodes — precisely what is hardest to capture live (position limits, dislocations, borrow constraints).
+
+### An unexpected empirical fact, worth recording
+
+Momentum **winners** carried *negative* mean funding (−0.0138%/day) while **losers** were slightly positive (+0.0011%/day). Coins that had rallied were the ones with crowded *shorts paying longs* — a squeeze dynamic, the opposite of the naive "winners are crowded longs" assumption. This is why including funding helped both momentum legs, and it is a genuine description of this window regardless of whether any strategy exploits it.
+
+### Standing verdict — five hypotheses
+
+| # | hypothesis | result |
+|---|---|---|
+| 1 | checklist as scanner | no edge vs random longs (§14c) |
+| 2 | checklist as confirmation filter | structurally unreachable; mis-wired (§14d) |
+| 3 | zone-arrival location | **significantly worse** than random (§14d) |
+| 4 | cross-sectional momentum, long/short | not significant; worse than random risk-adjusted (§14e, corrected here) |
+| 5 | cross-sectional funding, contrarian | no edge; delta is a coin flip (§14f) |
+
+Five families, five negatives. The pivot in `SYSTEMATIC_ANALYST.md` stands on the evidence.
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |

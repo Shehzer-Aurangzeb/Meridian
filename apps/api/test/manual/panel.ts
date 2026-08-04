@@ -65,6 +65,7 @@ const MIN_UNIVERSE = 20;
 const MAX_UNIVERSE = 100;
 const LIQ_WINDOW = 30;
 const ROUND_TRIP_PCT = 0.14; // total, both sides; charged per unit turnover
+const FUND_WINDOW = 7; // days of funding prints averaged into the signal
 const BARS = 1200; // ~3.3y of daily, keeps the fetch to ~2 requests/coin
 
 const args = process.argv.slice(2);
@@ -74,6 +75,24 @@ const flagStr = (n: string, d: string) => {
 };
 const OUT_DIR = flagStr('out-dir', '.');
 const REFRESH = args.includes('--refresh');
+
+/**
+ * Which hypothesis to test. This selects a DISTINCT pre-registered
+ * hypothesis, not a parameter value — momentum (price) vs funding
+ * (positioning). It is not a sweep knob.
+ *
+ *  momentum — long the strongest trailing 30d return, short the weakest.
+ *  funding  — CONTRARIAN on crowding: Binance funding is positive when
+ *             longs pay shorts, so high funding = crowded long = short it,
+ *             and low/negative funding = crowded short = long it. The
+ *             signal is therefore NEGATED mean funding, which lets the same
+ *             "long the top, short the bottom" code serve both.
+ *
+ * Funding SLOPE (whether crowding is building or unwinding) is NOT tested.
+ */
+const SIGNAL = (flagStr('signal', 'momentum') === 'funding' ? 'funding' : 'momentum') as
+  | 'momentum'
+  | 'funding';
 
 let seed = 20260803;
 const rng = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
@@ -226,11 +245,94 @@ function finalisePanel(raw: Panel): Panel {
   return panel;
 }
 
+/**
+ * coin -> date -> { s: total funding that day, n: prints seen }.
+ *
+ * Both are needed: the SIGNAL ranks on the mean (s/n), while the CASHFLOW
+ * a position actually pays or receives is the total (s). Storing only the
+ * mean makes the cashflow unrecoverable, which is the bug that invalidated
+ * the first funding run.
+ */
+type FundingMap = Record<string, Record<string, { s: number; n: number }>>;
+
+async function buildFunding(panel: Panel): Promise<FundingMap> {
+  const fs = require('fs') as typeof import('fs');
+  const cachePath = `${OUT_DIR}/funding_1d.json`;
+  if (!REFRESH && fs.existsSync(cachePath)) {
+    console.log(`reusing cached funding → ${cachePath}`);
+    return JSON.parse(fs.readFileSync(cachePath, 'utf8')) as FundingMap;
+  }
+
+  const binance = new BinanceService(cache, new CacheTelemetryService());
+  const start = Date.parse(`${panel.dates[0]}T00:00:00Z`) - FUND_WINDOW * 86_400_000;
+  const out: FundingMap = {};
+  let done = 0;
+  let noPerp = 0;
+
+  console.log(`fetching funding history for ${panel.coins.length} coins...`);
+  for (const coin of panel.coins) {
+    try {
+      const prints = await binance.getFundingRates(coin, start);
+      if (prints.length === 0) { noPerp++; continue; }
+      const sums: Record<string, { s: number; n: number }> = {};
+      for (const p of prints) {
+        const d = p.time.toISOString().slice(0, 10);
+        (sums[d] ??= { s: 0, n: 0 }).s += p.rate;
+        sums[d].n += 1;
+      }
+      out[coin] = sums;
+    } catch {
+      noPerp++;
+    }
+    if (++done % 50 === 0) console.log(`  ${done}/${panel.coins.length}`);
+  }
+
+  fs.writeFileSync(cachePath, JSON.stringify(out));
+  console.log(
+    `funding: ${Object.keys(out).length} coins with perp history ` +
+      `(${noPerp} spot-only, excluded from the funding test)`,
+  );
+  return out;
+}
+
+/** Mean daily funding over the FUND_WINDOW days strictly before `di`. */
+export function trailingFunding(
+  fund: Record<string, { s: number; n: number }> | undefined,
+  dates: string[],
+  di: number,
+): number | null {
+  if (!fund) return null;
+  const vals: number[] = [];
+  for (let k = Math.max(0, di - FUND_WINDOW); k < di; k++) {
+    const v = fund[dates[k]];
+    if (v !== undefined && v.n > 0) vals.push(v.s / v.n);
+  }
+  if (vals.length < Math.ceil(FUND_WINDOW / 2)) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+/** Total funding a position accrues from di to di+HOLD (longs pay if >0). */
+export function holdFunding(
+  fund: Record<string, { s: number; n: number }> | undefined,
+  dates: string[],
+  di: number,
+  hold: number,
+): number {
+  if (!fund) return 0;
+  let total = 0;
+  for (let k = di; k < Math.min(di + hold, dates.length); k++) {
+    const v = fund[dates[k]];
+    if (v !== undefined) total += v.s;
+  }
+  return total;
+}
+
 // ── strategy ────────────────────────────────────────────────────────────
 
 interface Eligible {
   coin: string;
   momentum: number; // formation return
+  signal: number; // what we actually rank on; long the top, short the bottom
   dv: number; // trailing median dollar volume
 }
 
@@ -238,7 +340,7 @@ interface Eligible {
  * Coins tradeable at `di`, with their signal. Uses ONLY data strictly
  * before the decision date — closes up to di-SKIP, volume up to di-1.
  */
-export function eligibleAt(panel: Panel, di: number): Eligible[] {
+export function eligibleAt(panel: Panel, di: number, fund?: FundingMap): Eligible[] {
   const dates = panel.dates;
   const out: Eligible[] = [];
   const formEnd = di - SKIP; // last close used by the signal
@@ -261,9 +363,18 @@ export function eligibleAt(panel: Panel, di: number): Eligible[] {
     if (vols.length < LIQ_WINDOW / 2) continue;
     vols.sort((x, y) => x - y);
 
+    const momentum = b.close / a.close - 1;
+    let signal = momentum;
+    if (SIGNAL === 'funding') {
+      const f = trailingFunding(fund?.[coin], dates, di);
+      if (f === null) continue; // no perp history: not tradeable in this test
+      signal = -f; // contrarian: crowded longs (high funding) go to the SHORT leg
+    }
+
     out.push({
       coin,
-      momentum: b.close / a.close - 1,
+      momentum,
+      signal,
       dv: vols[Math.floor(vols.length / 2)],
     });
   }
@@ -283,7 +394,12 @@ let staleExits = 0;
  * silently remove exactly the positions most likely to have collapsed,
  * which biases every basket upward — and hits the short leg hardest.
  */
-function basketReturn(panel: Panel, coins: string[], di: number): number | null {
+function basketReturn(
+  panel: Panel,
+  coins: string[],
+  di: number,
+  fund?: FundingMap,
+): number | null {
   const dates = panel.dates;
   const exit = di + HOLD;
   if (exit >= dates.length) return null;
@@ -299,7 +415,9 @@ function basketReturn(panel: Panel, coins: string[], di: number): number | null 
       }
     }
     if (!b) continue;
-    rs.push(b.close / a.close - 1);
+    // Long-side return net of funding paid. The short leg is the negation
+    // of this same quantity, so every arm stays correct downstream.
+    rs.push(b.close / a.close - 1 - holdFunding(fund?.[c], dates, di, HOLD));
   }
   if (rs.length === 0) return null;
   return rs.reduce((x, y) => x + y, 0) / rs.length;
@@ -329,7 +447,7 @@ export function turnover(prev: string[] | null, next: string[]): number {
   return next.length === 0 ? 0 : (next.length - kept) / next.length;
 }
 
-export function runStrategy(panel: Panel): Period[] {
+export function runStrategy(panel: Panel, fund?: FundingMap): Period[] {
   const periods: Period[] = [];
   const RT = ROUND_TRIP_PCT / 100;
   let prevLong: string[] | null = null;
@@ -339,18 +457,18 @@ export function runStrategy(panel: Panel): Period[] {
   let prevUni: string[] | null = null;
 
   for (let di = FORMATION + SKIP; di + HOLD < panel.dates.length; di += HOLD) {
-    const elig = eligibleAt(panel, di);
+    const elig = eligibleAt(panel, di, fund);
     if (elig.length < MIN_UNIVERSE) continue;
 
     const legSize = Math.max(MIN_LEG, Math.floor(elig.length * LEG_PCT));
     if (legSize * 2 > elig.length) continue;
 
-    const byMom = [...elig].sort((a, b) => b.momentum - a.momentum);
-    const longs = byMom.slice(0, legSize).map((e) => e.coin);
-    const shorts = byMom.slice(-legSize).map((e) => e.coin);
+    const ranked = [...elig].sort((a, b) => b.signal - a.signal);
+    const longs = ranked.slice(0, legSize).map((e) => e.coin);
+    const shorts = ranked.slice(-legSize).map((e) => e.coin);
 
-    const rl = basketReturn(panel, longs, di);
-    const rs = basketReturn(panel, shorts, di);
+    const rl = basketReturn(panel, longs, di, fund);
+    const rs = basketReturn(panel, shorts, di, fund);
 
     // Control 1 — same number of positions, sides assigned at random from
     // the same eligible set. Isolates ranking skill from position count.
@@ -361,12 +479,12 @@ export function runStrategy(panel: Panel): Period[] {
     }
     const flipL = pool.slice(0, legSize).map((e) => e.coin);
     const flipS = pool.slice(legSize, legSize * 2).map((e) => e.coin);
-    const rfl = basketReturn(panel, flipL, di);
-    const rfs = basketReturn(panel, flipS, di);
+    const rfl = basketReturn(panel, flipL, di, fund);
+    const rfs = basketReturn(panel, flipS, di, fund);
 
     // Control 2 — always long the whole eligible universe.
     const uni = elig.map((e) => e.coin);
-    const rlo = basketReturn(panel, uni, di);
+    const rlo = basketReturn(panel, uni, di, fund);
 
     // Each leg holds half the capital, so its turnover costs half as much.
     const lsCost = RT * (0.5 * turnover(prevLong, longs) + 0.5 * turnover(prevShort, shorts));
@@ -482,6 +600,38 @@ function selfCheck() {
     'one of three replaced is 1/3 turnover',
   );
 
+  // Funding: trailing mean over the window strictly before the decision date,
+  // and the contrarian sign convention.
+  {
+    const ds: string[] = [];
+    for (let k = 0; k < 9; k++) {
+      ds.push(new Date(Date.UTC(2024, 0, 1 + k)).toISOString().slice(0, 10));
+    }
+    // 7 prints on days 0..6, values .001 .. .007, mean .004
+    // 7 days of prints, daily MEAN .001 .. .007 (3 prints each), mean .004
+    const f: Record<string, { s: number; n: number }> = {};
+    for (let k = 0; k < 7; k++) f[ds[k]] = { s: ((k + 1) / 1000) * 3, n: 3 };
+    const tf = trailingFunding(f, ds, 7);
+    ok(tf !== null && Math.abs(tf - 0.004) < 1e-12, `trailing funding mean, got ${tf}`);
+    // A print ON or AFTER the decision date must be ignored by the SIGNAL.
+    const tf2 = trailingFunding(
+      { ...f, [ds[7]]: { s: 99, n: 3 }, [ds[8]]: { s: 99, n: 3 } }, ds, 7);
+    ok(tf2 !== null && Math.abs(tf2 - 0.004) < 1e-12, 'funding signal must exclude the decision date');
+    ok(trailingFunding(undefined, ds, 7) === null, 'no perp history -> null');
+    // Too few prints in the window must be rejected, not silently averaged.
+    ok(trailingFunding({ [ds[0]]: { s: 0.003, n: 3 } }, ds, 7) === null, 'sparse funding -> null');
+
+    // CASHFLOW is the opposite: it accrues FROM the entry date forward, and
+    // sums totals rather than averaging them.
+    const hf = holdFunding(f, ds, 0, 3);
+    ok(Math.abs(hf - (0.001 + 0.002 + 0.003) * 3) < 1e-12, `hold funding total, got ${hf}`);
+    ok(holdFunding(undefined, ds, 0, 3) === 0, 'no funding data -> zero cashflow');
+    ok(holdFunding(f, ds, 0, 0) === 0, 'zero-length hold -> zero cashflow');
+    // Contrarian: crowded longs (HIGH funding) must sort to the SHORT leg,
+    // i.e. their signal must be the LOWEST. Signal = -funding.
+    ok(-0.005 < -0.001, 'higher funding must produce a lower signal');
+  }
+
   const elig = eligibleAt(panel, 60);
   ok(elig.length === nCoins, `all coins eligible, got ${elig.length}`);
   const best = [...elig].sort((a, b) => b.momentum - a.momentum)[0];
@@ -503,22 +653,29 @@ function selfCheck() {
   const after = eligibleAt(corrupt, 60).map((e) => e.momentum.toFixed(8)).join(',');
   ok(before === after, 'signal must not depend on data at or after the decision date');
 
-  console.log('self-check passed (ranking, long/short sign, no look-ahead)');
+  console.log(
+    'self-check passed (contiguity trim, turnover, funding window + sign, ranking, long/short sign, no look-ahead)',
+  );
 }
 
 async function main() {
   const fs = require('fs') as typeof import('fs');
   const panel = await buildPanel();
-  const periods = runStrategy(panel);
+  const fund = await buildFunding(panel); // cashflow applies to BOTH hypotheses
+  const periods = runStrategy(panel, fund);
 
   console.log(
-    `\ncross-sectional momentum · formation ${FORMATION}d skip ${SKIP}d · ` +
-      `hold ${HOLD}d · leg ${LEG_PCT * 100}% (min ${MIN_LEG}) · ` +
-      `universe top ${MAX_UNIVERSE} by trailing ${LIQ_WINDOW}d dollar volume`,
+    SIGNAL === 'funding'
+      ? `\ncross-sectional FUNDING (contrarian on crowding) · trailing ${FUND_WINDOW}d mean funding · ` +
+          `long lowest decile, short highest · hold ${HOLD}d · leg ${LEG_PCT * 100}% (min ${MIN_LEG}) · ` +
+          `universe top ${MAX_UNIVERSE} by trailing ${LIQ_WINDOW}d dollar volume`
+      : `\ncross-sectional MOMENTUM · formation ${FORMATION}d skip ${SKIP}d · ` +
+          `hold ${HOLD}d · leg ${LEG_PCT * 100}% (min ${MIN_LEG}) · ` +
+          `universe top ${MAX_UNIVERSE} by trailing ${LIQ_WINDOW}d dollar volume`,
   );
   console.log(
-    `cost ${ROUND_TRIP_PCT}% round trip on turnover · funding excluded ` +
-      `(conservative for shorts)`,
+    `cost ${ROUND_TRIP_PCT}% round trip on turnover · funding cashflow INCLUDED ` +
+      `(longs pay, shorts receive)`,
   );
 
   const pick = (k: 'ls' | 'flip' | 'longOnly') => {
@@ -589,9 +746,10 @@ async function main() {
     );
     console.log(`wrote ${rows.length} periods → ${path}`);
   };
-  write('panel_ls.csv', 'ls');
-  write('panel_flip.csv', 'flip');
-  write('panel_long.csv', 'longOnly');
+  const tag = SIGNAL === 'funding' ? 'fund' : 'panel';
+  write(`${tag}_ls.csv`, 'ls');
+  write(`${tag}_flip.csv`, 'flip');
+  write(`${tag}_long.csv`, 'longOnly');
 }
 
 if (args.includes('--self-check')) {
