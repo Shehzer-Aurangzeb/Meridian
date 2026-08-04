@@ -744,6 +744,76 @@ The §14b diagnosis was a coherent story that fit every prior measurement, and i
 
 ---
 
+## 14e. ⛔ CROSS-SECTIONAL MOMENTUM — no edge; loses to its own random control
+
+*3 Aug 2026. Pre-registered, no sweep. First test built to output a **direction** (long or short) rather than long-only, and the first venue-agnostic one.*
+
+```
+npx ts-node test/manual/panel.ts --self-check
+npx ts-node test/manual/panel.ts --out-dir <dir>          # builds/reuses panel_1d.json
+npx ts-node test/manual/bootstrap.ts <dir>/panel_ls.csv <dir>/panel_flip.csv
+npx ts-node test/manual/bootstrap.ts <dir>/panel_ls.csv <dir>/panel_long.csv
+```
+
+### Design
+
+Rank the universe by trailing 30d return (skip 1d), **long the top decile, short the bottom decile**, equal weight, equal capital per leg, weekly rebalance. Universe = top 100 by trailing 30d median dollar volume, recomputed per rebalance date, from 399 Binance USDT pairs surviving mechanical filters (stablecoins, fiat, metals, leveraged tokens, tokenised equities).
+
+The point of the market-neutral construction: **market drift cannot manufacture the result.** Every earlier section was ambiguous because "did the signal work" was entangled with "did crypto go up". Here the book is half long and half short at all times. It also gives shorts their only fair test — relative weakness against peers rather than fighting an uptrend.
+
+Two bars, both pre-registered: beat a **random-direction** control (same position count, sides shuffled within the same eligible set) *and* beat **always-long**.
+
+### Result — 166 weekly rebalances, 2023-04-22 → 2026-08-03
+
+| book | mean/period | positive % | sd/period | Sharpe (ann) | turnover cost |
+|---|---|---|---|---|---|
+| long/short (strategy) | +0.081% | 51.2% | 4.38% | **0.13** | 0.067% |
+| random direction | **+0.182%** | 48.8% | 2.47% | **0.53** | 0.128% |
+| always long | −0.436% | 49.4% | 11.06% | −0.28 | 0.009% |
+
+Month-clustered bootstrap, 10,000 resamples, 39 blocks:
+
+| | point | 95% CI | P(≤0) |
+|---|---|---|---|
+| strategy | +0.0008 | [−0.0058, +0.0078] | 0.41 |
+| **delta vs random direction** | **−0.0010** | [−0.0085, +0.0064] | **0.60** |
+| delta vs always-long | +0.0052 | [−0.0120, +0.0220] | 0.33 |
+
+**The strategy's point estimate is BELOW its random control.** It fails the primary bar outright, and clears neither bar significantly. Annualised Sharpe 0.13 is economically meaningless even taken at face value.
+
+### Two findings worth keeping, neither about edge
+
+**1. Breakeven round-trip cost is 0.309%,** at 48% weekly turnover. This is the venue-agnostic number the tool should carry: any strategy of this turnover needs sub-0.31% round-trip execution. At retail spot fees (~0.5–0.8% round trip) it is dead before the signal is even considered.
+
+**2. The equal-weight top-100 altcoin universe lost 0.436% per week** across this window while majors rose. That is a structural drag, and it qualifies §14's "frequency comes from breadth" conclusion: **breadth into the long tail is not free.** More coins means fishing in a pond that bleeds, so a wider universe raises trade count and lowers per-trade quality at the same time.
+
+### A bug found and fixed mid-run (worth recording)
+
+The first run reported a window of 2022-06-16 → 2026-08-03. That was wrong. The date axis was built as the **union** of all coins' dates, and because every horizon in the file is expressed in array steps, it must be a contiguous calendar. It wasn't: the leading 179 slots were covered by exactly **one delisted coin (FTT)**, followed by a **127-day hole**. A "30-day" signal spanning that hole measured 157 days, and a "7-day" hold spanned months.
+
+Fixed by `trimToContiguous`, which keeps the longest run of consecutive days covered by ≥20 coins and then asserts contiguity. Effective window became 2023-04-22 → 2026-08-03, 1,200 contiguous days. Also fixed: a coin with no print on its exit date now uses its last available close instead of being dropped from the basket, since dropping silently removes exactly the positions most likely to have collapsed.
+
+The random control's estimate moved from −0.076% to +0.182% across that fix — purely a different RNG draw sequence. **A single random draw is itself a noisy benchmark**; averaging over many draws would be the better construction. It does not change the verdict, since the strategy sits below random either way.
+
+### Caveats
+
+- **Power is lower than earlier tests**: 39 month blocks vs 95–98, because the fetch was capped at 1,200 bars/coin for runtime. A modest real edge might not be detectable here.
+- **Survivorship remains the biggest threat**: the universe is pairs listed *today*, so delisted coins are absent — inflating the long leg's pool and removing short-leg opportunities.
+- Funding excluded (conservative for shorts). Daily closes only.
+
+### Standing verdict after four hypotheses
+
+| # | hypothesis | result |
+|---|---|---|
+| 1 | checklist as scanner | no edge vs random longs (§14c) |
+| 2 | checklist as confirmation filter | structurally unreachable; mis-wired (§14d) |
+| 3 | zone-arrival location | **significantly worse** than random (§14d) |
+| 4 | cross-sectional momentum, long/short | no edge; below its random control (§14e) |
+
+Four families, four negatives, measured in one day for $0. The measurement stack (`backtest.ts`, `zonetest.ts`, `panel.ts`, `bootstrap.ts`, all with self-checks) is what makes that possible and is the only thing here with demonstrated value.
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |
