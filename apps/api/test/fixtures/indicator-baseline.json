@@ -1,0 +1,50 @@
+{
+  "library": "technicalindicators@3.1.0",
+  "candles": 500,
+  "series": {
+    "rsiSeries": {
+      "length": 486,
+      "first3": [
+        62.98,
+        61.22,
+        56.11
+      ],
+      "last3": [
+        61.05,
+        63.1,
+        58.31
+      ],
+      "checksum": "71ac698e954e9300"
+    },
+    "bandWidthSeries": {
+      "length": 481,
+      "first3": [
+        1.5242664092,
+        1.4092781858,
+        1.4164509369
+      ],
+      "last3": [
+        1.4265346586,
+        1.3786378149,
+        1.424308676
+      ],
+      "checksum": "f11db8674390f206"
+    }
+  },
+  "scalars": {
+    "rsi": 58.31,
+    "bbUpper": 64382.2996920862,
+    "bbMiddle": 63927.0404999999,
+    "bbLower": 63471.7813079137,
+    "bandWidth": 1.424308676,
+    "atr": 311.3340572445,
+    "adx": 24.7648323648,
+    "pdi": 20.7323960682,
+    "mdi": 13.02167842,
+    "dx": 22.8438129769,
+    "qqeValue": 60.0622309213,
+    "qqeColor": "red",
+    "qqeTrend": "falling",
+    "bandWidthPercentile": 32.5
+  }
+}
