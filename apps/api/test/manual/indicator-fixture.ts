@@ -36,6 +36,9 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 import { IndicatorsService } from '../../src/indicators/indicators.service';
+import { MarketRegimeService } from '../../src/market-regime/market-regime.service';
+import { BinanceService } from '../../src/market-data/market-data.service';
+import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { Candle } from '../../src/common/types/candle.types';
 
 const CANDLES = join(__dirname, '../fixtures/candles-btc-1h-500.json');
@@ -54,6 +57,14 @@ interface Baseline {
   candles: number;
   series: Record<string, SeriesEntry>;
   scalars: Scalars;
+  /**
+   * The COMPRESSION percentile must not depend on how many candles were
+   * fetched. It used to: `bandWidthSeries.length` is (candles - interval + 1),
+   * and BOTH the percentile rank and the 15th-percentile cutoff scaled with
+   * it, so changing the fetch limit moved the verdict silently. Now it is
+   * measured over a declared lookback. These entries prove independence.
+   */
+  fetchIndependence: Array<{ candles: number; percentile: number | null; samples: number; lookback: number }>;
 }
 
 const P = 10; // decimals used for checksum + display
@@ -109,6 +120,30 @@ function assertInvariants(i: {
   }
 }
 
+/** Regime percentile computed from the trailing `n` candles of the fixture. */
+function regimeAt(candles: Candle[], n: number) {
+  const slice = candles.slice(-n);
+  const svc = new IndicatorsService();
+  const store = new Map<string, unknown>();
+  const cache = {
+    get: (k: string) => Promise.resolve(store.get(k)),
+    set: (k: string, v: unknown) => Promise.resolve(store.set(k, v)),
+    del: (k: string) => Promise.resolve(store.delete(k)),
+  } as unknown as import('cache-manager').Cache;
+  const regime = new MarketRegimeService(
+    new BinanceService(cache, new CacheTelemetryService()),
+    svc,
+  );
+  const ctx = svc.buildContext('BTC', '1h', slice);
+  const r = regime.classifyFromContext(ctx);
+  return {
+    candles: n,
+    percentile: r.metrics.bandWidthPercentile === null ? null : round(r.metrics.bandWidthPercentile),
+    samples: r.metrics.bandWidthSamples,
+    lookback: r.metrics.bandWidthLookback,
+  };
+}
+
 function compute(): Baseline {
   const raw = JSON.parse(readFileSync(CANDLES, 'utf8')) as Array<{
     time: string; open: number; high: number; low: number; close: number; volume: number;
@@ -129,9 +164,15 @@ function compute(): Baseline {
 
   assertInvariants({ rsiSeries, bandWidthSeries, bb, atr, adx, qqe, lastClose });
 
+  // Same trailing bars, two different fetch sizes. The percentile must be
+  // identical: a 20-period BB at any bar depends only on the prior 20
+  // closes, all present in both slices.
+  const fetchIndependence = [regimeAt(candles, 300), regimeAt(candles, 500)];
+
   return {
     library: WRITE ? (process.env.FIXTURE_LABEL ?? 'unlabelled') : 'current',
     candles: candles.length,
+    fetchIndependence,
     series: {
       rsiSeries: digest(rsiSeries),
       bandWidthSeries: digest(bandWidthSeries),
@@ -150,14 +191,11 @@ function compute(): Baseline {
       qqeValue: round(qqe.value),
       qqeColor: qqe.color,
       qqeTrend: qqe.trend,
-      // The regime classifier's actual input. Recorded because a warm-up
-      // change silently shifts it.
-      bandWidthPercentile: round(
-        svc.percentileRank(
-          svc.calculateBandWidth(bb),
-          bandWidthSeries.slice(0, -1),
-        ),
-      ),
+      // Taken from MarketRegimeService itself rather than recomputed here,
+      // so the fixture records the product's real verdict input and cannot
+      // drift from it. Measured over the declared lookback, so this value is
+      // independent of the candle count (proven in fetchIndependence).
+      bandWidthPercentile: fetchIndependence[fetchIndependence.length - 1].percentile ?? -1,
     },
   };
 }
@@ -220,6 +258,19 @@ function compare(now: Baseline, base: Baseline) {
     if (rel > 1e-9) significant++;
   }
   console.table(rows);
+
+  console.log('\n── fetch-size independence ' + '─'.repeat(35));
+  console.table(now.fetchIndependence);
+  const pcts = now.fetchIndependence.map((f) => f.percentile);
+  const allEqual = pcts.every((p) => p === pcts[0]);
+  if (!allEqual) {
+    console.log(
+      '  ❌ percentile MOVES with fetch size — the declared lookback is not binding',
+    );
+    significant++;
+  } else {
+    console.log(`  ✅ percentile ${pcts[0]} identical at ${now.fetchIndependence.map((f) => f.candles).join(' and ')} candles`);
+  }
 
   console.log(
     significant === 0

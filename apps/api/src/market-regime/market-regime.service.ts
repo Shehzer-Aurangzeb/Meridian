@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
 import { TimeInterval } from '../common/types/candle.types';
@@ -27,13 +27,30 @@ import {
  */
 @Injectable()
 export class MarketRegimeService {
-  // Minimum number of historical band-width samples required before we
-  // trust the percentile-based COMPRESSION rule. Below this we fall back
-  // to the strict < 1.5% absolute threshold.
-  private static readonly BANDWIDTH_PERCENTILE_MIN_SAMPLES = 50;
+  private readonly logger = new Logger(MarketRegimeService.name);
 
-  // Default candle window. Large enough to build a reliable BB-width
-  // distribution (~230 BB(20) samples).
+  /**
+   * How many historical band-width samples the COMPRESSION percentile is
+   * measured over. A DECLARED CHOICE, not an accident of the fetch size.
+   *
+   * This used to be "however many samples `bandWidthSeries` happened to
+   * contain", i.e. `candles - interval + 1 - 1`. Both the percentile rank
+   * AND the 15th-percentile cutoff (`sorted[idx]`) scale with that length,
+   * so raising the candle limit from 250 to 1000 silently moved the
+   * COMPRESSION verdict with nothing in the code or output explaining why.
+   *
+   * 200 samples: comfortably enough to estimate a 15th percentile, and
+   * available with headroom at the 250-candle default fetch
+   * (BB(20) over 250 closes yields ~230 samples).
+   *
+   * Below this we do NOT quietly compute over fewer — that is the behaviour
+   * being removed. We take the explicit fallback path instead, and say so.
+   */
+  private static readonly BANDWIDTH_PERCENTILE_LOOKBACK = 200;
+
+  // Default candle window. Must be large enough to supply
+  // BANDWIDTH_PERCENTILE_LOOKBACK samples: BB(20) over 250 closes yields
+  // ~230, leaving ~30 of headroom over the 200 required.
   public static readonly REGIME_CANDLE_LIMIT = 250;
 
   // ADX threshold above which the market is considered trending.
@@ -102,12 +119,23 @@ export class MarketRegimeService {
       );
     }
 
-    // Historical bandwidth distribution (excludes the current sample so the
-    // percentile reflects "where am I relative to the past?").
-    const historical = bandWidthSeries.slice(0, -1);
+    // Historical bandwidth distribution. Excludes the current sample so the
+    // percentile answers "where am I relative to the past?", and is capped to
+    // an explicit lookback so neither the rank nor the cutoff depends on how
+    // many candles the caller happened to fetch.
+    const available = bandWidthSeries.slice(0, -1);
+    const lookback = MarketRegimeService.BANDWIDTH_PERCENTILE_LOOKBACK;
+    const historical = available.slice(-lookback);
 
-    const hasReliableHistory =
-      historical.length >= MarketRegimeService.BANDWIDTH_PERCENTILE_MIN_SAMPLES;
+    const hasReliableHistory = historical.length >= lookback;
+
+    if (!hasReliableHistory) {
+      this.logger.warn(
+        `${symbol} ${timeframe}: only ${historical.length} band-width samples available, ` +
+          `need ${lookback} — percentile suppressed, falling back to the absolute ` +
+          `${MarketRegimeService.COMPRESSION_FALLBACK_PCT}% threshold`,
+      );
+    }
 
     let bandWidthPercentile: number | null = null;
     let bandWidthThreshold: number;
@@ -139,8 +167,10 @@ export class MarketRegimeService {
     if (isCompressed) {
       regime = 'COMPRESSION';
       reason = hasReliableHistory
-        ? `BB width ${bandWidth.toFixed(3)}% at ${bandWidthPercentile?.toFixed(1)}th percentile (<= 15th, cutoff ${bandWidthThreshold.toFixed(3)}%)`
-        : `BB width ${bandWidth.toFixed(3)}% < ${MarketRegimeService.COMPRESSION_FALLBACK_PCT}% (historical percentile unavailable)`;
+        ? `BB width ${bandWidth.toFixed(3)}% at ${bandWidthPercentile?.toFixed(1)}th percentile ` +
+          `(<= 15th, cutoff ${bandWidthThreshold.toFixed(3)}%) measured over ${historical.length} samples`
+        : `BB width ${bandWidth.toFixed(3)}% < ${MarketRegimeService.COMPRESSION_FALLBACK_PCT}% ` +
+          `(percentile needs ${lookback} samples, only ${historical.length} available)`;
     } else if (adx.adx > MarketRegimeService.ADX_TREND_THRESHOLD) {
       regime = 'TRENDING';
       reason = `ADX ${adx.adx.toFixed(2)} > ${MarketRegimeService.ADX_TREND_THRESHOLD} (+DI ${adx.pdi.toFixed(2)}, -DI ${adx.mdi.toFixed(2)})`;
@@ -163,6 +193,8 @@ export class MarketRegimeService {
         bandWidth,
         bandWidthPercentile,
         bandWidthThreshold,
+        bandWidthLookback: lookback,
+        bandWidthSamples: historical.length,
         bollingerBands,
       },
     };

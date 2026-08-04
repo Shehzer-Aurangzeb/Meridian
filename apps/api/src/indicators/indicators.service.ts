@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { RSI, BollingerBands, ATR, ADX, EMA } from 'technicalindicators';
+import {
+  adxLatest,
+  atrLatest,
+  bollingerSeries,
+  emaSeries,
+  rsiSeries as rsiSeriesOf,
+} from './series';
 import { Candle } from '../common/types/candle.types';
 import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
@@ -43,10 +49,7 @@ export class IndicatorsService {
       );
     }
 
-    const rsiValues = RSI.calculate({
-      values: closes,
-      period,
-    });
+    const rsiValues = rsiSeriesOf(closes, period);
 
     if (rsiValues.length === 0) {
       throw new Error('RSI calculation returned no values');
@@ -78,11 +81,7 @@ export class IndicatorsService {
       );
     }
 
-    const bbValues = BollingerBands.calculate({
-      values: closes,
-      period,
-      stdDev,
-    });
+    const bbValues = bollingerSeries(closes, period, stdDev);
 
     if (bbValues.length === 0) {
       throw new Error('Bollinger Bands calculation returned no values');
@@ -129,19 +128,8 @@ export class IndicatorsService {
       );
     }
 
-    const atrValues = ATR.calculate({
-      high: highs,
-      low: lows,
-      close: closes,
-      period,
-    });
-
-    if (atrValues.length === 0) {
-      throw new Error('ATR calculation returned no values');
-    }
-
-    const latestATR = atrValues[atrValues.length - 1];
-    if (latestATR === undefined || isNaN(latestATR)) {
+    const latestATR = atrLatest(highs, lows, closes, period);
+    if (isNaN(latestATR)) {
       throw new Error('ATR calculation returned invalid value');
     }
 
@@ -227,7 +215,7 @@ export class IndicatorsService {
     }
 
     // Calculate RSI values
-    const rsiValues = RSI.calculate({ values: closes, period });
+    const rsiValues = rsiSeriesOf(closes, period);
 
     if (rsiValues.length < 5) {
       return {
@@ -240,10 +228,7 @@ export class IndicatorsService {
 
     // Smooth RSI with EMA (QQE uses smoothed RSI)
     const smoothingPeriod = 5;
-    const smoothedRSI = EMA.calculate({
-      values: rsiValues,
-      period: smoothingPeriod,
-    });
+    const smoothedRSI = emaSeries(rsiValues, smoothingPeriod);
 
     if (smoothedRSI.length < 2) {
       return {
@@ -440,7 +425,7 @@ export class IndicatorsService {
   /**
    * Calculate ADX (Average Directional Index) with +DI / -DI.
    *
-   * Uses Wilder's smoothing via the `technicalindicators` library.
+   * Uses Wilder's smoothing via `trading-signals` (see ./series.ts).
    * Requires roughly 2 * period candles to produce a stable value.
    *
    * @param highs  - Array of high prices
@@ -466,27 +451,8 @@ export class IndicatorsService {
       );
     }
 
-    const adxValues = ADX.calculate({
-      high: highs,
-      low: lows,
-      close: closes,
-      period,
-    });
-
-    if (adxValues.length === 0) {
-      throw new Error('ADX calculation returned no values');
-    }
-
-    const latest = adxValues[adxValues.length - 1];
-    if (
-      !latest ||
-      latest.adx === undefined ||
-      latest.pdi === undefined ||
-      latest.mdi === undefined ||
-      isNaN(latest.adx) ||
-      isNaN(latest.pdi) ||
-      isNaN(latest.mdi)
-    ) {
+    const latest = adxLatest(highs, lows, closes, period);
+    if (isNaN(latest.adx) || isNaN(latest.pdi) || isNaN(latest.mdi)) {
       throw new Error('ADX calculation returned invalid values');
     }
 
@@ -514,7 +480,7 @@ export class IndicatorsService {
   ): number[] {
     if (closes.length < period) return [];
 
-    const bbSeries = BollingerBands.calculate({ values: closes, period, stdDev });
+    const bbSeries = bollingerSeries(closes, period, stdDev);
     const widths: number[] = [];
     for (const bb of bbSeries) {
       if (
