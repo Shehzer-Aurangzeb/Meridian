@@ -18,6 +18,12 @@ export interface MarketRegimeMetrics {
   bandWidth: number;
   bandWidthPercentile: number | null; // null if historical data not ready
   bandWidthThreshold: number; // 15th-percentile cutoff used (or 1.5 fallback)
+  // The window the percentile and cutoff were measured over. Surfaced so a
+  // COMPRESSION verdict always states what it was measured against — the
+  // percentile used to depend on however many samples the fetch happened to
+  // produce, which made the verdict move with the candle limit.
+  bandWidthLookback: number; // declared lookback (samples requested)
+  bandWidthSamples: number; // samples actually used
   bollingerBands: BollingerBandsResult;
 }
 

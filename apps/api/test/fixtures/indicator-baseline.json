@@ -1,50 +1,64 @@
 {
-  "library": "technicalindicators@3.1.0",
+  "library": "trading-signals@8.2.0",
   "candles": 500,
+  "fetchIndependence": [
+    {
+      "candles": 300,
+      "percentile": 25.5,
+      "samples": 200,
+      "lookback": 200
+    },
+    {
+      "candles": 500,
+      "percentile": 25.5,
+      "samples": 200,
+      "lookback": 200
+    }
+  ],
   "series": {
     "rsiSeries": {
       "length": 486,
       "first3": [
-        62.98,
-        61.22,
-        56.11
+        62.9771243984,
+        61.2198595195,
+        56.1088046295
       ],
       "last3": [
-        61.05,
-        63.1,
-        58.31
+        61.047317992,
+        63.0965647169,
+        58.3057437479
       ],
-      "checksum": "71ac698e954e9300"
+      "checksum": "b6237d48ea8ff0d9"
     },
     "bandWidthSeries": {
-      "length": 481,
+      "length": 480,
       "first3": [
-        1.5242664092,
         1.4092781858,
-        1.4164509369
+        1.4164509369,
+        1.4704668906
       ],
       "last3": [
         1.4265346586,
         1.3786378149,
         1.424308676
       ],
-      "checksum": "f11db8674390f206"
+      "checksum": "115c873113d31f3e"
     }
   },
   "scalars": {
-    "rsi": 58.31,
+    "rsi": 58.3057437479,
     "bbUpper": 64382.2996920862,
-    "bbMiddle": 63927.0404999999,
-    "bbLower": 63471.7813079137,
+    "bbMiddle": 63927.0405,
+    "bbLower": 63471.7813079138,
     "bandWidth": 1.424308676,
     "atr": 311.3340572445,
     "adx": 24.7648323648,
     "pdi": 20.7323960682,
     "mdi": 13.02167842,
     "dx": 22.8438129769,
-    "qqeValue": 60.0622309213,
+    "qqeValue": 60.0598830858,
     "qqeColor": "red",
     "qqeTrend": "falling",
-    "bandWidthPercentile": 32.5
+    "bandWidthPercentile": 25.5
   }
 }
