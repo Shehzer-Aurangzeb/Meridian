@@ -123,10 +123,26 @@ export class LeverageService {
   }
   
   /**
-   * Get base leverage from timeframe
+   * Get base leverage from timeframe.
+   *
+   * Throws on an unrecognised timeframe. This previously fell back to `|| 5`,
+   * so an unknown timeframe silently received 5x leverage — a risk control
+   * granting leverage on input it does not understand.
+   *
+   * A "conservative" fallback of 1x would be no better: it is still a
+   * made-up number presented as an answer. If leverage cannot be determined
+   * the system must refuse to produce a plan, because a plausible number is
+   * exactly how this repo's earlier indicator bugs survived for months.
    */
   private getBaseLeverageFromTimeframe(timeframe: string): number {
-    return this.TIMEFRAME_BASE_LEVERAGE[timeframe] || 5;
+    const base = this.TIMEFRAME_BASE_LEVERAGE[timeframe];
+    if (base === undefined) {
+      throw new Error(
+        `Cannot determine leverage for unrecognised timeframe "${timeframe}". ` +
+          `Known timeframes: ${Object.keys(this.TIMEFRAME_BASE_LEVERAGE).join(', ')}`,
+      );
+    }
+    return base;
   }
   
   /**
