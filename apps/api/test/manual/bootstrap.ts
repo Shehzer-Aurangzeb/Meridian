@@ -23,6 +23,8 @@
  * month boundary is ever suspected of mattering; for a 48-bar max hold on 1d
  * bars it does not.
  */
+import { makeRng } from './rng';
+
 const args = process.argv.slice(2);
 const flagVal = (name: string, fallback: string): string => {
   const i = args.indexOf(`--${name}`);
@@ -61,11 +63,9 @@ function parse(path: string): Row[] {
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
-/** Deterministic RNG so a reported p-value can be reproduced exactly. */
-function makeRng(seed: number) {
-  let s = seed;
-  return () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-}
+// Deterministic RNG (see rng.ts) so a reported p-value reproduces exactly.
+// The generator that used to live here was non-uniform enough to over-weight
+// some months in the resample; any CI printed before that fix needs re-running.
 
 function byMonth(rows: Row[]): Map<string, number[]> {
   const m = new Map<string, number[]>();
