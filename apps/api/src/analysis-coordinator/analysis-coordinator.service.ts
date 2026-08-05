@@ -59,6 +59,7 @@ export class AnalysisCoordinatorService {
   async analyzeAsset(
     symbol: string,
     timeframe: string,
+    direction?: 'long' | 'short',
   ): Promise<CoordinatorAnalysisResult> {
     this.logger.log(`Starting analysis pipeline for ${symbol} ${timeframe}`);
 
@@ -78,7 +79,7 @@ export class AnalysisCoordinatorService {
     const regimeResult = this.marketRegimeService.classifyFromContext(context);
     this.logger.debug(`Market regime: ${regimeResult.regime}`);
 
-    return this.routeFromRegime(context, timeframe, regimeResult);
+    return this.routeFromRegime(context, timeframe, regimeResult, direction);
   }
 
   /**
@@ -93,6 +94,7 @@ export class AnalysisCoordinatorService {
     context: IndicatorContext,
     timeframe: string,
     regimeResult: MarketRegimeResult,
+    direction?: 'long' | 'short',
   ): CoordinatorAnalysisResult {
     if (regimeResult.regime === 'COMPRESSION') {
       this.logger.debug('Routing to SQUEEZE_BREAKOUT strategy...');
@@ -121,7 +123,7 @@ export class AnalysisCoordinatorService {
 
     this.logger.debug('Routing to CONFLUENCE_CHECKLIST strategy...');
 
-    const checklistInputs = this.buildChecklistInputs(context, regimeResult);
+    const checklistInputs = this.buildChecklistInputs(context, regimeResult, direction);
     const checklistResult =
       this.checklistService.evaluateChecklist(checklistInputs);
 
@@ -141,7 +143,9 @@ export class AnalysisCoordinatorService {
       shouldInvokeAI,
       reasoning:
         `Market classified as ${regimeResult.regime} (ADX: ${regimeResult.metrics.adx.toFixed(2)}). ` +
-        `Evaluated confluence checklist: ${checklistResult.status} (${checklistResult.totalScore}/100). ` +
+        `Evaluated confluence checklist for ${checklistResult.tradeType} ` +
+        `(direction ${direction ? 'supplied by caller' : 'derived from trend'}): ` +
+        `${checklistResult.status} (${checklistResult.totalScore}/100). ` +
         `AI execution ${shouldInvokeAI ? 'ENABLED' : 'DISABLED'}.`,
     };
   }
@@ -161,6 +165,7 @@ export class AnalysisCoordinatorService {
   private buildChecklistInputs(
     context: IndicatorContext,
     regimeResult: MarketRegimeResult,
+    direction?: 'long' | 'short',
   ): EntryChecklistParams {
     const {
       candles,
@@ -226,7 +231,12 @@ export class AnalysisCoordinatorService {
       currentPrice,
     );
 
-    const tradeType = this.deriveTradeType(regimeResult, marketStructure);
+    // Direction is an INPUT when the caller knows it. A confirmation filter
+    // must be told which side it is confirming; deciding for itself and then
+    // vetoing is how support-zone arrivals came to be evaluated as shorts,
+    // where `rsi >= 60` and the UPPER Bollinger band can never pass.
+    // Falls back to trend-derived direction only when the caller has no view.
+    const tradeType = direction ?? this.deriveTradeType(regimeResult, marketStructure);
 
     return {
       tradeType,
@@ -256,6 +266,14 @@ export class AnalysisCoordinatorService {
    *   1. Market structure (HH/HL → long, LH/LL → short) — strongest signal
    *   2. DI spread (+DI vs -DI) — directional trend tiebreaker
    *   3. Fallback to 'long' when neither is conclusive
+   */
+  /**
+   * Fallback direction when the caller supplies none: read it off the trend.
+   *
+   * This is only a guess, and it is the WRONG guess whenever the setup's
+   * direction is implied by something other than trend — most obviously a
+   * level, where arriving at support is a long regardless of the prevailing
+   * structure. Prefer passing `direction` explicitly.
    */
   private deriveTradeType(
     regimeResult: MarketRegimeResult,
