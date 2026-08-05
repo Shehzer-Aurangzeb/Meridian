@@ -219,7 +219,7 @@ credit at support/resistance — it is NOT a binary 60+ gate.
 - Total Score:      ${checklist.totalScore}/100
 - Conditions Met:   ${checklist.conditionsMet}/5
 - **Status:        ${checklist.status}** — ${tierGuide}
-- Tradeable Gate:   ${checklist.passed ? 'YES (status ≠ WATCHING)' : 'NO (status = WATCHING)'}
+- Tradeable Gate:   ${checklist.passed ? 'YES' : 'NO'} (${checklist.conditionsMet}/5 conditions, needs 3)
 
 ## Per-Condition Breakdown (each scored 0–20 with partial credit)
 ${conditions}

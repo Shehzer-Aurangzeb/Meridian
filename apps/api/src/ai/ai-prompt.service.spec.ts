@@ -227,7 +227,10 @@ describe('ClaudePromptService', () => {
     });
 
     it('carries a failing score for a 1/5 setup', () => {
-      // 1/5 = 20 points = WATCHING, the only tier where `passed` is false.
+      // 1/5 fails the playbook's 3-of-5 minimum. Note this fixture derives
+      // `passed` from the old tier rule, where WATCHING was the only failing
+      // tier; production now fails 2/5 as well. The assertion holds under
+      // both, and the fixture is exercising prompt rendering, not the gate.
       const data = createMockData('long', [true, false, false, false, false], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 

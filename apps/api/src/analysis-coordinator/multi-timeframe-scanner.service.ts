@@ -99,8 +99,11 @@ export class MultiTimeframeScannerService {
     const entryHorizon = this.buildExecutionHorizon(entryResult, '1h');
     const structureHorizon = this.buildExecutionHorizon(structureResult, '4h');
 
-    const isActive = (h: ExecutionHorizon): boolean =>
-      h.status !== 'WATCHING';
+    // Routes on the coordinator's gate rather than re-deriving one from the
+    // tier label. The coordinator applies the playbook's 3-of-5 rule, and
+    // squeeze horizons carry shouldInvokeAI=true, so this preserves squeeze
+    // behaviour while removing the scanner's dependence on tiers.
+    const isActive = (h: ExecutionHorizon): boolean => h.shouldInvokeAI;
 
     let executionHorizon: ExecutionHorizon;
     let executionPayload: CoordinatorAnalysisResult;
@@ -117,7 +120,7 @@ export class MultiTimeframeScannerService {
       // TTL still reflects the *displayed* horizon (1h ⇒ 12h) so the UI
       // countdown is meaningful even on "no-trade" results.
       this.logger.log(
-        `Scanner short-circuit | coin=${coin} | reason=both 1h and 4h are WATCHING`,
+        `Scanner short-circuit | coin=${coin} | reason=neither 1h nor 4h met the entry gate`,
       );
       const watchingExpiresAt = this.computeExpiresAt(entryHorizon.timeframe);
       return {

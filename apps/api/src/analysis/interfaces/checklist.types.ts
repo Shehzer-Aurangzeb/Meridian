@@ -88,7 +88,7 @@ export interface EntryChecklistResult {
   totalScore: number; // 0-100
   conditionsMet: number; // 0-5
   status: ChecklistStatus; // WATCHING | TACTICAL_SETUP | STRATEGIC_TRADE | APEX_SETUP
-  passed: boolean; // true if status !== 'WATCHING'
+  passed: boolean; // true if conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET (3 of 5)
   tradeType: 'long' | 'short';
 
   // All conditions as array for iteration
@@ -142,6 +142,22 @@ export const SR_THRESHOLDS = {
 /**
  * Checklist scoring tiers
  */
+/**
+ * Minimum conditions that must be met for a setup to exist at all.
+ *
+ * Playbook p12, "Entry Checklist - LONG Position": *Minimum Requirements
+ * (Must Have 3/5)*. The same wording appears for shorts on p12-13.
+ *
+ * Expressed in CONDITIONS, not points, deliberately: the continuous scorer
+ * awards partial credit, so a score threshold means different things under
+ * the two scorers while "3 of 5 conditions met" does not.
+ *
+ * Note this is STRICTER than the tier gate it replaces. `WATCHING` ended at
+ * a score of 39, so the old gate admitted 2-of-5 setups — below the
+ * playbook's own stated minimum.
+ */
+export const PLAYBOOK_MIN_CONDITIONS_MET = 3;
+
 export const CHECKLIST_SCORE_TIERS = {
   WATCHING: { min: 0, max: 39 },
   TACTICAL_SETUP: { min: 40, max: 59 },
