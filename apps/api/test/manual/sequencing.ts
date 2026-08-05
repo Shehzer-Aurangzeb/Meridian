@@ -45,11 +45,8 @@ import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-c
 import { IndicatorsService } from '../../src/indicators/indicators.service';
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
-import {
-  BB_THRESHOLDS,
-  RSI_ENTRY_THRESHOLDS,
-} from '../../src/analysis/interfaces/checklist.types';
 import { TimeInterval } from '../../src/common/types/candle.types';
+import { BarState, MAX_WAIT, classify, walk } from './signal';
 
 const store = new Map<string, unknown>();
 const cache = {
@@ -66,17 +63,6 @@ const COINS =
 const li = rest.indexOf('--limit');
 const LIMIT = li >= 0 && rest[li + 1] ? Number(rest[li + 1]) : 1200;
 
-/** Longest a dip is allowed to wait for its trigger before we call it stale. */
-const MAX_WAIT = 20;
-
-interface BarState {
-  oversold: boolean;
-  atLowerBand: boolean;
-  qqeGreen: boolean;
-  qqeTurnedGreen: boolean;
-  structure: string;
-}
-
 let bars = 0;
 let setupBars = 0;
 let simultaneous = 0; // dip AND turn on the SAME bar — the current encoding
@@ -89,36 +75,6 @@ let stillAtLower = 0;
 let stillBoth = 0;
 const structureAtTrigger = new Map<string, number>();
 let coinYears = 0;
-
-function classify(ctx: {
-  rsi: number;
-  bollingerBands: { upper: number; lower: number };
-  closes: readonly number[];
-  qqe: { color: string; previousColor: string };
-  highs: readonly number[];
-  lows: readonly number[];
-}): BarState {
-  const price = ctx.closes[ctx.closes.length - 1];
-  const range = ctx.bollingerBands.upper - ctx.bollingerBands.lower;
-  const proximity = range > 0 ? ((price - ctx.bollingerBands.lower) / range) * 100 : 100;
-
-  // Same structure rule the checklist uses: compare the last bar to a pivot
-  // roughly 20 bars back.
-  const n = ctx.closes.length;
-  const mid = (ctx.bollingerBands.upper + ctx.bollingerBands.lower) / 2;
-  const pivot = Math.max(0, n - 21);
-  let structure = 'ranging';
-  if (price > mid && ctx.highs[n - 1] > ctx.highs[pivot]) structure = 'HH/HL';
-  else if (price < mid && ctx.lows[n - 1] < ctx.lows[pivot]) structure = 'LH/LL';
-
-  return {
-    oversold: ctx.rsi <= RSI_ENTRY_THRESHOLDS.LONG.STRICT_MAX,
-    atLowerBand: proximity <= BB_THRESHOLDS.PROXIMITY_PERCENT,
-    qqeGreen: ctx.qqe.color === 'green',
-    qqeTurnedGreen: ctx.qqe.color === 'green' && ctx.qqe.previousColor !== 'green',
-    structure,
-  };
-}
 
 async function run(coin: string) {
   const indicators = new IndicatorsService();
@@ -134,37 +90,19 @@ async function run(coin: string) {
   bars += states.length;
   coinYears += states.length / 365;
 
-  // ── state machine: IDLE -> ARMED (dip present) -> TRIGGERED | EXPIRED ──
-  let armedAt = -1;
-  for (let k = 0; k < states.length; k++) {
-    const s = states[k];
-    const isDip = s.oversold && s.atLowerBand;
+  const w = walk(states);
+  setupBars += w.dipBars;
+  simultaneous += w.simultaneous;
+  expired += w.expired;
+  sequencedSignals += w.triggers.length;
 
-    if (isDip) {
-      setupBars++;
-      if (s.qqeTurnedGreen) simultaneous++;
-      // (Re)arm on any dip bar — the dip is ongoing, the clock restarts.
-      armedAt = k;
-      continue;
-    }
-
-    if (armedAt < 0) continue;
-
-    if (k - armedAt > MAX_WAIT) {
-      expired++;
-      armedAt = -1;
-      continue;
-    }
-
-    if (s.qqeTurnedGreen) {
-      sequencedSignals++;
-      waitBars.push(k - armedAt);
-      if (s.oversold) stillOversold++;
-      if (s.atLowerBand) stillAtLower++;
-      if (s.oversold && s.atLowerBand) stillBoth++;
-      structureAtTrigger.set(s.structure, (structureAtTrigger.get(s.structure) ?? 0) + 1);
-      armedAt = -1;
-    }
+  for (const t of w.triggers) {
+    const s = states[t.at];
+    waitBars.push(t.at - t.armedAt);
+    if (s.oversold) stillOversold++;
+    if (s.atLowerBand) stillAtLower++;
+    if (s.oversold && s.atLowerBand) stillBoth++;
+    structureAtTrigger.set(s.structure, (structureAtTrigger.get(s.structure) ?? 0) + 1);
   }
 }
 
