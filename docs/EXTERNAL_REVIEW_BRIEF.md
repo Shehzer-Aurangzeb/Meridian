@@ -1,5 +1,12 @@
 # Meridian — External Review Brief
 
+> ⚠️ **SUPERSEDED by `STATUS_FOR_REVIEW.md` (4 Aug 2026).** Kept as the record of what
+> we actually asked in the first review round. **Its headline result is retracted:**
+> the +0.117R / p=0.0041 figure in §3 did not survive month-clustered inference and
+> is not reproducible — see `STATE_OF_PLAY.md` §14c. Four further hypotheses were
+> tested after this document was written and all four also failed. Do not quote
+> numbers from this file.
+
 **Date:** 3 Aug 2026 · **Purpose:** independent second opinion on direction before we build the next phase.
 
 You have no access to the repository. Everything needed to judge this is in this document. We are not asking for encouragement — we are asking whether the reasoning holds. **§8 lists the specific things we think are most likely to be wrong. If you only address one section, address that one.**
