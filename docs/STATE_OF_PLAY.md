@@ -887,6 +887,157 @@ Five families, five negatives. The pivot in `SYSTEMATIC_ANALYST.md` stands on th
 
 ---
 
+## 14g. ⛔ SEQUENCED DIP→TURN — fires often, predicts nothing
+
+The sequencing test (`b581e86`) proved the five checklist conditions are a
+*sequence*, not a conjunction: read as "dip, THEN momentum turns," the same
+conditions fire **314 times** (12.06/coin-year) where the simultaneous rule
+fired **10** (0.38/coin-year). That fixed the frequency problem — it said
+nothing about whether the signals are worth taking.
+
+This is that measurement, and it is negative.
+
+### Design — pre-registered in the harness header before the first run
+
+Deliberately **no exit rule.** §14d showed a bad exit drowns the entry: a
+0.25 reward/risk TP1 needs an >80% win rate just to break even, so the entry
+could not be seen through it. And 2R is arbitrary — we chose it, not the
+market. So this measures the **raw forward return** and leaves exit design to
+a later step. Entry and exit are measured separately instead of confounded.
+
+| | |
+|---|---|
+| signal | dip (RSI ≤ 40 AND within 10% of lower band), THEN QQE turns green within 20 bars |
+| window | 20 bars — **not fitted.** Zero dips went stale and the median wait is 1 bar, so the cap never binds. A guard, not a parameter. |
+| horizons | 5, 10, 20 bars. Declared together, reported together. |
+| units | ATR at the entry bar — makes a 4% BTC move and a 12% alt move comparable |
+| cost | 0.05% fee + 0.02% slip per side = 0.140% round trip, over ATR% (median 0.020R) |
+| control | random long entries, matched count **per coin**, uniform without replacement over the same eligible bars |
+| eligible | full indicator window, ATR > 0, largest horizon still ahead — identical set for both arms and all horizons |
+| inference | month-clustered block bootstrap. No t-test. |
+
+Signal definition extracted to `test/manual/signal.ts` so the frequency test
+and the return test provably measure the same thing. Verified by re-running
+`sequencing.ts` after the extraction: 314 / 10 / 0% band-proximity / 2.2%
+HH/HL, identical to the committed run.
+
+```
+npx ts-node test/manual/forward.ts 1d \
+  --coins ARB,ADA,SOL,DOGE,BTC,ETH,LINK,XRP,AVAX,BNB --limit 3300 \
+  --out test/manual/results/step1-long
+npx ts-node test/manual/bootstrap.ts test/manual/results/step1-long-signal-h20.csv \
+  test/manual/results/step1-long-random-h20.csv --direction long
+```
+
+### Result — 672 signals, 24,206 bars, ~66 coin-years, 85 monthly blocks
+
+| horizon | signal mean net | random mean net | delta | 95% CI | P(≤0) |
+|---|---|---|---|---|---|
+| 5 bars | +0.010R | +0.139R | −0.129R | [−0.181, +0.188] | 0.458 |
+| 10 bars | −0.055R | +0.193R | −0.248R | [−0.418, +0.163] | 0.791 |
+| 20 bars | +0.411R | +0.436R | −0.024R | [−0.431, +0.673] | 0.301 |
+
+Every horizon includes zero. Two of three point estimates are negative. The
+signal does not precede better returns than a coin flip at matched frequency.
+
+### The reason both sample sizes were run — and why it matters
+
+The first run used `--limit 1200` (matching the sequencing run) and gave only
+**29 monthly blocks**, which cannot resolve an effect of this size. At 29
+blocks the 20-bar delta was **+0.435R, P(≤0) = 0.068** — the first
+positive-leaning number in this project.
+
+At 85 blocks it is **−0.024R**. The lean was small-sample noise.
+
+Same specification, same seed, same coins — only the history length changed.
+This is recorded because the tempting move was to report the 29-block number
+and call the longer run a robustness check. **29-block CIs on this data are
+not informative and should not be quoted.**
+
+### One distributional fact, which is an observation and not an edge
+
+At 20 bars the signal beats random on the *middle* of the distribution and
+loses the tail:
+
+| | signal | random |
+|---|---|---|
+| median net | **+0.013R** | −0.202R |
+| win % | **50.3%** | 45.7% |
+| mean net | +0.411R | +0.436R |
+| sd | 4.02 | 4.45 |
+
+The signal wins slightly more often and more tightly; random longs win less
+often but bigger. Identical means. This is a real difference in *shape*, and
+it is worth remembering when an exit rule is eventually designed — a rule
+that harvests the middle would treat these differently. It is not evidence of
+predictive edge, and it was found after the fact.
+
+### A generator bug found by the new self-check — affects earlier CIs
+
+`bootstrap.ts` and the new harness both used this inline LCG:
+
+```
+s = (s * 1103515245 + 12345) & 0x7fffffff
+```
+
+In JavaScript this is badly non-uniform: `s * 1103515245` reaches ~2^61, past
+the 2^53 where doubles are exact, so the product's low bits are rounding
+artefacts — and `& 0x7fffffff` then keeps exactly those bits. Measured by the
+new uniformity assertion: drawing 5-of-20 twenty thousand times gave bucket
+counts from **369 to 1632** against an expected 1000. In a month-block
+bootstrap that silently over-weights some months.
+
+Replaced with mulberry32 (`test/manual/rng.ts`), all arithmetic through
+`Math.imul` so it stays in exact 32-bit range. Still fully deterministic, so a
+reported CI still reproduces from its seed.
+
+**⚠️ Consequence for §14b–§14f:** every CI in those sections was computed with
+the biased generator. The direction of the distortion is not knowable without
+re-running, and the CSVs were not kept, so they cannot be re-bootstrapped
+without re-running the generating harnesses. The §14g numbers above are the
+only ones in this document computed with the fixed generator.
+
+This does not change any decision: §14d's zone result reads either
+"significantly worse than random" or "no better than random," and both say
+*do not build it.* But **§14d's "CI excludes zero" should be treated as
+unverified**, not as an established fact, until `zonetest.ts` is re-run.
+
+### Standing verdict — six hypotheses
+
+| # | hypothesis | result |
+|---|---|---|
+| 1 | checklist as scanner | no edge vs random longs (§14c) |
+| 2 | checklist as confirmation filter | structurally unreachable; mis-wired (§14d) |
+| 3 | zone-arrival location | worse than random — *significance unverified, see §14g* (§14d) |
+| 4 | cross-sectional momentum, long/short | not significant; worse than random risk-adjusted (§14e) |
+| 5 | cross-sectional funding, contrarian | no edge; delta is a coin flip (§14f) |
+| 6 | sequenced dip→turn | fires 32× more often; no edge at any horizon (§14g) |
+
+**What §14g does and does not close.** It closes "the conditions were just
+encoded wrong" — the sequencing fix was real, it produced a tradeable
+frequency, and the signals still carry no directional information. It does
+not test *location*: `signal.ts` uses momentum and band-extremity only, with
+no support/resistance input at all, because the level engine that would
+supply trustworthy levels does not exist yet. The dip conditions fire at
+whatever price happens to be oversold, not at a level.
+
+So the open question narrows to one: **does requiring the dip to happen at a
+real level change this?** That is a delta against the table above, on the
+same signal and the same control — which is what step 3 of the build plan
+measures. Six negatives means the prior on it is low.
+
+### Methodology rules added
+
+- **Report the block count next to every CI.** 29 blocks and 85 blocks on the
+  same data disagreed on sign. Trade count is not sample size.
+- **Never quote a point estimate from the smaller of two sample sizes** you
+  ran, whichever direction it leans.
+- **A seeded RNG needs a uniformity assertion,** not just a reproducibility
+  one. Reproducible and uniform are different properties, and the harness
+  passed reproducibility for months while being non-uniform.
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |
