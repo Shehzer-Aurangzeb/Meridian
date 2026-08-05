@@ -6,7 +6,10 @@ import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 import { IndicatorContext } from '../common/types/indicator-context.types';
-import { EntryChecklistParams } from '../analysis/interfaces/checklist.types';
+import {
+  EntryChecklistParams,
+  PLAYBOOK_MIN_CONDITIONS_MET,
+} from '../analysis/interfaces/checklist.types';
 import { MarketRegimeResult } from '../market-regime/interfaces/market-regime.types';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 
@@ -127,10 +130,27 @@ export class AnalysisCoordinatorService {
     const checklistResult =
       this.checklistService.evaluateChecklist(checklistInputs);
 
-    const shouldInvokeAI = checklistResult.status !== 'WATCHING';
+    // Playbook rule: a setup requires 3 of 5 conditions (p12). This replaces
+    // `status !== 'WATCHING'`, which admitted 2-of-5 because WATCHING ended
+    // at a score of 39.
+    const shouldInvokeAI =
+      checklistResult.conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET;
+
+    // TRANSITIONAL (remove in D4 with the tiers): report both rules so any
+    // disagreement is visible rather than silent.
+    const oldTierGate = checklistResult.status !== 'WATCHING';
+    if (oldTierGate !== shouldInvokeAI) {
+      this.logger.warn(
+        `Gate disagreement | ${context.symbol} ${timeframe} | ` +
+          `conditionsMet=${checklistResult.conditionsMet}/5 ` +
+          `score=${checklistResult.totalScore} tier=${checklistResult.status} | ` +
+          `old tier gate=${oldTierGate}, playbook 3-of-5=${shouldInvokeAI}`,
+      );
+    }
 
     this.logger.debug(
-      `Checklist status: ${checklistResult.status} => shouldInvokeAI: ${shouldInvokeAI}`,
+      `Checklist ${checklistResult.conditionsMet}/5 conditions ` +
+        `(tier ${checklistResult.status}) => shouldInvokeAI: ${shouldInvokeAI}`,
     );
 
     return {
@@ -145,7 +165,10 @@ export class AnalysisCoordinatorService {
         `Market classified as ${regimeResult.regime} (ADX: ${regimeResult.metrics.adx.toFixed(2)}). ` +
         `Evaluated confluence checklist for ${checklistResult.tradeType} ` +
         `(direction ${direction ? 'supplied by caller' : 'derived from trend'}): ` +
-        `${checklistResult.status} (${checklistResult.totalScore}/100). ` +
+        `${checklistResult.conditionsMet}/5 conditions met ` +
+        `(needs ${PLAYBOOK_MIN_CONDITIONS_MET}). ` +
+        `[transitional: tier=${checklistResult.status}, old gate would say ` +
+        `${oldTierGate ? 'GO' : 'NO'}] ` +
         `AI execution ${shouldInvokeAI ? 'ENABLED' : 'DISABLED'}.`,
     };
   }

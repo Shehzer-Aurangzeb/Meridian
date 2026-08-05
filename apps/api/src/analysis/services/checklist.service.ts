@@ -9,6 +9,7 @@ import {
   BB_THRESHOLDS,
   SR_THRESHOLDS,
   CHECKLIST_SCORE_TIERS,
+  PLAYBOOK_MIN_CONDITIONS_MET,
 } from '../interfaces/checklist.types';
 
 /**
@@ -59,7 +60,9 @@ export class ChecklistService {
       totalScore,
       conditionsMet,
       status,
-      passed: status !== 'WATCHING',
+      // Playbook 3-of-5, not the tier gate. `WATCHING` ended at 39, so the
+      // tier gate passed 2-of-5 setups the playbook does not consider setups.
+      passed: conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET,
       tradeType: params.tradeType,
       conditions,
     };
