@@ -164,6 +164,5 @@ describe('AnalysisCoordinatorService — checklist input wiring', () => {
       context.bollingerBands.lower,
     );
     expect(result.bollingerBand.passed).toBe(true);
-    expect(result.bollingerBand.score).toBe(20);
   });
 });

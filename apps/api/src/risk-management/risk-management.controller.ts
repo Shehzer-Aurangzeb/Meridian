@@ -182,7 +182,7 @@ export class RiskManagementController {
     try {
       const result = this.leverageService.recommendLeverage({
         timeframe: dto.timeframe,
-        checklistScore: dto.checklistScore,
+        conditionsMet: dto.checklistScore ?? null,
         atr: dto.atr,
         currentPrice: dto.currentPrice,
         stopLossPercentage: dto.stopLossPercentage,

@@ -397,7 +397,7 @@ async function runCoin(coin: string): Promise<ZTrade[]> {
     const ctx = indicators.buildContext(coin, timeframe, window);
     const regime = regimeSvc.classifyFromContext(ctx);
     const routed = coordinator.routeFromRegime(ctx, timeframe, regime);
-    const score = routed.checklistResult?.totalScore ?? -1;
+    const score = routed.checklistResult?.conditionsMet ?? -1;
     const waitBars = i - armed.armedAt;
     const zone = armed;
     armed = null; // touched: consumed either way
@@ -544,7 +544,7 @@ async function main() {
       );
     }
     if (diag.scoresAtTouch.size > 0) {
-      console.log('score at the moment price reached the zone:');
+      console.log('conditions met at the moment price reached the zone:');
       console.table(
         [...diag.scoresAtTouch.entries()]
           .sort((a, b) => a[0] - b[0])

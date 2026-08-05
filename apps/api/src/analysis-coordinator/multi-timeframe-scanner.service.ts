@@ -56,7 +56,7 @@ const SCANNER_RISK_DEFAULTS = {
  *  - **Risk profile** sized against `walletBalance` whenever Claude
  *    returns an actionable LONG/SHORT.
  *
- * If both sub-daily horizons resolve to `WATCHING`, the scanner
+ * If neither sub-daily horizon meets the entry gate, the scanner
  * short-circuits before touching Claude / risk to avoid wasting AI tokens
  * on non-trades.
  */
@@ -115,7 +115,7 @@ export class MultiTimeframeScannerService {
       executionHorizon = structureHorizon;
       executionPayload = structureResult;
     } else {
-      // Both horizons are WATCHING — short-circuit, surface the 1h view
+      // Neither horizon is a setup — short-circuit, surface the 1h view
       // as the canonical execution horizon, skip Claude + risk entirely.
       // TTL still reflects the *displayed* horizon (1h ⇒ 12h) so the UI
       // countdown is meaningful even on "no-trade" results.
@@ -242,10 +242,10 @@ export class MultiTimeframeScannerService {
    * Project a coordinator pass onto the `ExecutionHorizon` shape.
    *
    * Status mapping:
-   *  - CONFLUENCE_CHECKLIST → uses the checklist status verbatim.
+   *  - CONFLUENCE_CHECKLIST → SETUP / NO_SETUP from the entry gate.
    *  - SQUEEZE_BREAKOUT     → `PENDING_BREAKOUT` (gating happens at the
    *    AI layer; coordinator always sets shouldInvokeAI=true for it).
-   *  - UNKNOWN / missing    → `WATCHING` so the caller short-circuits.
+   *  - UNKNOWN / missing    → `NO_SETUP` so the caller short-circuits.
    */
   private buildExecutionHorizon(
     result: CoordinatorAnalysisResult,
@@ -256,7 +256,7 @@ export class MultiTimeframeScannerService {
         timeframe,
         strategyRoute: 'SQUEEZE_BREAKOUT',
         status: 'PENDING_BREAKOUT',
-        score: null,
+        conditionsMet: null,
         shouldInvokeAI: result.shouldInvokeAI,
         squeezeSetup: result.squeezeSetup,
         checklistResult: null,
@@ -266,8 +266,8 @@ export class MultiTimeframeScannerService {
     return {
       timeframe,
       strategyRoute: 'CONFLUENCE_CHECKLIST',
-      status: result.checklistResult?.status ?? 'WATCHING',
-      score: result.checklistResult?.totalScore ?? null,
+      status: result.checklistResult?.passed ? 'SETUP' : 'NO_SETUP',
+      conditionsMet: result.checklistResult?.conditionsMet ?? null,
       shouldInvokeAI: result.shouldInvokeAI,
       squeezeSetup: null,
       checklistResult: result.checklistResult,
@@ -318,13 +318,14 @@ export class MultiTimeframeScannerService {
     const stopLossPercentage =
       (Math.abs(entryPrice - stopLossPrice) / entryPrice) * 100;
 
-    const checklistScore = executionPayload.checklistResult?.totalScore ?? 60;
+    // null when the squeeze route ran and there is no checklist to count.
+    const conditionsMet = executionPayload.checklistResult?.conditionsMet ?? null;
     const atr = executionPayload.regimeResult.metrics.atr;
 
     // ── 1. Leverage recommendation ───────────────────────────────────
     const leverageRec = this.leverageService.recommendLeverage({
       timeframe: executionPayload.timeframe,
-      checklistScore,
+      conditionsMet,
       atr,
       currentPrice: entryPrice,
       stopLossPercentage,

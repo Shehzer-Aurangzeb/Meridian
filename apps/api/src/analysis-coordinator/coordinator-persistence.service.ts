@@ -8,7 +8,14 @@ import { ClaudeAnalysisResponse } from '../ai/interfaces/claude-response.types';
  * Input payload for a single coordinator run record.
  *
  * `aiResponse` is null when the AI gate was not triggered (e.g. checklist
- * status was WATCHING). `errorMessage` is populated only for failed runs.
+ * the entry gate was not met). `errorMessage` is populated only for failed
+ * runs.
+ *
+ * NOTE: `checklistStatus` and `totalScore` are deliberately no longer
+ * written. Both columns remain in the schema as nullable and are NOT dropped:
+ * historical rows hold what the old system actually said at the time, which
+ * is the record to consult when reconstructing why a past call was made.
+ * New rows leave them null. A drop migration can happen later, if ever.
  */
 export interface CoordinatorRunInput {
   coordinatorResult: CoordinatorAnalysisResult;
@@ -64,8 +71,6 @@ export class CoordinatorPersistenceService {
           timeframe: args.timeframe,
           regime: 'UNKNOWN',
           strategyRoute: 'UNKNOWN',
-          checklistStatus: null,
-          totalScore: null,
           shouldInvokeAI: false,
           aiAction: null,
           aiConfidence: null,
@@ -93,8 +98,6 @@ export class CoordinatorPersistenceService {
         timeframe: coordinatorResult.timeframe,
         regime: coordinatorResult.regimeResult.regime,
         strategyRoute: coordinatorResult.strategyRoute,
-        checklistStatus: coordinatorResult.checklistResult?.status ?? null,
-        totalScore: coordinatorResult.checklistResult?.totalScore ?? null,
         shouldInvokeAI: coordinatorResult.shouldInvokeAI,
         aiAction: aiResponse?.action ?? null,
         aiConfidence: aiResponse?.confidence ?? null,

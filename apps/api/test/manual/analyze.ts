@@ -76,12 +76,13 @@ async function main() {
 
   if (result.checklistResult) {
     const c = result.checklistResult;
-    console.log(`\nchecklist   ${c.totalScore}/100 → ${c.status} (${c.tradeType})`);
+    console.log(
+      `\nchecklist   ${c.conditionsMet}/5 conditions met (needs 3) · ${c.tradeType}`,
+    );
     console.table(
       c.conditions.map((cond) => ({
         condition: cond.name,
-        pass: cond.passed ? '✓' : '✗',
-        pts: cond.score,
+        met: cond.passed ? '✓' : '✗',
         value: String(cond.value ?? ''),
       })),
     );
