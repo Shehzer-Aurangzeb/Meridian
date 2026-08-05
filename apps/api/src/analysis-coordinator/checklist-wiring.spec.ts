@@ -20,6 +20,13 @@ import { AnalysisCoordinatorService } from './analysis-coordinator.service';
  *      For BTC that yields Z ≈ -66 every run: every LONG passed condition 1
  *      for free, every SHORT failed it.
  *
+ *   C. The coordinator DERIVED the direction from trend and then evaluated
+ *      direction-specific conditions against it. A setup whose direction is
+ *      implied by something other than trend — arriving at support during a
+ *      downtrend is a long — was therefore evaluated as the opposite side,
+ *      where `rsi >= 60` and the UPPER Bollinger band can never pass. In a
+ *      zone-arrival test this scored 0 out of 839 on both conditions.
+ *
  * Both bugs are invisible in the output unless you know the numbers, which
  * is why they survived a refactor that claimed to preserve behaviour.
  */
@@ -94,6 +101,45 @@ describe('AnalysisCoordinatorService — checklist input wiring', () => {
     );
 
     expect(Math.abs(proximity - 50)).toBeGreaterThan(1);
+  });
+
+  it('bug C: direction is an input, and it changes the conditions evaluated', () => {
+    const regime = marketRegime.classifyFromContext(context);
+
+    const asLong = coordinator.routeFromRegime(context, '1h', regime, 'long');
+    const asShort = coordinator.routeFromRegime(context, '1h', regime, 'short');
+
+    expect(asLong.checklistResult!.tradeType).toBe('long');
+    expect(asShort.checklistResult!.tradeType).toBe('short');
+
+    // This series closes BELOW the lower band, which is a long condition and
+    // cannot be a short one. Under bug C the caller could not express that,
+    // so whichever side the trend implied was the only side ever scored.
+    expect(asLong.checklistResult!.bollingerBand.passed).toBe(true);
+    expect(asShort.checklistResult!.bollingerBand.passed).toBe(false);
+
+    // Same bar, same indicators, opposite orientation — the two evaluations
+    // must differ, which is exactly what could not happen before.
+    //
+    // Compared as a PATTERN, not a count: the counts can legitimately tie
+    // (here both are 2) because conditions that fail for a long may pass for
+    // a short. It is which conditions fired that must change.
+    const pattern = (r: typeof asLong) =>
+      r.checklistResult!.conditions.map((c) => `${c.name}:${c.passed}`).join('|');
+
+    expect(pattern(asLong)).not.toBe(pattern(asShort));
+  });
+
+  it('bug C: an unspecified direction still falls back to trend', () => {
+    // The fallback must survive, because existing callers pass no direction.
+    const regime = marketRegime.classifyFromContext(context);
+    const derived = coordinator.routeFromRegime(context, '1h', regime);
+
+    expect(['long', 'short']).toContain(derived.checklistResult!.tradeType);
+    expect(derived.reasoning).toContain('derived from trend');
+
+    const supplied = coordinator.routeFromRegime(context, '1h', regime, 'long');
+    expect(supplied.reasoning).toContain('supplied by caller');
   });
 
   it('the band-proximity condition is reachable at all', () => {
