@@ -455,19 +455,44 @@ describe('LeverageService', () => {
       expect(result.tradeStyle).toBe('scalp');
     });
     
-    it('should handle unknown timeframe with default base leverage', () => {
-      const result = service.recommendLeverage({
+    // Was: 'should handle unknown timeframe with default base leverage',
+    // asserting a silent fallback to 5x. That fallback was the bug — a risk
+    // control that grants leverage on input it does not recognise, producing
+    // a plausible number instead of an error. A "conservative" 1x default
+    // would be no better: still a made-up answer. If leverage cannot be
+    // determined the service must refuse to produce a plan.
+    it('throws on an unrecognised timeframe rather than fabricating leverage', () => {
+      const unknown = {
         timeframe: '2h', // Not in the map
         checklistScore: 80,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
-        experienceLevel: 'intermediate',
-      });
-      
-      // Should use default of 5x
-      expect(result.recommended).toBeLessThanOrEqual(5);
+        experienceLevel: 'intermediate' as const,
+      };
+
+      expect(() => service.recommendLeverage(unknown)).toThrow(
+        /unrecognised timeframe "2h"/i,
+      );
+      // The error names the valid options so a caller can correct the input.
+      expect(() => service.recommendLeverage(unknown)).toThrow(/1w, 1d, 12h, 4h/);
     });
+
+    it.each(['', '1H', '1D', '60m', 'daily', 'nonsense'])(
+      'rejects "%s" instead of silently defaulting',
+      (timeframe) => {
+        expect(() =>
+          service.recommendLeverage({
+            timeframe,
+            checklistScore: 60,
+            atr: 500,
+            currentPrice: 60000,
+            stopLossPercentage: 3,
+            experienceLevel: 'intermediate',
+          }),
+        ).toThrow();
+      },
+    );
   });
   
   describe('getLeverageConstraints', () => {
