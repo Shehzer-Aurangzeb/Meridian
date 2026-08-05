@@ -1,16 +1,25 @@
 /**
  * 5-Point Entry Checklist Types
- * Based on Miraj's trading strategy
- * Tiered scoring system with dynamic relative thresholds
- * Scoring tiers: WATCHING (0-39) | TACTICAL_SETUP (40-59) | STRATEGIC_TRADE (60-79) | APEX_SETUP (80-100)
+ * Based on Miraj's trading strategy.
+ *
+ * There is deliberately NO aggregate score and no tier label. Conditions are
+ * reported individually as met/unmet with the value that decided each one.
+ *
+ * The removed 0-100 score and its four tiers (WATCHING / TACTICAL_SETUP /
+ * STRATEGIC_TRADE / APEX_SETUP) were measured to carry no predictive
+ * information: score buckets did not rank outcomes at any timeframe, and
+ * APEX_SETUP never fired once in any run. Worse, every tier boundary was
+ * calibrated on top of three mis-wired inputs, and the lowest passing tier
+ * began at 40 — two of five conditions, below the playbook's own stated
+ * minimum of three. See docs/STATE_OF_PLAY.md 14c-14f.
+ *
+ * A number that ranks nothing invites being trusted anyway, so it is gone
+ * rather than merely unused.
  */
-
-export type ChecklistStatus = 'WATCHING' | 'TACTICAL_SETUP' | 'STRATEGIC_TRADE' | 'APEX_SETUP';
 
 export interface ChecklistCondition {
   name: string;
   passed: boolean;
-  score: number; // 0-20 (supports partial credit)
   value?: number | string;
   threshold?: string;
   reason: string;
@@ -85,9 +94,7 @@ export interface EntryChecklistResult {
   supportResistance: ChecklistCondition;
 
   // Summary
-  totalScore: number; // 0-100
   conditionsMet: number; // 0-5
-  status: ChecklistStatus; // WATCHING | TACTICAL_SETUP | STRATEGIC_TRADE | APEX_SETUP
   passed: boolean; // true if conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET (3 of 5)
   tradeType: 'long' | 'short';
 
@@ -140,27 +147,12 @@ export const SR_THRESHOLDS = {
 } as const;
 
 /**
- * Checklist scoring tiers
- */
-/**
  * Minimum conditions that must be met for a setup to exist at all.
  *
  * Playbook p12, "Entry Checklist - LONG Position": *Minimum Requirements
  * (Must Have 3/5)*. The same wording appears for shorts on p12-13.
  *
- * Expressed in CONDITIONS, not points, deliberately: the continuous scorer
- * awards partial credit, so a score threshold means different things under
- * the two scorers while "3 of 5 conditions met" does not.
- *
- * Note this is STRICTER than the tier gate it replaces. `WATCHING` ended at
- * a score of 39, so the old gate admitted 2-of-5 setups — below the
- * playbook's own stated minimum.
+ * Expressed in CONDITIONS, not points: the removed tier gate admitted
+ * 2-of-5, below the playbook's own stated minimum.
  */
 export const PLAYBOOK_MIN_CONDITIONS_MET = 3;
-
-export const CHECKLIST_SCORE_TIERS = {
-  WATCHING: { min: 0, max: 39 },
-  TACTICAL_SETUP: { min: 40, max: 59 },
-  STRATEGIC_TRADE: { min: 60, max: 79 },
-  APEX_SETUP: { min: 80, max: 100 },
-} as const;

@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsNumber, IsPositive, IsString, Matches } from 'class-validator';
 import { Transform } from 'class-transformer';
 
-import { ChecklistStatus, EntryChecklistResult } from '../../analysis/interfaces/checklist.types';
+import { EntryChecklistResult } from '../../analysis/interfaces/checklist.types';
 import { MarketRegime } from '../../market-regime/interfaces/market-regime.types';
 import { SqueezeBreakoutSetup } from '../../squeeze-breakout/interfaces/squeeze-breakout.types';
 import { ClaudeAnalysisResponse } from '../../ai/interfaces/claude-response.types';
@@ -59,8 +59,8 @@ export interface MacroBias {
 export interface ExecutionHorizon {
   timeframe: '4h' | '1h';
   strategyRoute: StrategyRoute | 'UNKNOWN';
-  status: ChecklistStatus | 'PENDING_BREAKOUT' | 'WATCHING';
-  score: number | null;
+  status: 'SETUP' | 'NO_SETUP' | 'PENDING_BREAKOUT';
+  conditionsMet: number | null;
   shouldInvokeAI: boolean;
   squeezeSetup: SqueezeBreakoutSetup | null;
   checklistResult: EntryChecklistResult | null;
@@ -68,7 +68,7 @@ export interface ExecutionHorizon {
 
 /**
  * Concrete sizing + risk envelope computed for the execution horizon. Null
- * when the execution horizon resolved to `WATCHING` (no trade to size).
+ * when the execution horizon met no setup (no trade to size).
  */
 export interface RiskProfile {
   positionSize: number;

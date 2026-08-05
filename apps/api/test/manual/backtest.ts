@@ -22,6 +22,26 @@
  *  4. One position at a time. Signals arriving while a trade is open are
  *     skipped and counted, not silently dropped.
  *  5. Costs are charged in R against every closed trade.
+ *
+ * ─── PRIOR RESULTS FROM THIS HARNESS ARE NOT REPRODUCIBLE AGAINST IT ─────
+ * Two reasons, both recorded here because the second was invisible:
+ *
+ *  1. The entry gate changed. Until 5 Aug 2026 this replayed a pipeline that
+ *     admitted setups at the TACTICAL_SETUP tier — a score of 40, i.e. two
+ *     of five conditions. The playbook's own stated minimum is three (p12),
+ *     and the tiers and score have since been deleted entirely because score
+ *     buckets were measured and did not rank outcomes. Every number produced
+ *     before that date was measuring a threshold the playbook contradicts.
+ *
+ *  2. Squeeze-route trades bypassed `--min-score`. The squeeze branch
+ *     returned before the gate was applied, so any run with `--min-score`
+ *     set gated checklist trades while admitting squeeze trades ungated.
+ *
+ * Whether `--min-score` was set on prior runs is UNKNOWN, because the
+ * configuration was never recorded alongside the results. That is the same
+ * lost-configuration failure that forced the retraction of the +0.117R / 1d
+ * result in docs/STATE_OF_PLAY.md 14c: a number whose configuration is lost
+ * is not a result. Record the exact command with anything produced here.
  */
 import * as dotenv from 'dotenv';
 import type { Cache } from 'cache-manager';
@@ -33,14 +53,12 @@ import {
   ANALYSIS_CANDLE_LIMIT,
 } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { ChecklistService } from '../../src/analysis/services/checklist.service';
-import { ContinuousChecklistService } from '../../src/analysis/services/continuous-checklist.service';
 import { IndicatorsService } from '../../src/indicators/indicators.service';
 import { MarketRegimeService } from '../../src/market-regime/market-regime.service';
 import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-breakout.service';
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
-import { ChecklistStatus } from '../../src/analysis/interfaces/checklist.types';
 
 const store = new Map<string, unknown>();
 const cache = {
@@ -77,8 +95,6 @@ const FEE_PCT = flag('fee', 0.05); // per side, %
 const SLIP_PCT = flag('slip', 0.02); // per side, %
 const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
 const FLAT_COST = flag('cost', -1); // override with a flat R cost if > 0
-const SCORER = rest.includes('--continuous') ? 'continuous' : 'binary';
-const MIN_SCORE = flag('min-score', 0); // extra gate on top of the tier cut
 const FOLDS = flag('folds', 0); // >0 splits the window into N sequential folds
 const CSV = (() => {
   const i = rest.indexOf('--csv');
@@ -110,7 +126,7 @@ type Outcome = 'WIN' | 'LOSS' | 'TIMEOUT';
 interface Trade {
   index: number;
   time: Date;
-  tier: ChecklistStatus;
+  tier: string; // 'CHECKLIST' | 'SQUEEZE' | 'RANDOM'
   score: number;
   direction: 'long' | 'short';
   entry: number;
@@ -198,7 +214,7 @@ async function runCoin(coin: string): Promise<RunStats> {
   const coordinator = new AnalysisCoordinatorService(
     regimeSvc,
     new SqueezeBreakoutService(binance),
-    SCORER === 'continuous' ? new ContinuousChecklistService() : new ChecklistService(),
+    new ChecklistService(),
     binance,
     indicators,
   );
@@ -282,7 +298,7 @@ async function runCoin(coin: string): Promise<RunStats> {
       const rSim = simulate(candles, i, dir, rEntry, rStop, rTarget);
       openUntil = rSim.exitIndex;
       trades.push({
-        index: i, time: candles[i].time, tier: 'RANDOM' as ChecklistStatus,
+        index: i, time: candles[i].time, tier: 'RANDOM',
         score: -1, direction: dir, entry: rEntry, stop: rStop, target: rTarget,
         outcome: rSim.outcome, r: rSim.r, barsHeld: rSim.barsHeld,
         exitIndex: rSim.exitIndex, coin,
@@ -296,9 +312,8 @@ async function runCoin(coin: string): Promise<RunStats> {
     const result = coordinator.routeFromRegime(ctx, timeframe, regime);
 
     if (result.checklistResult) {
-      const raw = result.checklistResult.totalScore;
-      const bucket = SCORER === 'continuous' ? Math.floor(raw / 5) * 5 : raw;
-      scoreHistogram.set(bucket, (scoreHistogram.get(bucket) ?? 0) + 1);
+      const met = result.checklistResult.conditionsMet;
+      scoreHistogram.set(met, (scoreHistogram.get(met) ?? 0) + 1);
     }
 
     if (!result.shouldInvokeAI) continue;
@@ -343,7 +358,7 @@ async function runCoin(coin: string): Promise<RunStats> {
       trades.push({
         index: fired,
         time: candles[fired].time,
-        tier: 'SQUEEZE' as ChecklistStatus,
+        tier: 'SQUEEZE',
         score: -1,
         direction: dir,
         entry: sEntry,
@@ -362,7 +377,6 @@ async function runCoin(coin: string): Promise<RunStats> {
       });
       continue;
     }
-    if (result.checklistResult.totalScore < MIN_SCORE) continue;
     if (i <= openUntil) {
       overlapSkipped++;
       continue;
@@ -382,8 +396,8 @@ async function runCoin(coin: string): Promise<RunStats> {
     trades.push({
       index: i,
       time: candles[i].time,
-      tier: result.checklistResult.status,
-      score: result.checklistResult.totalScore,
+      tier: 'CHECKLIST',
+      score: result.checklistResult.conditionsMet,
       direction,
       entry,
       stop,
@@ -443,7 +457,7 @@ async function main() {
   // ── report ────────────────────────────────────────────────────────────
   console.log(`\n${coin} · ${timeframe} · ${testBars} test bars · ${span}`);
   console.log(
-    `scorer ${SCORER}${MIN_SCORE ? ` · min-score ${MIN_SCORE}` : ''} · stop ATR×${ATR_MULT} · target ${RR}R · max hold ${MAX_BARS} bars`,
+    `gate 3-of-5 conditions · stop ATR×${ATR_MULT} · target ${RR}R · max hold ${MAX_BARS} bars`,
   );
   console.log(
     FLAT_COST > 0
@@ -456,12 +470,12 @@ async function main() {
   );
 
   const checklistBars = [...scoreHistogram.values()].reduce((a, b) => a + b, 0);
-  console.log('\n── score distribution (all checklist-routed bars) ' + '─'.repeat(12));
+  console.log('\n── conditions met (all checklist-routed bars) ' + '─'.repeat(14));
   console.table(
     [...scoreHistogram.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([score, bars]) => ({
-        score,
+        conditionsMet: `${score}/5`,
         bars,
         pct: `${((bars / checklistBars) * 100).toFixed(1)}%`,
         bar: '█'.repeat(Math.round((bars / checklistBars) * 60)),
@@ -480,23 +494,21 @@ async function main() {
 
   console.log('\n── by tier ' + '─'.repeat(50));
   console.table(
-    (['APEX_SETUP', 'STRATEGIC_TRADE', 'TACTICAL_SETUP', 'SQUEEZE' as ChecklistStatus] as ChecklistStatus[])
+    (['CHECKLIST', 'SQUEEZE'] as string[])
       .map((tier) => summarise(tier, trades.filter((t) => t.tier === tier)))
       .concat(summarise('ALL', trades)),
   );
 
   // The decisive question: does a higher score produce a better outcome?
-  const width = SCORER === 'continuous' ? 10 : 20;
   const buckets = new Map<number, Trade[]>();
   for (const t of trades) {
-    const b = Math.floor(t.score / width) * width;
-    (buckets.get(b) ?? buckets.set(b, []).get(b)!).push(t);
+    (buckets.get(t.score) ?? buckets.set(t.score, []).get(t.score)!).push(t);
   }
-  console.log('── by score bucket (does the score rank?) ' + '─'.repeat(20));
+  console.log('── by conditions met (does it rank?) ' + '─'.repeat(24));
   console.table(
     [...buckets.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([b, ts]) => summarise(`${b}-${b + width - 1}`, ts)),
+      .map(([b, ts]) => summarise(b < 0 ? 'n/a (squeeze/random)' : `${b}/5`, ts)),
   );
 
   // ── Walk-forward folds: is the result stable, or one lucky stretch? ──

@@ -136,21 +136,10 @@ export class AnalysisCoordinatorService {
     const shouldInvokeAI =
       checklistResult.conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET;
 
-    // TRANSITIONAL (remove in D4 with the tiers): report both rules so any
-    // disagreement is visible rather than silent.
-    const oldTierGate = checklistResult.status !== 'WATCHING';
-    if (oldTierGate !== shouldInvokeAI) {
-      this.logger.warn(
-        `Gate disagreement | ${context.symbol} ${timeframe} | ` +
-          `conditionsMet=${checklistResult.conditionsMet}/5 ` +
-          `score=${checklistResult.totalScore} tier=${checklistResult.status} | ` +
-          `old tier gate=${oldTierGate}, playbook 3-of-5=${shouldInvokeAI}`,
-      );
-    }
 
     this.logger.debug(
       `Checklist ${checklistResult.conditionsMet}/5 conditions ` +
-        `(tier ${checklistResult.status}) => shouldInvokeAI: ${shouldInvokeAI}`,
+        `=> shouldInvokeAI: ${shouldInvokeAI}`,
     );
 
     return {
@@ -167,8 +156,6 @@ export class AnalysisCoordinatorService {
         `(direction ${direction ? 'supplied by caller' : 'derived from trend'}): ` +
         `${checklistResult.conditionsMet}/5 conditions met ` +
         `(needs ${PLAYBOOK_MIN_CONDITIONS_MET}). ` +
-        `[transitional: tier=${checklistResult.status}, old gate would say ` +
-        `${oldTierGate ? 'GO' : 'NO'}] ` +
         `AI execution ${shouldInvokeAI ? 'ENABLED' : 'DISABLED'}.`,
     };
   }

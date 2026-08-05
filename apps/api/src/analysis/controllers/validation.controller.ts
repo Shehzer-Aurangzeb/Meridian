@@ -75,6 +75,8 @@ export class ValidationController {
           timeframe: true,
           regime: true,
           strategyRoute: true,
+          // Historical only — no longer written. Kept so past rows still
+          // report what the system said at the time. Null on new rows.
           checklistStatus: true,
           totalScore: true,
           shouldInvokeAI: true,

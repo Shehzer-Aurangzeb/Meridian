@@ -1,6 +1,10 @@
 import { ClaudePromptService, PromptData } from './ai-prompt.service';
 import { MultiTimeframeAnalysisResult, HTFBiasResult, LTFEntryResult, TimeframeAnalysis } from '../analysis/interfaces/multi-timeframe.types';
-import { EntryChecklistResult, ChecklistCondition, ChecklistStatus } from '../analysis/interfaces/checklist.types';
+import {
+  EntryChecklistResult,
+  ChecklistCondition,
+  PLAYBOOK_MIN_CONDITIONS_MET,
+} from '../analysis/interfaces/checklist.types';
 import { SupportResistanceLevel } from '../analysis/interfaces/support-resistance.types';
 
 describe('ClaudePromptService', () => {
@@ -19,7 +23,6 @@ describe('ClaudePromptService', () => {
   ): ChecklistCondition => ({
     name,
     passed,
-    score: passed ? 20 : 0,
     reason,
     value,
   });
@@ -38,16 +41,6 @@ describe('ClaudePromptService', () => {
     ];
 
     const conditionsMet = conditionsPassed.filter(Boolean).length;
-    const totalScore = conditionsMet * 20;
-
-    // Derive status from score to mirror ChecklistService.determineStatus tiers
-    const deriveStatus = (score: number): ChecklistStatus => {
-      if (score >= 80) return 'APEX_SETUP';
-      if (score >= 60) return 'STRATEGIC_TRADE';
-      if (score >= 40) return 'TACTICAL_SETUP';
-      return 'WATCHING';
-    };
-    const status = deriveStatus(totalScore);
 
     return {
       rsi: conditions[0],
@@ -55,10 +48,8 @@ describe('ClaudePromptService', () => {
       bollingerBand: conditions[2],
       marketStructure: conditions[3],
       supportResistance: conditions[4],
-      totalScore,
       conditionsMet,
-      status,
-      passed: status !== 'WATCHING',
+      passed: conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET,
       tradeType,
       conditions,
     };
@@ -216,8 +207,9 @@ describe('ClaudePromptService', () => {
       const data = createMockData('long', [true, true, true, true, true], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('100/100');
-      expect(prompt).toContain('5/5 conditions met');
+      expect(prompt).toContain('5/5');
+      // No aggregate score should reach the model at all.
+      expect(prompt).not.toMatch(/\d+\/100/);
       expect(prompt).toContain('LONG');
       expect(prompt).toContain('✅ PASSED');
 
@@ -226,16 +218,21 @@ describe('ClaudePromptService', () => {
       expect(prompt).toContain('28,750');
     });
 
-    it('carries a failing score for a 1/5 setup', () => {
-      // 1/5 fails the playbook's 3-of-5 minimum. Note this fixture derives
-      // `passed` from the old tier rule, where WATCHING was the only failing
-      // tier; production now fails 2/5 as well. The assertion holds under
-      // both, and the fixture is exercising prompt rendering, not the gate.
+    it('carries a failing state for a 1/5 setup', () => {
       const data = createMockData('long', [true, false, false, false, false], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('20/100');
-      expect(prompt).toContain('1/5 conditions met');
+      expect(prompt).toContain('1/5');
+      expect(prompt).toContain('❌ FAILED');
+    });
+
+    it('fails a 2/5 setup — the tier gate used to pass these', () => {
+      // TACTICAL_SETUP began at a score of 40, so 2-of-5 was tradeable under
+      // the removed tiers. The playbook minimum is 3.
+      const data = createMockData('long', [true, true, false, false, false], 'bullish');
+      const prompt = service.buildAnalysisPrompt(data);
+
+      expect(prompt).toContain('2/5');
       expect(prompt).toContain('❌ FAILED');
     });
 
@@ -245,15 +242,15 @@ describe('ClaudePromptService', () => {
 
       expect(prompt).toContain('SHORT');
       expect(prompt).toContain('BEARISH');
-      expect(prompt).toContain('80/100');
+      expect(prompt).toContain('4/5');
       expect(prompt).toContain('✅ PASSED');
     });
 
-    it('states the scoring rule the model must apply', () => {
+    it('states the entry rule the model must apply', () => {
       const data = createMockData('long', [true, true, true, false, false], 'bullish');
       const prompt = service.buildAnalysisPrompt(data);
 
-      expect(prompt).toContain('60+ points');
+      expect(prompt).toContain('3 of 5');
       // All five conditions must be named so the model can reason per-condition.
       expect(prompt).toContain('RSI');
       expect(prompt).toContain('QQE');

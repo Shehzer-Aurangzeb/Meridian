@@ -5,7 +5,7 @@ export type TradeStyle = 'swing' | 'day' | 'scalp' | 'ultra-scalp';
 export interface LeverageInput {
   // Trade parameters
   timeframe: string;                    // '1d', '4h', '1h', etc.
-  checklistScore: number;               // 0-100
+  conditionsMet: number | null;         // 0-5 met, or null when no checklist ran
   atr: number;                          // Average True Range
   currentPrice: number;                 // Current asset price
   

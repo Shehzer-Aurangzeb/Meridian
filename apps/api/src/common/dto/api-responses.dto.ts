@@ -197,8 +197,14 @@ export class AIAnalysisDto {
 }
 
 export class ChecklistDto {
-  @ApiProperty({ example: 75 })
-  totalScore!: number;
+  /**
+   * Historical only. The 0-100 score was removed on 5 Aug 2026 after score
+   * buckets were measured and found not to rank outcomes; the column is kept
+   * so past rows still report what the system said at the time. Null on every
+   * row written since. Read `conditionsMet` instead.
+   */
+  @ApiProperty({ example: 75, nullable: true, deprecated: true })
+  totalScore!: number | null;
 
   @ApiProperty({ example: 4 })
   conditionsMet!: number;

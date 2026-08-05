@@ -3,19 +3,17 @@ import {
   ChecklistCondition,
   EntryChecklistParams,
   EntryChecklistResult,
-  ChecklistStatus,
   RSI_ENTRY_THRESHOLDS,
   RSI_ZSCORE_CONFIG,
   BB_THRESHOLDS,
   SR_THRESHOLDS,
-  CHECKLIST_SCORE_TIERS,
   PLAYBOOK_MIN_CONDITIONS_MET,
 } from '../interfaces/checklist.types';
 
 /**
  * ChecklistService implements Miraj's 5-Point Entry Checklist
  * Dynamic relative thresholds with tiered scoring output
- * Scoring tiers: WATCHING (0-39) | TACTICAL_SETUP (40-59) | STRATEGIC_TRADE (60-79) | APEX_SETUP (80-100)
+ * Conditions are reported individually as met/unmet. No aggregate score, no tiers.
  */
 @Injectable()
 export class ChecklistService {
@@ -47,9 +45,7 @@ export class ChecklistService {
     );
 
     const conditions = [rsi, qqe, bollingerBand, marketStructure, supportResistance];
-    const totalScore = conditions.reduce((sum, c) => sum + c.score, 0);
     const conditionsMet = conditions.filter((c) => c.passed).length;
-    const status = this.determineStatus(totalScore);
 
     return {
       rsi,
@@ -57,25 +53,13 @@ export class ChecklistService {
       bollingerBand,
       marketStructure,
       supportResistance,
-      totalScore,
       conditionsMet,
-      status,
       // Playbook 3-of-5, not the tier gate. `WATCHING` ended at 39, so the
       // tier gate passed 2-of-5 setups the playbook does not consider setups.
       passed: conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET,
       tradeType: params.tradeType,
       conditions,
     };
-  }
-
-  /**
-   * Determine tiered status based on total score
-   */
-  protected determineStatus(score: number): ChecklistStatus {
-    if (score >= CHECKLIST_SCORE_TIERS.APEX_SETUP.min) return 'APEX_SETUP';
-    if (score >= CHECKLIST_SCORE_TIERS.STRATEGIC_TRADE.min) return 'STRATEGIC_TRADE';
-    if (score >= CHECKLIST_SCORE_TIERS.TACTICAL_SETUP.min) return 'TACTICAL_SETUP';
-    return 'WATCHING';
   }
 
   /**
@@ -162,7 +146,6 @@ export class ChecklistService {
     return {
       name: 'RSI Condition',
       passed,
-      score: passed ? 20 : 0,
       value: zScore !== null ? `${rsi.toFixed(1)} (Z: ${zScore.toFixed(2)})` : rsi,
       threshold: tradeType === 'long' 
         ? `<= ${RSI_ENTRY_THRESHOLDS.LONG.STRICT_MAX} OR Z-Score <= ${RSI_ENTRY_THRESHOLDS.LONG.ZSCORE_THRESHOLD}`
@@ -200,7 +183,6 @@ export class ChecklistService {
     return {
       name: 'QQE Volume Bars',
       passed,
-      score: passed ? 20 : 0,
       value: qqeColor,
       threshold: tradeType === 'long' ? 'green (buying pressure)' : 'red (selling pressure)',
       reason,
@@ -228,7 +210,6 @@ export class ChecklistService {
       return {
         name: 'Bollinger Band Extreme',
         passed: false,
-        score: 0,
         value: `${bandWidth.toFixed(2)}% width`,
         threshold: `> ${BB_THRESHOLDS.MIN_BAND_WIDTH}% band width (expanded)`,
         reason: `Bollinger Bands are SQUEEZED (${bandWidth.toFixed(2)}% width). Avoid trading - big move coming but direction unclear`,
@@ -264,7 +245,6 @@ export class ChecklistService {
     return {
       name: 'Bollinger Band Extreme',
       passed: nearTarget,
-      score: nearTarget ? 20 : 0,
       value: `${proximityPercent.toFixed(1)}% from ${targetBand}`,
       threshold: `< ${BB_THRESHOLDS.PROXIMITY_PERCENT}% from ${targetBand} band, bands expanded`,
       reason,
@@ -295,7 +275,6 @@ export class ChecklistService {
     return {
       name: 'Market Structure (HTF)',
       passed,
-      score: passed ? 20 : 0,
       value: structure,
       threshold: requiredStructure,
       reason,
@@ -330,7 +309,6 @@ export class ChecklistService {
       return {
         name: 'Support/Resistance Confluence',
         passed: false,
-        score: 0,
         value: 'No level found',
         threshold: `${tradeType === 'long' ? 'support' : 'resistance'} within 2% (full) or 1.5% (partial), 3+ tests (full) or 2 tests with vol (partial)`,
         reason: 'No significant support/resistance level identified nearby',
@@ -363,8 +341,9 @@ export class ChecklistService {
       }
     }
 
-    const score = meetsFullCredit ? 20 : meetsPartialCredit ? 15 : 0;
-    const passed = score > 0;
+    // Full and partial credit collapse to met/unmet: the partial tier existed
+    // only to feed the removed 0-100 score.
+    const passed = meetsFullCredit || meetsPartialCredit;
 
     let reason: string;
     if (meetsFullCredit) {
@@ -388,46 +367,29 @@ export class ChecklistService {
     return {
       name: 'Support/Resistance Confluence',
       passed,
-      score,
       value: nearestLevel
         ? `${nearestLevel.type} at ${nearestLevel.price.toFixed(2)} (${nearestLevel.strength} tests)`
         : 'None',
-      threshold: `${requiredType} within 2% (3+ tests, 20 pts) or 1.5% (2 tests + vol, 15 pts)`,
+      threshold: `${requiredType} within 2% (3+ tests) or 1.5% (2 tests + volume)`,
       reason,
     };
   }
 
   /**
-   * Get a human-readable summary of the checklist
+   * Get a human-readable summary of the checklist.
+   *
+   * States what is true rather than grading it: which conditions are met,
+   * which are not, and the value that decided each. There is no aggregate
+   * score and no tier label, because neither carried information.
    */
   getSummary(result: EntryChecklistResult): string {
-    const statusEmoji = {
-      'WATCHING': '🔍',
-      'TACTICAL_SETUP': '⚡',
-      'STRATEGIC_TRADE': '✅',
-      'APEX_SETUP': '🎯',
-    };
-
-    const statusDescriptions = {
-      'WATCHING': 'Low-probability environment, preserve capital',
-      'TACTICAL_SETUP': 'Medium-probability, tight invalidation, lower leverage/sizing',
-      'STRATEGIC_TRADE': 'High-probability, standard rules apply',
-      'APEX_SETUP': 'Highest-probability confluence across structural layers',
-    };
-
-    const emoji = statusEmoji[result.status];
-    const description = statusDescriptions[result.status];
-
     const conditionLines = result.conditions
-      .map((c) => `  ${c.passed ? '✓' : '✗'} ${c.name}: ${c.reason} (${c.score} pts)`)
+      .map((c) => `  ${c.passed ? '✓' : '✗'} ${c.name}: ${c.reason}`)
       .join('\n');
 
     return `
-5-Point Entry Checklist: ${emoji} ${result.status}
-${description}
-
-Trade Type: ${result.tradeType.toUpperCase()}
-Score: ${result.totalScore}/100 (${result.conditionsMet}/5 conditions met)
+Entry Checklist — ${result.conditionsMet}/5 conditions met (needs ${PLAYBOOK_MIN_CONDITIONS_MET})
+Direction: ${result.tradeType.toUpperCase()}
 
 Conditions:
 ${conditionLines}

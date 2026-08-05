@@ -7,7 +7,6 @@ import {
 } from '../analysis/interfaces/multi-timeframe.types';
 import {
   EntryChecklistResult,
-  ChecklistStatus,
   ChecklistCondition,
 } from '../analysis/interfaces/checklist.types';
 import { SupportResistanceLevel } from '../analysis/interfaces/support-resistance.types';
@@ -196,7 +195,6 @@ The coordinator routed this asset to CONFLUENCE_CHECKLIST but the upstream
 service produced no checklist payload. Return action=WAIT.`;
     }
 
-    const tierGuide = this.describeChecklistTier(checklist.status);
     const conditions = [
       checklist.rsi,
       checklist.qqe,
@@ -207,36 +205,32 @@ service produced no checklist payload. Return action=WAIT.`;
       .map((c, i) => this.formatChecklistCondition(c, i + 1))
       .join('\n');
 
-    return `# STRATEGY: CONFLUENCE_CHECKLIST  (tiered 5-point confluence)
+    return `# STRATEGY: CONFLUENCE_CHECKLIST  (5-point confluence)
 
 This asset is in a ${regime.regime} regime. Trade direction bias: **${checklist.tradeType.toUpperCase()}**.
 
-The upstream checklist uses a tiered scoring system with DYNAMIC relative
-thresholds (Z-scores against the asset's own recent history) and partial
-credit at support/resistance — it is NOT a binary 60+ gate.
+Each condition below is reported as MET or UNMET with the value that decided
+it. There is deliberately no aggregate score and no tier label: score buckets
+were measured and did not rank outcomes, so a number here would invite being
+trusted for information it does not carry.
 
-## Tier Result
-- Total Score:      ${checklist.totalScore}/100
-- Conditions Met:   ${checklist.conditionsMet}/5
-- **Status:        ${checklist.status}** — ${tierGuide}
-- Tradeable Gate:   ${checklist.passed ? 'YES' : 'NO'} (${checklist.conditionsMet}/5 conditions, needs 3)
+## Result
+- Conditions Met:   ${checklist.conditionsMet}/5 (playbook minimum is 3)
+- Tradeable Gate:   ${checklist.passed ? 'YES' : 'NO'}
 
-## Per-Condition Breakdown (each scored 0–20 with partial credit)
+## Per-Condition Breakdown
 ${conditions}
 
 ## Reasoning You MUST Perform
-1. **Respect the tier.**  Treat status as the dominant signal — not raw score.
-     • WATCHING        → almost always WAIT (no conviction).
-     • TACTICAL_SETUP  → small-size, low-leverage, only if confluence story is coherent.
-     • STRATEGIC_TRADE → standard sizing, normal leverage.
-     • APEX_SETUP      → high-conviction, may justify larger leverage.
-2. **Read Z-scores, not absolutes.**  An RSI condition that scored 18/20 at
-   an RSI of 42 indicates an unusually oversold reading FOR THIS ASSET. Do
-   not override the dynamic threshold with a static 30/70 mental model.
-3. **Partial-credit S/R.**  A supportResistance score of 12/20 means the
-   level is close but not perfectly aligned (e.g. weaker strength, slightly
-   further than 2%). Weight stop placement and confidence accordingly.
-4. **Regime coherence.**  Long setups in MEAN_REVERSION regimes target the
+1. **Reason from the conditions themselves, not from a count.**  Which
+   conditions are met matters more than how many. Two conditions met at a
+   strong confluence zone is a different situation from two met in open
+   space, and you can see which is which from the values below. Name the
+   specific unmet conditions in your reasoning.
+2. **Read Z-scores, not absolutes.**  An RSI condition met at an RSI of 42
+   indicates an unusually oversold reading FOR THIS ASSET. Do not override
+   the dynamic threshold with a static 30/70 mental model.
+3. **Regime coherence.**  Long setups in MEAN_REVERSION regimes target the
    mid-band; long setups in TRENDING regimes target continuation. Reject
    setups that fight the regime without an exceptional reason.
 5. **Invalidation.**  The strongest failed condition usually defines the
@@ -251,21 +245,8 @@ ${conditions}
     const valueStr =
       c.value !== undefined ? ` | value=${String(c.value)}` : '';
     const thresholdStr = c.threshold ? ` | threshold=${c.threshold}` : '';
-    return `  ${idx}. [${mark}] ${c.name}  (${c.score}/20)${valueStr}${thresholdStr}
+    return `  ${idx}. [${mark}] ${c.name}${valueStr}${thresholdStr}
         ${c.reason}`;
-  }
-
-  private describeChecklistTier(status: ChecklistStatus): string {
-    switch (status) {
-      case 'WATCHING':
-        return 'no actionable confluence; default to WAIT.';
-      case 'TACTICAL_SETUP':
-        return 'early confluence forming; trade only with strong narrative, reduced size.';
-      case 'STRATEGIC_TRADE':
-        return 'multi-factor confluence aligned; standard execution.';
-      case 'APEX_SETUP':
-        return 'rare full-stack alignment; high-conviction setup, scale leverage prudently.';
-    }
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -275,7 +256,7 @@ ${conditions}
   private buildCoordinatorTask(r: CoordinatorAnalysisResult): string {
     const defaultAction =
       r.strategyRoute === 'CONFLUENCE_CHECKLIST' &&
-      r.checklistResult?.status === 'WATCHING'
+      r.checklistResult?.passed === false
         ? 'WAIT'
         : 'LONG | SHORT | WAIT';
 
@@ -427,7 +408,7 @@ This is your foundation. Follow these rules, but THINK about what they mean:
 - **SHORT**: Price within 2% of resistance with strength ≥3
 - **Level quality**: How many touches? How recent? How clean?
 
-**SCORING**: Need 60+ points (3/5 conditions) to trade. 80+ = high confidence.
+**GATE**: 3 of 5 conditions minimum to trade (playbook p12).
 
 ═══════════════════════════════════════════════════════════════
 
@@ -439,23 +420,23 @@ This is your foundation. Follow these rules, but THINK about what they mean:
 - **Analysis Time**: ${new Date().toISOString()}
 
 ## 5-Point Checklist Results
-**Total Score**: ${checklist.totalScore}/100 (${checklist.conditionsMet}/5 conditions met)
+**Conditions Met**: ${checklist.conditionsMet}/5
 **Trade Type**: ${checklist.tradeType.toUpperCase()}
-**Status**: ${checklist.passed ? '✅ PASSED' : '❌ FAILED'} (need 60+ points)
+**Status**: ${checklist.passed ? '✅ PASSED' : '❌ FAILED'} (needs 3 of 5)
 
-1. **RSI**: ${checklist.rsi.passed ? '✓ PASS' : '✗ FAIL'} (${checklist.rsi.score}/20 points)
+1. **RSI**: ${checklist.rsi.passed ? '✓ PASS' : '✗ FAIL'}
    ${checklist.rsi.reason}${checklist.rsi.value !== undefined ? ` | Value: ${checklist.rsi.value}` : ''}
 
-2. **QQE**: ${checklist.qqe.passed ? '✓ PASS' : '✗ FAIL'} (${checklist.qqe.score}/20 points)
+2. **QQE**: ${checklist.qqe.passed ? '✓ PASS' : '✗ FAIL'}
    ${checklist.qqe.reason}
 
-3. **Bollinger Bands**: ${checklist.bollingerBand.passed ? '✓ PASS' : '✗ FAIL'} (${checklist.bollingerBand.score}/20 points)
+3. **Bollinger Bands**: ${checklist.bollingerBand.passed ? '✓ PASS' : '✗ FAIL'}
    ${checklist.bollingerBand.reason}
 
-4. **Market Structure**: ${checklist.marketStructure.passed ? '✓ PASS' : '✗ FAIL'} (${checklist.marketStructure.score}/20 points)
+4. **Market Structure**: ${checklist.marketStructure.passed ? '✓ PASS' : '✗ FAIL'}
    ${checklist.marketStructure.reason}
 
-5. **Support/Resistance**: ${checklist.supportResistance.passed ? '✓ PASS' : '✗ FAIL'} (${checklist.supportResistance.score}/20 points)
+5. **Support/Resistance**: ${checklist.supportResistance.passed ? '✓ PASS' : '✗ FAIL'}
    ${checklist.supportResistance.reason}
 
 ## Multi-Timeframe Analysis
@@ -530,7 +511,7 @@ Analyze this market setup by considering:
 
 Based on your analysis:
 
-**If checklist score < 60**: Almost always WAIT
+**If fewer than 3 conditions are met**: Almost always WAIT
 - Exception: If you see exceptional confluence the checklist missed, explain why
 
 **If checklist score 60-79**: Consider WAIT or cautious trade
