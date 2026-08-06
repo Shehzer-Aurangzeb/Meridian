@@ -72,7 +72,7 @@ describe('AnalysisCoordinatorService — checklist input wiring', () => {
     new ChecklistService(),
     binance,
     indicators,
-    new SupportResistanceService(binance),
+    new SupportResistanceService(),
   );
 
   const candles = buildCandles();

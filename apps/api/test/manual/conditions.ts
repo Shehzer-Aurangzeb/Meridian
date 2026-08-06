@@ -99,7 +99,7 @@ async function run(coin: string, t: Tally) {
     new ChecklistService(),
     binance,
     indicators,
-    new SupportResistanceService(binance),
+    new SupportResistanceService(),
   );
 
   const candles = await binance.getCandlesPaged(coin, timeframe, LIMIT);

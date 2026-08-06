@@ -26,6 +26,8 @@ import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.ser
 import { TimeInterval } from '../../src/common/types/candle.types';
 import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { logRun } from '../../src/common/run-log';
+import { MarkedLevel } from '../../src/analysis/interfaces/support-resistance.types';
+import { Timeframe } from '../../src/common/constants/timeframes';
 
 // ponytail: BinanceService only calls get/set/del — a Map covers it.
 // Swap for the real CacheModule if this ever needs TTL semantics.
@@ -45,6 +47,7 @@ const pct = (n: number) => `${n.toFixed(2)}%`;
 
 async function main() {
   const indicators = new IndicatorsService();
+  const sr = new SupportResistanceService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
   const regimeSvc = new MarketRegimeService(binance, indicators);
   const coordinator = new AnalysisCoordinatorService(
@@ -53,7 +56,7 @@ async function main() {
     new ChecklistService(),
     binance,
     indicators,
-    new SupportResistanceService(binance),
+    new SupportResistanceService(),
   );
 
   const startedAt = Date.now();
@@ -76,6 +79,56 @@ async function main() {
       })`,
   );
   console.log(`route       ${result.strategyRoute}`);
+
+  // ── Level engine ──────────────────────────────────────────────────────
+  // ponytail: Fib is anchored to THIS timeframe. The playbook anchors it to
+  // 12h (p51, "Weekly acceptable too"); multi-timeframe gathering is the
+  // next phase, and the anchor is surfaced below so it is never implicit.
+  const srLevels = sr.levelsFromCandles(
+    [...ctx.candles],
+    timeframe as Timeframe,
+    lastClose,
+  );
+  const anchors = sr.fibAnchors([...ctx.candles]);
+  const fib = anchors ? sr.fibLevels(anchors.low, anchors.high) : [];
+
+  const marks: MarkedLevel[] = [
+    ...srLevels.map((l) => ({
+      price: l.price,
+      type: l.type,
+      source: `${timeframe} ${l.type} x${l.touchCount}`,
+      touchCount: l.touchCount,
+    })),
+    ...fib.map((f) => ({
+      price: f.price,
+      type: f.type,
+      source: `${f.ratio} Fib (${timeframe})`,
+    })),
+  ];
+  const zones = sr.findConfluenceZones(marks, lastClose);
+
+  if (anchors) {
+    console.log(
+      `fib anchor  ${timeframe} swing range ` +
+        `$${anchors.low.toLocaleString()} – $${anchors.high.toLocaleString()}`,
+    );
+  }
+
+  console.log(`\nlevels      ${srLevels.length} S/R + ${fib.length} Fib = ${marks.length} marks`);
+  if (zones.length === 0) {
+    console.log('confluence  none — no two independent marks agree within 0.5%');
+  } else {
+    console.log(`confluence  ${zones.length} zone(s)`);
+    console.table(
+      zones.slice(0, 5).map((z) => ({
+        zone: `$${z.low.toFixed(2)} – $${z.high.toFixed(2)}`,
+        type: z.type,
+        away: `${z.distancePercent >= 0 ? '+' : ''}${z.distancePercent.toFixed(2)}%`,
+        span: `${z.spanPercent.toFixed(2)}%`,
+        sources: z.sources.join(' + '),
+      })),
+    );
+  }
 
   if (result.checklistResult) {
     const c = result.checklistResult;
@@ -127,6 +180,11 @@ async function main() {
           lower: result.squeezeSetup.lowerTriggerPrice,
         }
       : null,
+    fibAnchor: anchors,
+    zones: zones.map((z) => ({
+      low: z.low, high: z.high, type: z.type,
+      distancePercent: z.distancePercent, sources: z.sources,
+    })),
     shouldInvokeAI: result.shouldInvokeAI,
     durationMs: Date.now() - startedAt,
   });

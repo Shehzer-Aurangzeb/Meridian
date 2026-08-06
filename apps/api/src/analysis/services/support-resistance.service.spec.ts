@@ -34,7 +34,7 @@ function buildCandles(): Candle[] {
 }
 
 describe('SupportResistanceService — level stability', () => {
-  const service = new SupportResistanceService({} as BinanceService);
+  const service = new SupportResistanceService();
   const candles = buildCandles();
   const spot = candles[candles.length - 1].close;
 
@@ -75,5 +75,102 @@ describe('SupportResistanceService — level stability', () => {
     // MIN_TOUCHES defaults to 2: a level tested once is not a level.
     const levels = service.levelsFromCandles(candles, '1d', spot);
     expect(levels.every((l) => l.touchCount >= 2)).toBe(true);
+  });
+});
+
+describe('SupportResistanceService — playbook Fibonacci', () => {
+  const service = new SupportResistanceService();
+
+  it("reproduces the playbook's own worked example (p51)", () => {
+    // "Swing Low: $25,000 (0 level) · 0.25: $28,750 · 0.5: $32,500 (mid-range)
+    //  · 0.75: $36,250 · Swing High: $40,000 (1.0 level)"
+    // These only reproduce on QUARTERS. Classic 0.236/0.382/0.618 would give
+    // 28,540 / 30,730 / 34,270 and match nothing in the document.
+    const fib = service.fibLevels(25_000, 40_000);
+
+    expect(fib.map((f) => f.price)).toEqual([25_000, 28_750, 32_500, 36_250, 40_000]);
+  });
+
+  it('types levels by position in the range, not by spot', () => {
+    // Playbook colour code: "0 and 0.25 and 0.5: BLUE (support zones)
+    //                        0.75 and 1.0: RED (resistance zones)"
+    const fib = service.fibLevels(25_000, 40_000);
+
+    expect(fib.map((f) => f.type)).toEqual([
+      'support', 'support', 'support', 'resistance', 'resistance',
+    ]);
+  });
+
+  it('refuses a degenerate range rather than emitting five identical levels', () => {
+    expect(service.fibLevels(30_000, 30_000)).toEqual([]);
+    expect(service.fibLevels(40_000, 25_000)).toEqual([]);
+  });
+});
+
+describe('SupportResistanceService — confluence zones', () => {
+  const service = new SupportResistanceService();
+  const spot = 30_000;
+
+  const mark = (price: number, source: string, type: 'support' | 'resistance' = 'support') =>
+    ({ price, source, type });
+
+  it('groups marks that agree and names every contributor', () => {
+    const zones = service.findConfluenceZones(
+      [
+        mark(28_600, '0.25 Fib (12h)'),
+        mark(28_650, '4h swing x3'),
+        mark(28_700, '1h swing x2'),
+        mark(24_000, 'lone level'), // far away, and alone
+      ],
+      spot,
+    );
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].sources).toHaveLength(3);
+    expect(zones[0].low).toBe(28_600);
+    expect(zones[0].high).toBe(28_700);
+    expect(zones[0].spanPercent).toBeLessThan(0.6); // playbook's ~0.5% band
+  });
+
+  it('a lone level is not a zone', () => {
+    // Confluence means agreement. One mark with a wide band is not that.
+    expect(service.findConfluenceZones([mark(28_600, 'only me')], spot)).toEqual([]);
+  });
+
+  it('does not manufacture agreement from a duplicated source', () => {
+    // The same source counted twice must not clear minSources=2, or every
+    // level would become a zone by being listed on two timeframes.
+    const zones = service.findConfluenceZones(
+      [mark(28_600, '4h swing x3'), mark(28_610, '4h swing x3')],
+      spot,
+    );
+    expect(zones).toEqual([]);
+  });
+
+  it('reports signed distance so callers know which side spot is on', () => {
+    const below = service.findConfluenceZones(
+      [mark(27_000, 'a'), mark(27_050, 'b')], spot,
+    );
+    const above = service.findConfluenceZones(
+      [mark(33_000, 'a', 'resistance'), mark(33_050, 'b', 'resistance')], spot,
+    );
+
+    expect(below[0].distancePercent).toBeLessThan(0);
+    expect(above[0].distancePercent).toBeGreaterThan(0);
+  });
+
+  it('orders by proximity to spot', () => {
+    const zones = service.findConfluenceZones(
+      [
+        mark(29_500, 'a'), mark(29_520, 'b'),
+        mark(25_000, 'c'), mark(25_020, 'd'),
+      ],
+      spot,
+    );
+
+    expect(zones).toHaveLength(2);
+    expect(Math.abs(zones[0].distancePercent)).toBeLessThan(
+      Math.abs(zones[1].distancePercent),
+    );
   });
 });
