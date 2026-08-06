@@ -187,7 +187,47 @@ ATR. It is already chart-ready.
 
 ---
 
-### 7. ✅ DONE — auth
+### 7. ✅ DONE — auth (login + machine key)
+
+```
+  browser  ──POST /auth/login {password}──→  scrypt-verify vs MERIDIAN_PASSWORD_HASH
+           ←──────{ token, expiresIn }────   HMAC-signed, 30d, stateless
+           ──Authorization: Bearer <token>─→  ┐
+                                              ├→ AuthGuard → handler
+  cron     ──x-api-key: <key>───────────────→ ┘
+```
+
+Two credentials, one door, because they fail differently. A session token
+expires and is issued against a password, so a browser can hold it without
+ever holding the password. A static key never expires — exactly what a cron
+needs and exactly what a browser must not have, since anything shipped to a
+browser is readable in devtools and a static key read there is permanent
+access.
+
+**No JWT.** Nothing outside this API reads these tokens, and JWT's value is
+that a *third party* can validate one. What would remain is its failure
+surface: the `alg` header, which libraries have repeatedly been talked into
+honouring as `none`. The format here has no algorithm field —
+`v1.<payload>.<HMAC-SHA256>`, one rule, anything else rejected. Swap for
+`@nestjs/jwt` the day an API Gateway authorizer needs to validate a token.
+
+**No refresh token.** Access+refresh shortens the window on a stolen access
+token and revokes sessions across many users. One user, one device: it buys a
+token store, rotation and a revocation list to maintain. Rotating
+`MERIDIAN_TOKEN_SECRET` is the log-out-everywhere button. Add refresh when
+there is a second user, or when the token lives somewhere you do not control.
+
+Setup — writes both env values:
+
+```bash
+npx ts-node src/auth/session-token.ts 'your password'   # >> .env.local
+```
+
+Verified over HTTP: login with the wrong password 401s, `/auth/me` 401s
+unauthenticated and 200s with a token, a token with one character flipped
+401s, and the legacy routes accept the same token.
+
+### 7b. The guard itself
 
 `ApiKeyGuard`, registered as a **global** `APP_GUARD` in AppModule. Global
 rather than per-controller: a guard on the new routes only would leave every
@@ -211,7 +251,7 @@ the same hole with extra steps. Opt OUT with `@Public()`, never opt in.
 
 Verified over HTTP against a booted server:
 
-| request | no key | wrong key | correct key |
+| request | no cred | wrong cred | correct cred |
 |---|---|---|---|
 | `GET /health/live`, `GET /` | 200 | — | — |
 | `GET /analyses` | 401 | 401 | past the guard |

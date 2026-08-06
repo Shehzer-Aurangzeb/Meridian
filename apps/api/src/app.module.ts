@@ -7,7 +7,8 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './controllers/health.controller';
-import { ApiKeyGuard, Public } from './common/guards/api-key.guard';
+import { AuthGuard, Public } from './common/guards/auth.guard';
+import { AuthController } from './auth/auth.controller';
 
 @ApiTags('root')
 @Controller()
@@ -45,7 +46,7 @@ class AppController {
     ServicesModule,
     PrismaModule,
   ],
-  controllers: [AppController, HealthController],
+  controllers: [AppController, HealthController, AuthController],
   providers: [
     // Order matters: throttle first, so a brute-force attempt against the key
     // is rate-limited before it is ever compared.
@@ -58,7 +59,7 @@ class AppController {
     // with extra steps. Opt OUT with @Public(), never opt in.
     {
       provide: APP_GUARD,
-      useClass: ApiKeyGuard,
+      useClass: AuthGuard,
     },
   ],
 })

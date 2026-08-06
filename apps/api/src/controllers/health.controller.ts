@@ -4,7 +4,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { BinanceService } from '../market-data/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { Public } from '../common/guards/api-key.guard';
+import { Public } from '../common/guards/auth.guard';
 
 interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
