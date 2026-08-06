@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CoordinatorRun, TradeAnalysis } from '@prisma/client';
 import { BinanceService } from '../market-data/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { findFirstFill, findFirstOutcome } from './replay';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 import {
   ClaudeAnalysisResponse,
@@ -328,7 +329,7 @@ export class PerformanceService {
         return t >= createdAtMs && t <= fillWindowEnd;
       });
 
-      const firstFill = this.findFirstFillCandle(
+      const firstFill = findFirstFill(
         fillCandidates,
         trade.action,
         entryPrice,
@@ -364,7 +365,7 @@ export class PerformanceService {
       (c) => c.time.getTime() >= filledAtMs,
     );
 
-    const outcome = this.findFirstOutcomeCandle(
+    const outcome = findFirstOutcome(
       outcomeCandles,
       trade.action,
       stopLoss,
@@ -377,51 +378,6 @@ export class PerformanceService {
       takeProfit1,
       entryFilledAt,
     });
-  }
-
-  /**
-   * First candle in `candles` whose wick crosses the limit-entry price
-   * for the given action. LONG fills require `low <= entryPrice`; SHORT
-   * fills require `high >= entryPrice`.
-   */
-  private findFirstFillCandle(
-    candles: Candle[],
-    action: 'LONG' | 'SHORT',
-    entryPrice: number,
-  ): Candle | null {
-    for (const c of candles) {
-      if (action === 'LONG' && c.low <= entryPrice) return c;
-      if (action === 'SHORT' && c.high >= entryPrice) return c;
-    }
-    return null;
-  }
-
-  /**
-   * Walk post-fill candles in chronological order; first wick to touch
-   * SL or TP1 wins. When the same candle straddles both levels we treat
-   * it conservatively as `STOPPED_OUT` (no intra-candle ordering
-   * information available from the kline payload).
-   */
-  private findFirstOutcomeCandle(
-    candles: Candle[],
-    action: 'LONG' | 'SHORT',
-    stopLoss: number,
-    takeProfit1: number,
-  ): 'TARGET_HIT' | 'STOPPED_OUT' | 'OPEN' {
-    for (const c of candles) {
-      if (action === 'LONG') {
-        const hitSL = c.low <= stopLoss;
-        const hitTP = c.high >= takeProfit1;
-        if (hitSL) return 'STOPPED_OUT';
-        if (hitTP) return 'TARGET_HIT';
-      } else {
-        const hitSL = c.high >= stopLoss;
-        const hitTP = c.low <= takeProfit1;
-        if (hitSL) return 'STOPPED_OUT';
-        if (hitTP) return 'TARGET_HIT';
-      }
-    }
-    return 'OPEN';
   }
 
   private async persistEntryFilledAt(

@@ -15,7 +15,8 @@
     "db:studio": "pnpm --filter api exec prisma studio",
     "db:migrate": "pnpm --filter api exec prisma migrate dev",
     "analyze": "pnpm --filter api analyze",
-    "backtest": "pnpm --filter api backtest"
+    "backtest": "pnpm --filter api backtest",
+    "journal": "pnpm --filter api journal"
   },
   "engines": {
     "node": ">=18.0.0",
