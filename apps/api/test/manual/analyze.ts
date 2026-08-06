@@ -26,8 +26,10 @@ dotenv.config({ path: `.env.${process.env.NODE_ENV ?? 'local'}` });
 import { AnalysisCoordinatorService } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { ChecklistService } from '../../src/analysis/services/checklist.service';
 import { SupportResistanceService } from '../../src/analysis/services/support-resistance.service';
-import { ClaudePromptService } from '../../src/ai/ai-prompt.service';
-import { ClaudeService } from '../../src/ai/ai.service';
+import {
+  AnalystNarrationService,
+  PriceProvenanceError,
+} from '../../src/ai/analyst-narration.service';
 import { IndicatorsService } from '../../src/indicators/indicators.service';
 import { MarketRegimeService } from '../../src/market-regime/market-regime.service';
 import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-breakout.service';
@@ -287,10 +289,35 @@ async function main() {
   }
 
   console.log('\ncalling Claude…');
-  const claude = new ClaudeService(new ClaudePromptService());
-  const ai = await claude.analyzeWithChecklist(result);
-  logRun({ symbol: coin, ai });
-  console.log(JSON.stringify(ai, null, 2));
+  const narrator = new AnalystNarrationService();
+  const narrationInput = {
+    map,
+    plans,
+    regime,
+    checklist: result.checklistResult,
+    regimeTimeframe: ANALYSIS_TIMEFRAME,
+  };
+
+  try {
+    const narration = await narrator.narrate(narrationInput);
+    console.log(`\n${'═'.repeat(60)}\n`);
+    console.log(narration.text);
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(
+      `${narration.inputTokens} in / ${narration.outputTokens} out · ` +
+        `${narration.citedPrices.length} prices cited, all traced`,
+    );
+    logRun({ symbol: coin, narration: narration.text, citedPrices: narration.citedPrices });
+  } catch (err) {
+    if (err instanceof PriceProvenanceError) {
+      // Discarded on purpose. A narration that invents a level is worse than
+      // no narration — the numbers above are still correct and complete.
+      console.error(`\nNARRATION REJECTED: ${err.message}`);
+      logRun({ symbol: coin, narrationRejected: err.invented });
+      process.exit(2);
+    }
+    throw err;
+  }
 }
 
 main().catch((err: unknown) => {
