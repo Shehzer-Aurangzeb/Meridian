@@ -109,7 +109,7 @@ function quantiles(xs: number[], label: string) {
 async function run(coin: string) {
   const indicators = new IndicatorsService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
-  const sr = new SupportResistanceService(binance);
+  const sr = new SupportResistanceService();
   const regimeSvc = new MarketRegimeService(binance, indicators);
   const coordinator = new AnalysisCoordinatorService(
     regimeSvc,
@@ -117,7 +117,7 @@ async function run(coin: string) {
     new ChecklistService(),
     binance,
     indicators,
-    new SupportResistanceService(binance),
+    new SupportResistanceService(),
   );
   const candles = await binance.getCandlesPaged(coin, timeframe, LIMIT);
   if (candles.length <= ANALYSIS_CANDLE_LIMIT) return;
