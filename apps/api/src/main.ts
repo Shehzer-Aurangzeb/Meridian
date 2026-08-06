@@ -32,7 +32,16 @@ async function bootstrap() {
     origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Cache-Control'],
+    // x-api-key must be listed or the browser's preflight blocks it and every
+    // request fails CORS rather than 401 — a confusing way to find out auth
+    // is on.
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Cache-Control',
+      'x-api-key',
+    ],
     exposedHeaders: ['Content-Type', 'X-Request-Id'],
     maxAge: 86_400,
   });
@@ -46,6 +55,7 @@ async function bootstrap() {
     .addTag('analysis-coordinator', 'Strategy coordination & SSE streaming')
     .addTag('risk-management', 'Risk management calculations')
     .addTag('performance', 'Performance tracking')
+    .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
