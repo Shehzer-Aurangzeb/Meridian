@@ -381,6 +381,7 @@ export class SupportResistanceService {
     currentPrice: number,
     thresholdPercent: number = SR_DEFAULTS.CLUSTER_THRESHOLD,
     minSources: number = 2,
+    maxSpanPercent: number = SR_DEFAULTS.CLUSTER_THRESHOLD * 2,
   ): ConfluenceZone[] {
     if (marks.length === 0) return [];
 
@@ -392,7 +393,18 @@ export class SupportResistanceService {
       const avg = current.reduce((sum, m) => sum + m.price, 0) / current.length;
       const apart = Math.abs((sorted[i].price - avg) / avg) * 100;
 
-      if (apart <= thresholdPercent) {
+      // Distance to the running mean alone is not enough: each mark can sit
+      // within threshold of a mean that keeps moving, so a chain drifts and
+      // the "zone" ends up far wider than the band. Cap the TOTAL span too.
+      // The playbook's own worked example spans 0.524% against a ~0.5%
+      // tolerance (p53), so the cap has to be looser than the pairwise
+      // threshold or it would reject the document's own zone.
+      const prices = current.map((m) => m.price);
+      const spanLow = Math.min(...prices, sorted[i].price);
+      const spanHigh = Math.max(...prices, sorted[i].price);
+      const span = ((spanHigh - spanLow) / ((spanHigh + spanLow) / 2)) * 100;
+
+      if (apart <= thresholdPercent && span <= maxSpanPercent) {
         current.push(sorted[i]);
       } else {
         groups.push(current);
@@ -409,16 +421,12 @@ export class SupportResistanceService {
         const center = prices.reduce((a, b) => a + b, 0) / prices.length;
         const sources = [...new Set(g.map((m) => m.source))];
 
-        // Majority type; ties resolve to whichever side of spot the zone sits.
-        const supports = g.filter((m) => m.type === 'support').length;
-        const type =
-          supports * 2 === g.length
-            ? center < currentPrice
-              ? ('support' as const)
-              : ('resistance' as const)
-            : supports * 2 > g.length
-              ? ('support' as const)
-              : ('resistance' as const);
+        // Type is POSITIONAL, not historical. A zone below spot is where a
+        // long is placed and a zone above is where a short is; that is what
+        // the caller needs to build a plan. The historical evidence — a swing
+        // high sitting below price is a former resistance being retested as
+        // support — stays visible in `sources`, which is where it belongs.
+        const type = center < currentPrice ? ('support' as const) : ('resistance' as const);
 
         return {
           low,

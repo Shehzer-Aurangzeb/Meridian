@@ -26,8 +26,10 @@ import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.ser
 import { TimeInterval } from '../../src/common/types/candle.types';
 import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { logRun } from '../../src/common/run-log';
-import { MarkedLevel } from '../../src/analysis/interfaces/support-resistance.types';
-import { Timeframe } from '../../src/common/constants/timeframes';
+import {
+  LevelMapService,
+  LEVEL_TIMEFRAMES,
+} from '../../src/analysis/services/level-map.service';
 
 // ponytail: BinanceService only calls get/set/del — a Map covers it.
 // Swap for the real CacheModule if this ever needs TTL semantics.
@@ -49,6 +51,7 @@ async function main() {
   const indicators = new IndicatorsService();
   const sr = new SupportResistanceService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
+  const levelMap = new LevelMapService(binance, sr);
   const regimeSvc = new MarketRegimeService(binance, indicators);
   const coordinator = new AnalysisCoordinatorService(
     regimeSvc,
@@ -80,47 +83,30 @@ async function main() {
   );
   console.log(`route       ${result.strategyRoute}`);
 
-  // ── Level engine ──────────────────────────────────────────────────────
-  // ponytail: Fib is anchored to THIS timeframe. The playbook anchors it to
-  // 12h (p51, "Weekly acceptable too"); multi-timeframe gathering is the
-  // next phase, and the anchor is surfaced below so it is never implicit.
-  const srLevels = sr.levelsFromCandles(
-    [...ctx.candles],
-    timeframe as Timeframe,
-    lastClose,
+  // ── Level map: multi-timeframe, playbook order ────────────────────────
+  const map = await levelMap.build(coin);
+
+  console.log(
+    `spot        $${map.spot.toLocaleString()}  (${LEVEL_TIMEFRAMES[LEVEL_TIMEFRAMES.length - 1]} close)`,
   );
-  const anchors = sr.fibAnchors([...ctx.candles]);
-  const fib = anchors ? sr.fibLevels(anchors.low, anchors.high) : [];
-
-  const marks: MarkedLevel[] = [
-    ...srLevels.map((l) => ({
-      price: l.price,
-      type: l.type,
-      source: `${timeframe} ${l.type} x${l.touchCount}`,
-      touchCount: l.touchCount,
-    })),
-    ...fib.map((f) => ({
-      price: f.price,
-      type: f.type,
-      source: `${f.ratio} Fib (${timeframe})`,
-    })),
-  ];
-  const zones = sr.findConfluenceZones(marks, lastClose);
-
-  if (anchors) {
+  if (map.anchor) {
     console.log(
-      `fib anchor  ${timeframe} swing range ` +
-        `$${anchors.low.toLocaleString()} – $${anchors.high.toLocaleString()}`,
+      `fib anchor  ${map.anchor.timeframe} swing range ` +
+        `$${map.anchor.low.toLocaleString()} – $${map.anchor.high.toLocaleString()}`,
     );
   }
+  console.log(
+    `marks       ${map.marks.length} from ` +
+      map.perTimeframe.map((t) => `${t.timeframe}:${t.levels}`).join(' ') +
+      ` + ${map.fib.length} Fib`,
+  );
 
-  console.log(`\nlevels      ${srLevels.length} S/R + ${fib.length} Fib = ${marks.length} marks`);
-  if (zones.length === 0) {
-    console.log('confluence  none — no two independent marks agree within 0.5%');
+  if (map.zones.length === 0) {
+    console.log('confluence  none — no two independent sources agree within 0.5%');
   } else {
-    console.log(`confluence  ${zones.length} zone(s)`);
+    console.log(`confluence  ${map.zones.length} zone(s)`);
     console.table(
-      zones.slice(0, 5).map((z) => ({
+      map.zones.slice(0, 6).map((z) => ({
         zone: `$${z.low.toFixed(2)} – $${z.high.toFixed(2)}`,
         type: z.type,
         away: `${z.distancePercent >= 0 ? '+' : ''}${z.distancePercent.toFixed(2)}%`,
@@ -180,8 +166,11 @@ async function main() {
           lower: result.squeezeSetup.lowerTriggerPrice,
         }
       : null,
-    fibAnchor: anchors,
-    zones: zones.map((z) => ({
+    spot: map.spot,
+    fibAnchor: map.anchor,
+    markCount: map.marks.length,
+    perTimeframe: map.perTimeframe,
+    zones: map.zones.map((z) => ({
       low: z.low, high: z.high, type: z.type,
       distancePercent: z.distancePercent, sources: z.sources,
     })),

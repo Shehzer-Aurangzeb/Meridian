@@ -10,6 +10,7 @@ import { HistoryController } from './controllers/history.controller';
 import { ValidationController } from './controllers/validation.controller';
 import { ChecklistService } from './services/checklist.service';
 import { SupportResistanceService } from './services/support-resistance.service';
+import { LevelMapService } from './services/level-map.service';
 
 @Module({
   imports: [MarketDataModule, IndicatorsModule, AiModule, PrismaModule, RiskManagementModule, PerformanceModule],
@@ -17,10 +18,12 @@ import { SupportResistanceService } from './services/support-resistance.service'
   providers: [
     ChecklistService,
     SupportResistanceService,
+    LevelMapService,
   ],
   exports: [
     ChecklistService,
     SupportResistanceService,
+    LevelMapService,
     RiskManagementModule,
     PerformanceModule,
   ],
