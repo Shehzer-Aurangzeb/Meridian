@@ -121,6 +121,32 @@ export class LevelMapService {
       })),
     );
 
+    // ATR has its own declared timeframe, fetched separately only when it is
+    // not already one of the level timeframes.
+    const atrCandles =
+      series.find((s) => s.timeframe === ATR_TIMEFRAME)?.candles ??
+      (await this.binanceService.getCandles(
+        symbol,
+        ATR_TIMEFRAME as TimeInterval,
+        CANDLE_LIMITS[ATR_TIMEFRAME],
+      ));
+
+    return this.buildFrom(symbol, series, atrCandles);
+  }
+
+  /**
+   * The map itself, from candles a caller already holds.
+   *
+   * Pure and synchronous — split out from `build` so the plan backtest can
+   * rebuild the map as of a historical bar by passing truncated series. There
+   * is no other way to replay what this tool actually prints, and fetching is
+   * the only thing `build` adds.
+   */
+  buildFrom(
+    symbol: string,
+    series: Array<{ timeframe: Timeframe; candles: Candle[] }>,
+    atrCandles: Candle[],
+  ): LevelMap {
     const byTimeframe = new Map<Timeframe, Candle[]>(
       series.map((s) => [s.timeframe, s.candles]),
     );
@@ -182,15 +208,6 @@ export class LevelMapService {
 
     const zones = this.supportResistanceService.findConfluenceZones(marks, spot);
 
-    // ATR on its own declared timeframe, fetched separately when it is not
-    // already one of the level timeframes.
-    const atrCandles =
-      byTimeframe.get(ATR_TIMEFRAME) ??
-      (await this.binanceService.getCandles(
-        symbol,
-        ATR_TIMEFRAME as TimeInterval,
-        CANDLE_LIMITS[ATR_TIMEFRAME],
-      ));
     const atr = this.indicatorsService.buildContext(
       symbol,
       ATR_TIMEFRAME,

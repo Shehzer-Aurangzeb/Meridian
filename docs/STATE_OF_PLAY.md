@@ -1038,6 +1038,127 @@ measures. Six negatives means the prior on it is low.
 
 ---
 
+## 14h. ⛔ THE TRADE PLAN ITSELF — flat before costs, negative after
+
+**The first test of what the tool actually prints.** Every experiment above
+scored a *signal* — a checklist score, a momentum rank, a funding rank, a
+sequenced dip. None of them scored the thing `pnpm analyze` emits: a
+confluence zone, a three-step entry ladder, a stop one 4h ATR beyond the zone,
+and targets at the next zones. Different geometry, different trades, so §14c–g
+say nothing about the current output.
+
+`test/manual/backtest-plans.ts` closes that. It rebuilds the level map as of
+every historical 1h bar from **only completed candles** (`completedAsOf` —
+`open + duration <= bar close`, because a forming 12h candle already contains
+the future), builds both directions' plans, takes any plan in an eligible
+distance state once price reaches its average entry, and scores the printed
+ladder: stop before target within a bar, breakeven after TP1 (p14), open
+weight marked to market at the cap.
+
+### Config — quote these with any number below
+
+```
+A (primary)     pnpm backtest:plans --coins BTC,ETH,SOL --bars 6000 --random --csv plans.csv
+                states=ACTIONABLE fill-bars=24 max-bars=72 cooldown=24 fee=0.05% slip=0.02% seed=12345
+B (sensitivity) same, --max-bars 240
+window          2025-11-29 → 2026-08-06 · 6000 1h bars per coin · 10 monthly blocks
+drift           BTC −28.9%  ETH −36.0%  SOL −46.2%
+```
+
+### Result
+
+| | A (72-bar cap) | B (240-bar cap) |
+|---|---|---|
+| trades | 582 | 518 |
+| win rate | 58% | 58% |
+| **net R/trade** | **−0.039** | **−0.043** |
+| gross R/trade | +0.046 | +0.042 |
+| cost R/trade | 0.084 | 0.085 |
+| long / short | −0.060 / −0.016 | −0.046 / −0.039 |
+| random control | −0.121 | −0.040 |
+| **delta vs random** | **+0.083** | **−0.003** |
+
+Month-clustered bootstrap on A, 10,000 resamples, 10 blocks:
+
+```
+strategy   −0.0387R   CI [−0.1206, +0.0583]   P(<=0) 0.81
+control    −0.1212R   CI [−0.2330, +0.0102]   P(<=0) 0.96
+delta      +0.0826R   CI [−0.0908, +0.2435]   P(<=0) 0.18
+```
+
+### Six findings, all of which change what to build next
+
+**1. Costs, not direction, are the binding constraint.** Gross is +0.046R;
+cost is 0.084R. At the average 1.82% stop distance, breakeven demands a
+**round-trip cost under ~0.08%** — about 0.04% per side including slippage.
+The modelled 0.14% is ordinary taker pricing. The geometry does not have to be
+wrong for this to lose; it only has to be flat.
+
+**2. The apparent edge over random does not survive a modelling knob.**
++0.083R at a 72-bar cap becomes −0.003R at 240. `max-bars` is not a strategy
+parameter — it is an artifact of the harness — so a result that flips on it is
+not a result. This is the single most important line in this section.
+
+**3. 9% of trades were holding up the number.** The TIMEOUT bucket (never
+resolved inside the cap, marked to market) averaged +1.76R in A. Score those
+as 0R and the whole thing drops to **−0.202R**. Mark-to-market is a
+modelling choice, and this result rests on it.
+
+**4. Confluence strength does not rank outcomes.** Net R by source count:
+2 → −0.028, 3 → +0.036, 4 → −0.267, 5 → −0.118. The same non-monotonic
+non-ranking the deleted checklist score showed. Requiring *more* agreement
+picked worse trades, exactly as the earlier `minSources` 2→3 measurement
+predicted (level-map.service.ts).
+
+**5. `ACTIONABLE` is not selective — the cooldown is.** BTC produced 7,971
+eligible plans over 6,000 bars: price sits within 1% of a confluence zone, on
+both sides, essentially always. That does satisfy "don't say WAIT 95% of the
+time", but it means the distance state carries no information, and the trade
+count is set by `--cooldown`, not by the market.
+
+**6. A 58% win rate with negative expectancy.** TP1 is the next zone rather
+than a multiple of risk, so it is routinely below 1R by construction. Win rate
+is not the metric and never was; 41% of trades stop out at −1.08R and outvote
+the wins.
+
+### What this does and does not close
+
+It closes **§14g's open question** — "does requiring the signal to happen at a
+real level change this?" The level engine now exists, plans are built on it,
+and the answer is no: not distinguishable from zero, and the delta over random
+is not robust. Hypothesis 3 (zone-arrival location) is no longer "worse than
+random, significance unverified"; on the real engine it is *flat*.
+
+It does **not** close whether the tool is useful. It measures a mechanical
+version of the analyst — fixed cooldown, fixed cap, no regime filter, no human
+judgment, no narration. The journal (step 8) measures the version that has
+those. That remains the only instrument that can answer the actual question.
+
+### Standing verdict — seven hypotheses
+
+| # | hypothesis | result |
+|---|---|---|
+| 1 | checklist as scanner | no edge vs random longs (§14c) |
+| 2 | checklist as confirmation filter | structurally unreachable; mis-wired (§14d) |
+| 3 | zone-arrival location | flat on the real level engine (§14h, supersedes §14d) |
+| 4 | cross-sectional momentum, long/short | not significant; worse than random risk-adjusted (§14e) |
+| 5 | cross-sectional funding, contrarian | no edge; delta is a coin flip (§14f) |
+| 6 | sequenced dip→turn | fires 32× more often; no edge at any horizon (§14g) |
+| 7 | **the printed trade plan** | **flat gross, negative net; delta not robust (§14h)** |
+
+### Methodology rules added
+
+- **Vary the modelling knobs, not just the strategy ones.** `max-bars`,
+  `fill-bars` and the mark-to-market rule are harness artifacts. If the
+  conclusion moves when they do, report that in the same breath as the number.
+- **Name the share of trades that carry the result.** 9% of trades at +1.76R
+  decided the sign here. A mean without that share is a mean that hides.
+- **Score what the tool prints, not what it used to print.** `backtest.ts` was
+  still measuring a signal the analysis path no longer emits, and would have
+  answered "is this reliable" about code that no longer runs.
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |
