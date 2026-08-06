@@ -221,7 +221,6 @@ async function main() {
     });
   }
 
-  console.log(`\nshouldInvokeAI ${result.shouldInvokeAI}`);
   console.log(`elapsed        ${Date.now() - startedAt}ms`);
 
   logRun({
@@ -275,15 +274,12 @@ async function main() {
     atr: map.atr,
     atrTimeframe: map.atrTimeframe,
     zoneBands: ZONE_BANDS,
-    shouldInvokeAI: result.shouldInvokeAI,
     durationMs: Date.now() - startedAt,
   });
 
   if (!withAI) {
     console.log(
-      result.shouldInvokeAI
-        ? '\n(pass --ai to run the Claude leg)'
-        : '\n(AI skipped: pipeline says this is not a setup)',
+      '\n(pass --ai for the analyst read)',
     );
     return;
   }

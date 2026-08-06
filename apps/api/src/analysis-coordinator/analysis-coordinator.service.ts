@@ -8,10 +8,7 @@ import { SupportResistanceService } from '../analysis/services/support-resistanc
 import { Timeframe } from '../common/constants/timeframes';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 import { IndicatorContext } from '../common/types/indicator-context.types';
-import {
-  EntryChecklistParams,
-  PLAYBOOK_MIN_CONDITIONS_MET,
-} from '../analysis/interfaces/checklist.types';
+import { EntryChecklistParams } from '../analysis/interfaces/checklist.types';
 import { MarketRegimeResult } from '../market-regime/interfaces/market-regime.types';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 
@@ -115,7 +112,6 @@ export class AnalysisCoordinatorService {
         strategyRoute: 'SQUEEZE_BREAKOUT',
         squeezeSetup,
         checklistResult: null,
-        shouldInvokeAI: true,
         reasoning:
           `Market classified as COMPRESSION (BB width ${regimeResult.metrics.bandWidth.toFixed(3)}% ` +
           `at ${
@@ -123,7 +119,7 @@ export class AnalysisCoordinatorService {
               ? regimeResult.metrics.bandWidthPercentile.toFixed(1)
               : '?'
           }th percentile). ` +
-          `Activating squeeze breakout strategy with breakout levels. AI execution enabled.`,
+          `Activating squeeze breakout strategy with breakout levels.`,
       };
     }
 
@@ -133,16 +129,14 @@ export class AnalysisCoordinatorService {
     const checklistResult =
       this.checklistService.evaluateChecklist(checklistInputs);
 
-    // Playbook rule: a setup requires 3 of 5 conditions (p12). This replaces
-    // `status !== 'WATCHING'`, which admitted 2-of-5 because WATCHING ended
-    // at a score of 39.
-    const shouldInvokeAI =
-      checklistResult.conditionsMet >= PLAYBOOK_MIN_CONDITIONS_MET;
-
-
+    // No gate. The coordinator describes; it does not decide whether the
+    // analysis is worth having. Distance to a confluence zone replaced the
+    // "is this a setup" verdict (see TradePlanService.ZONE_BANDS), and the
+    // cost of a Claude call is a CALLER policy — the CLI has `--ai`, the
+    // scanner has its own constant. A pipeline-level verdict here is what
+    // made the tool silent on 99.6% of bars.
     this.logger.debug(
-      `Checklist ${checklistResult.conditionsMet}/5 conditions ` +
-        `=> shouldInvokeAI: ${shouldInvokeAI}`,
+      `Checklist ${checklistResult.conditionsMet}/5 conditions met`,
     );
 
     return {
@@ -152,14 +146,11 @@ export class AnalysisCoordinatorService {
       strategyRoute: 'CONFLUENCE_CHECKLIST',
       squeezeSetup: null,
       checklistResult,
-      shouldInvokeAI,
       reasoning:
         `Market classified as ${regimeResult.regime} (ADX: ${regimeResult.metrics.adx.toFixed(2)}). ` +
         `Evaluated confluence checklist for ${checklistResult.tradeType} ` +
         `(direction ${direction ? 'supplied by caller' : 'derived from trend'}): ` +
-        `${checklistResult.conditionsMet}/5 conditions met ` +
-        `(needs ${PLAYBOOK_MIN_CONDITIONS_MET}). ` +
-        `AI execution ${shouldInvokeAI ? 'ENABLED' : 'DISABLED'}.`,
+        `${checklistResult.conditionsMet}/5 conditions met.`,
     };
   }
 

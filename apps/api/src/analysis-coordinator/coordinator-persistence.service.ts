@@ -98,7 +98,11 @@ export class CoordinatorPersistenceService {
         timeframe: coordinatorResult.timeframe,
         regime: coordinatorResult.regimeResult.regime,
         strategyRoute: coordinatorResult.strategyRoute,
-        shouldInvokeAI: coordinatorResult.shouldInvokeAI,
+        // The pipeline no longer emits a verdict, so this column now records
+        // what actually happened: did a Claude call run for this row. Kept
+        // rather than migrated, per the no-migration decision — historical
+        // rows keep their original "was this gated in" meaning.
+        shouldInvokeAI: aiResponse !== null,
         aiAction: aiResponse?.action ?? null,
         aiConfidence: aiResponse?.confidence ?? null,
         coordinatorPayload: coordinatorResult as unknown as Prisma.InputJsonValue,

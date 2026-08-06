@@ -61,7 +61,8 @@ export interface ExecutionHorizon {
   strategyRoute: StrategyRoute | 'UNKNOWN';
   status: 'SETUP' | 'NO_SETUP' | 'PENDING_BREAKOUT';
   conditionsMet: number | null;
-  shouldInvokeAI: boolean;
+  /** The scanner's own budget decision — see SCANNER_MIN_CONDITIONS. */
+  worthNarrating: boolean;
   squeezeSetup: SqueezeBreakoutSetup | null;
   checklistResult: EntryChecklistResult | null;
 }

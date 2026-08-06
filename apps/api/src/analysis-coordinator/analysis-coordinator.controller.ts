@@ -64,7 +64,7 @@ export class AnalysisCoordinatorController {
    * Emission sequence:
    *   1. FETCHING_DATA      — emitted immediately on subscription.
    *   2. REGIME_CLASSIFIED  — after candle fetch + regime classification.
-   *   3. AI_THINKING        — only if `shouldInvokeAI` is true.
+   *   3. AI_THINKING        — always; there is no gate.
    *   4. COMPLETE           — final combined payload; stream closes.
    *   5. ERROR              — terminal error event; stream closes.
    *
@@ -161,13 +161,14 @@ export class AnalysisCoordinatorController {
           );
           if (cancelled) return;
 
-          // ── Step 4: AI_THINKING (conditional) ────────────────────────
+          // ── Step 4: AI_THINKING ──────────────────────────────────────
+          // Unconditional: there is no gate to pass. The analysis is always
+          // worth narrating, which is the whole point of dropping the verdict.
           let aiResponse: ClaudeAnalysisResponse | null = null;
-          if (coordinatorResult.shouldInvokeAI) {
+          {
             emit({
               status: 'AI_THINKING',
-              message:
-                'Quantitative gates passed. Invoking Claude 4.7 Opus for psychological analysis...',
+              message: 'Interpreting the computed analysis...',
             });
 
             aiResponse =
@@ -295,11 +296,8 @@ export class AnalysisCoordinatorController {
         regimeResult,
       );
 
-      let aiResponse: ClaudeAnalysisResponse | null = null;
-      if (coordinatorResult.shouldInvokeAI) {
-        aiResponse =
-          await this.claudeService.analyzeWithChecklist(coordinatorResult);
-      }
+      const aiResponse: ClaudeAnalysisResponse | null =
+        await this.claudeService.analyzeWithChecklist(coordinatorResult);
 
       const durationMs = Date.now() - startedAt;
       this.persistence.persist({

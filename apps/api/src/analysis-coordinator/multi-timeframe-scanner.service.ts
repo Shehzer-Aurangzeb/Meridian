@@ -36,6 +36,21 @@ const TTL_BY_TIMEFRAME_MS: Record<'15m' | '1h' | '4h' | '1d', number> = {
  * Claude trade signal. Aligned with Miraj's 1-2% per-trade rule and the
  * existing `LeverageService` heuristics.
  */
+/**
+ * How many of the five conditions a horizon must meet before the scanner
+ * spends a Claude call on it.
+ *
+ * This is the SCANNER'S cost policy, not a verdict from the pipeline. The
+ * coordinator no longer decides whether an analysis is worth having — it
+ * describes, and callers choose what to pay for. The scanner needs a cap
+ * because it runs three coordinator passes per coin and would otherwise
+ * make a Claude call for every one.
+ *
+ * Deliberately owned here so it is visibly a budget decision. Set to 0 to
+ * narrate every scan.
+ */
+const SCANNER_MIN_CONDITIONS = 3;
+
 const SCANNER_RISK_DEFAULTS = {
   riskPercentage: 1.5,
   experienceLevel: 'intermediate' as const,
@@ -52,7 +67,7 @@ const SCANNER_RISK_DEFAULTS = {
  *  - **Macro bias** from the 1d pass (the directional anchor).
  *  - **Execution horizon** preferring the 1h pass, falling back to 4h.
  *  - **AI insight** by re-using the coordinator payload on the chosen
- *    execution timeframe whenever `shouldInvokeAI === true`.
+ *    execution timeframe whenever the scanner deems it worth narrating.
  *  - **Risk profile** sized against `walletBalance` whenever Claude
  *    returns an actionable LONG/SHORT.
  *
@@ -99,11 +114,7 @@ export class MultiTimeframeScannerService {
     const entryHorizon = this.buildExecutionHorizon(entryResult, '1h');
     const structureHorizon = this.buildExecutionHorizon(structureResult, '4h');
 
-    // Routes on the coordinator's gate rather than re-deriving one from the
-    // tier label. The coordinator applies the playbook's 3-of-5 rule, and
-    // squeeze horizons carry shouldInvokeAI=true, so this preserves squeeze
-    // behaviour while removing the scanner's dependence on tiers.
-    const isActive = (h: ExecutionHorizon): boolean => h.shouldInvokeAI;
+    const isActive = (h: ExecutionHorizon): boolean => h.worthNarrating;
 
     let executionHorizon: ExecutionHorizon;
     let executionPayload: CoordinatorAnalysisResult;
@@ -141,7 +152,7 @@ export class MultiTimeframeScannerService {
 
     // ── 4. AI insight ────────────────────────────────────────────────
     const aiInsight: ClaudeAnalysisResponse | null =
-      executionHorizon.shouldInvokeAI
+      executionHorizon.worthNarrating
         ? await this.claudeService.analyzeWithChecklist(executionPayload)
         : null;
 
@@ -244,7 +255,7 @@ export class MultiTimeframeScannerService {
    * Status mapping:
    *  - CONFLUENCE_CHECKLIST → SETUP / NO_SETUP from the entry gate.
    *  - SQUEEZE_BREAKOUT     → `PENDING_BREAKOUT` (gating happens at the
-   *    AI layer; coordinator always sets shouldInvokeAI=true for it).
+   *    AI layer; the scanner always narrates a squeeze).
    *  - UNKNOWN / missing    → `NO_SETUP` so the caller short-circuits.
    */
   private buildExecutionHorizon(
@@ -257,7 +268,9 @@ export class MultiTimeframeScannerService {
         strategyRoute: 'SQUEEZE_BREAKOUT',
         status: 'PENDING_BREAKOUT',
         conditionsMet: null,
-        shouldInvokeAI: result.shouldInvokeAI,
+        // Squeeze setups have no condition count; the envelope itself is the
+        // description, so the scanner always narrates them.
+        worthNarrating: true,
         squeezeSetup: result.squeezeSetup,
         checklistResult: null,
       };
@@ -268,7 +281,8 @@ export class MultiTimeframeScannerService {
       strategyRoute: 'CONFLUENCE_CHECKLIST',
       status: result.checklistResult?.passed ? 'SETUP' : 'NO_SETUP',
       conditionsMet: result.checklistResult?.conditionsMet ?? null,
-      shouldInvokeAI: result.shouldInvokeAI,
+      worthNarrating:
+        (result.checklistResult?.conditionsMet ?? 0) >= SCANNER_MIN_CONDITIONS,
       squeezeSetup: null,
       checklistResult: result.checklistResult,
     };

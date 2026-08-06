@@ -34,7 +34,6 @@ export interface CoordinatorAnalysisResult {
   // Gate controlling downstream AI invocation
   // - SQUEEZE_BREAKOUT always sets true
   // - CONFLUENCE_CHECKLIST sets true only if 3 of 5 conditions are met
-  shouldInvokeAI: boolean;
 
   // Optional: reasoning/explanation of the coordinator's decision path
   reasoning: string;
