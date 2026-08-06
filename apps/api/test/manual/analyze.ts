@@ -1,12 +1,22 @@
 /**
- * Terminal analysis harness.
+ * Terminal analyst.
  *
- *   pnpm analyze BTC 1h
- *   pnpm analyze ETH 4h --ai      # also calls Claude (costs money)
+ *   pnpm analyze BTC
+ *   pnpm analyze ETH --balance 10000
+ *   pnpm analyze SOL --ai              # adds the Claude leg (costs money)
  *
- * Runs the real coordinator pipeline in-process. No Nest bootstrap, no
- * Postgres, no HTTP server — `routeFromRegime` is pure and the only I/O is
- * the Binance fetch, so the whole thing is five constructors and a call.
+ * SYMBOL IS THE ONLY ARGUMENT. Every timeframe is a declared decision, not a
+ * caller's guess — measured reason: passing an arbitrary ATR timeframe moved
+ * blended R by 10x (0.09R on 1d vs 3.61R on 1h for identical zones), so a
+ * timeframe nobody chose deliberately is a correctness problem rather than a
+ * convenience. All four are printed below:
+ *
+ *   levels    12h / 4h / 1h     LEVEL_TIMEFRAMES
+ *   fib       12h               FIB_ANCHOR_TIMEFRAME
+ *   atr       4h                ATR_TIMEFRAME
+ *   regime    12h               ANALYSIS_TIMEFRAME
+ *
+ * Runs in-process: no Nest bootstrap, no Postgres, no HTTP server.
  */
 import * as dotenv from 'dotenv';
 import type { Cache } from 'cache-manager';
@@ -23,10 +33,12 @@ import { MarketRegimeService } from '../../src/market-regime/market-regime.servi
 import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-breakout.service';
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
-import { TimeInterval } from '../../src/common/types/candle.types';
+import { ANALYSIS_TIMEFRAME } from '../../src/common/constants/timeframes';
 import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { logRun } from '../../src/common/run-log';
 import {
+  ATR_TIMEFRAME,
+  FIB_ANCHOR_TIMEFRAME,
   LevelMapService,
   LEVEL_TIMEFRAMES,
 } from '../../src/analysis/services/level-map.service';
@@ -44,10 +56,20 @@ const cache = {
   del: (k: string) => Promise.resolve(store.delete(k)),
 } as unknown as Cache;
 
-const [, , coinArg, tfArg, ...flags] = process.argv;
+const [, , coinArg, ...flags] = process.argv;
 const coin = (coinArg ?? 'BTC').toUpperCase();
-const timeframe = (tfArg ?? '1h') as TimeInterval;
 const withAI = flags.includes('--ai');
+
+// Reject a leftover timeframe argument loudly. Silently ignoring it would let
+// `analyze BTC 1h` look like it honoured the 1h while actually reporting 12h.
+const stray = flags.find((f) => !f.startsWith('--') && !/^\d+(\.\d+)?$/.test(f));
+if (stray) {
+  console.error(
+    `Unexpected argument '${stray}'. analyze takes a symbol only — the ` +
+      `playbook decides the timeframes. See the header for which.`,
+  );
+  process.exit(1);
+}
 // Sizing needs an account size, and inventing a default would put a made-up
 // number in the output. Omitted unless supplied.
 const balance = (() => {
@@ -74,15 +96,18 @@ async function main() {
   );
 
   const startedAt = Date.now();
-  const candles = await binance.getCandles(coin, timeframe, ANALYSIS_CANDLE_LIMIT);
-  const ctx = indicators.buildContext(coin, timeframe, candles);
+  const candles = await binance.getCandles(coin, ANALYSIS_TIMEFRAME, ANALYSIS_CANDLE_LIMIT);
+  const ctx = indicators.buildContext(coin, ANALYSIS_TIMEFRAME, candles);
   const regime = regimeSvc.classifyFromContext(ctx);
-  const result = coordinator.routeFromRegime(ctx, timeframe, regime);
+  const result = coordinator.routeFromRegime(ctx, ANALYSIS_TIMEFRAME, regime);
 
   const lastClose = ctx.closes[ctx.closes.length - 1];
 
-  console.log(`\n${coin}/USDT · ${timeframe} · ${candles.length} candles`);
-  console.log(`last close  $${lastClose.toLocaleString()}`);
+  console.log(`\n${coin}/USDT`);
+  console.log(
+    `timeframes  levels ${LEVEL_TIMEFRAMES.join('/')} · fib ${FIB_ANCHOR_TIMEFRAME} · ` +
+      `atr ${ATR_TIMEFRAME} · regime ${ANALYSIS_TIMEFRAME}`,
+  );
   console.log(
     `regime      ${regime.regime}  (ADX ${regime.metrics.adx.toFixed(1)}, ` +
       `BB width ${pct(regime.metrics.bandWidth)}` +
@@ -199,8 +224,12 @@ async function main() {
 
   logRun({
     symbol: coin,
-    timeframe,
-    lastClose,
+    timeframes: {
+      levels: LEVEL_TIMEFRAMES,
+      fib: FIB_ANCHOR_TIMEFRAME,
+      atr: ATR_TIMEFRAME,
+      regime: ANALYSIS_TIMEFRAME,
+    },
     regime: regime.regime,
     adx: regime.metrics.adx,
     bandWidth: regime.metrics.bandWidth,
@@ -260,7 +289,7 @@ async function main() {
   console.log('\ncalling Claude…');
   const claude = new ClaudeService(new ClaudePromptService());
   const ai = await claude.analyzeWithChecklist(result);
-  logRun({ symbol: coin, timeframe, ai });
+  logRun({ symbol: coin, ai });
   console.log(JSON.stringify(ai, null, 2));
 }
 
