@@ -173,8 +173,7 @@ routes (those stream a regime-leg-only result and predate the level map).
 - [x] `GET /analyses/:id` — full payload + `currentPrice` + `freshness`
 - [x] 422 on rows that predate the level map, rather than scoring freshness
       off a payload with no plans in it
-- [ ] **No auth.** Add a shared-secret header before this is publicly
-      reachable.
+- [x] **Auth done** — see below. Every route requires a key except health.
 
 ### 6. Frontend (no backend work)
 
@@ -187,6 +186,44 @@ and sources, fib anchor, marks per timeframe, entries, stop, targets, spot,
 ATR. It is already chart-ready.
 
 ---
+
+### 7. ✅ DONE — auth
+
+`ApiKeyGuard`, registered as a **global** `APP_GUARD` in AppModule. Global
+rather than per-controller: a guard on the new routes only would leave every
+legacy `/analysis-coordinator` and `/analysis/history` route open, which is
+the same hole with extra steps. Opt OUT with `@Public()`, never opt in.
+
+- [x] `x-api-key: <key>` or `Authorization: Bearer <key>`
+- [x] **Fails closed at boot.** A missing or <16-char `MERIDIAN_API_KEY`
+      throws on startup rather than disabling auth. "No key configured means
+      everything is allowed" is how these guards end up protecting nothing.
+- [x] Constant-time compare, both sides SHA-256'd first — `timingSafeEqual`
+      throws on unequal lengths, so hashing makes a wrong-length key fail by
+      value instead of through an exception path.
+- [x] `@Public()` on health and the banner only. An uptime check that needs a
+      secret is not an uptime check.
+- [x] Throttler runs before it, so brute-force attempts are rate-limited
+      before the key is ever compared.
+- [x] `x-api-key` added to CORS `allowedHeaders` — without it the browser
+      preflight blocks the request and you get a CORS error instead of a 401.
+- [x] Swagger `addApiKey` so /docs can authorise.
+
+Verified over HTTP against a booted server:
+
+| request | no key | wrong key | correct key |
+|---|---|---|---|
+| `GET /health/live`, `GET /` | 200 | — | — |
+| `GET /analyses` | 401 | 401 | past the guard |
+| `POST /analyses?symbol=BTC` | 401 | — | — |
+| `GET /analysis/history/BTC` *(legacy)* | 401 | — | — |
+| `POST /analysis-coordinator/coordinate` *(legacy)* | 401 | — | — |
+
+**Two things this does not cover.** Swagger UI at `/docs` is served outside
+Nest's guard chain, so the page itself is reachable without a key (the API
+calls it makes are not). And `@Sse('stream')` is unusable from a browser now:
+`EventSource` cannot set headers. That path is legacy and parked — if it is
+ever revived it needs a query token or fetch-based streaming.
 
 ## Verified
 

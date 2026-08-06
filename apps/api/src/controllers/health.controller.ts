@@ -4,6 +4,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { BinanceService } from '../market-data/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { Public } from '../common/guards/api-key.guard';
 
 interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -21,6 +22,9 @@ interface HealthStatus {
 
 @ApiTags('health')
 @Controller('health')
+// Public: an uptime check that needs a secret is not an uptime check, and a
+// load balancer cannot hold one. These expose no market data and no analysis.
+@Public()
 export class HealthController {
   private readonly startTime = Date.now();
 

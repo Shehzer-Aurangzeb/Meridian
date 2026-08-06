@@ -7,11 +7,13 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './controllers/health.controller';
+import { ApiKeyGuard, Public } from './common/guards/api-key.guard';
 
 @ApiTags('root')
 @Controller()
 class AppController {
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Service banner / liveness ping' })
   getHello(): { message: string; status: string } {
     return {
@@ -45,10 +47,18 @@ class AppController {
   ],
   controllers: [AppController, HealthController],
   providers: [
-    // Apply throttler globally
+    // Order matters: throttle first, so a brute-force attempt against the key
+    // is rate-limited before it is ever compared.
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    // Global, not per-controller. A guard applied only to new routes leaves
+    // every legacy /analysis-coordinator route open, which is the same hole
+    // with extra steps. Opt OUT with @Public(), never opt in.
+    {
+      provide: APP_GUARD,
+      useClass: ApiKeyGuard,
     },
   ],
 })
