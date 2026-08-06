@@ -12,3 +12,6 @@ dist/
 *.db-journal
 temp/
 test/manual/results/
+
+# CLI run log (JSONL)
+logs/

@@ -25,6 +25,7 @@ import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { TimeInterval } from '../../src/common/types/candle.types';
 import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-coordinator.service';
+import { logRun } from '../../src/common/run-log';
 
 // ponytail: BinanceService only calls get/set/del — a Map covers it.
 // Swap for the real CacheModule if this ever needs TTL semantics.
@@ -103,6 +104,33 @@ async function main() {
   console.log(`\nshouldInvokeAI ${result.shouldInvokeAI}`);
   console.log(`elapsed        ${Date.now() - startedAt}ms`);
 
+  logRun({
+    symbol: coin,
+    timeframe,
+    lastClose,
+    regime: regime.regime,
+    adx: regime.metrics.adx,
+    bandWidth: regime.metrics.bandWidth,
+    bandWidthPercentile: regime.metrics.bandWidthPercentile,
+    route: result.strategyRoute,
+    direction: result.checklistResult?.tradeType ?? null,
+    conditionsMet: result.checklistResult?.conditionsMet ?? null,
+    conditions:
+      result.checklistResult?.conditions.map((c) => ({
+        name: c.name,
+        passed: c.passed,
+        value: c.value ?? null,
+      })) ?? null,
+    squeezeSetup: result.squeezeSetup
+      ? {
+          upper: result.squeezeSetup.upperTriggerPrice,
+          lower: result.squeezeSetup.lowerTriggerPrice,
+        }
+      : null,
+    shouldInvokeAI: result.shouldInvokeAI,
+    durationMs: Date.now() - startedAt,
+  });
+
   if (!withAI) {
     console.log(
       result.shouldInvokeAI
@@ -115,6 +143,7 @@ async function main() {
   console.log('\ncalling Claude…');
   const claude = new ClaudeService(new ClaudePromptService());
   const ai = await claude.analyzeWithChecklist(result);
+  logRun({ symbol: coin, timeframe, ai });
   console.log(JSON.stringify(ai, null, 2));
 }
 
