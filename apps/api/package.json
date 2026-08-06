@@ -14,7 +14,8 @@
     "test:e2e": "jest --config ./jest-e2e.json --runInBand",
     "test:analysis": "npx ts-node test/manual/run-analysis.ts",
     "analyze": "npx ts-node test/manual/analyze.ts",
-    "backtest": "npx ts-node test/manual/backtest.ts"
+    "backtest": "npx ts-node test/manual/backtest.ts",
+    "journal": "npx ts-node test/manual/journal.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
