@@ -60,6 +60,7 @@ import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-break
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
+import { makeRng } from './rng';
 
 const store = new Map<string, unknown>();
 const cache = {
@@ -69,7 +70,12 @@ const cache = {
 } as unknown as Cache;
 
 // ── args ────────────────────────────────────────────────────────────────
-const [, , coinArg, tfArg, ...rest] = process.argv;
+// A leading argument is only positional if it is not a flag, and flags are
+// searched across the whole list — otherwise `backtest --coins BTC,ETH` reads
+// "--coins" as the symbol and "BTC,ETH" as the timeframe, both silently.
+const rest = process.argv.slice(2);
+const coinArg = rest[0]?.startsWith('--') ? undefined : rest[0];
+const tfArg = coinArg && !rest[1]?.startsWith('--') ? rest[1] : undefined;
 const flag = (name: string, fallback: number): number => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : fallback;
@@ -121,8 +127,11 @@ const RANDOM = (() => {
   return i >= 0 ? (rest[i + 1] === 'match' ? 'match' : 'long') : null;
 })();
 const RANDOM_RATE = flag('random-rate', 0.025); // entries per eligible bar
-let seed = 12345;
-const rng = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+// Was the same inline LCG that made every bootstrap CI suspect (commit
+// 0ec40ed) — non-uniform in JS because the product passes 2^53 and the mask
+// keeps exactly the rounded bits. The control experiment is the yardstick
+// everything else is judged against, so it cannot run on a biased generator.
+const rng = makeRng(flag('seed', 12345));
 
 type Outcome = 'WIN' | 'LOSS' | 'TIMEOUT';
 

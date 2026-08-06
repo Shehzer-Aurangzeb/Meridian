@@ -42,7 +42,13 @@ interface Row {
 
 function parse(path: string): Row[] {
   const fs = require('fs') as typeof import('fs');
-  const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
+  // '#' lines carry the generating config, which must travel with the numbers
+  // (docs/STATE_OF_PLAY.md §14c) but is not data.
+  const lines = fs
+    .readFileSync(path, 'utf8')
+    .trim()
+    .split('\n')
+    .filter((l) => !l.startsWith('#'));
   const head = lines[0].split(',');
   const iTime = head.indexOf('time');
   const iR = head.indexOf('r');
