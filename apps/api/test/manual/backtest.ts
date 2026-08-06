@@ -97,6 +97,8 @@ const SLIP_PCT = flag('slip', 0.02); // per side, %
 const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
 const FLAT_COST = flag('cost', -1); // override with a flat R cost if > 0
 const FOLDS = flag('folds', 0); // >0 splits the window into N sequential folds
+// The coordinator no longer gates, so the harness owns its signal definition.
+const HARNESS_MIN_CONDITIONS = flag('min-conditions', 3);
 const CSV = (() => {
   const i = rest.indexOf('--csv');
   return i >= 0 && rest[i + 1] ? rest[i + 1] : null;
@@ -318,7 +320,9 @@ async function runCoin(coin: string): Promise<RunStats> {
       scoreHistogram.set(met, (scoreHistogram.get(met) ?? 0) + 1);
     }
 
-    if (!result.shouldInvokeAI) continue;
+    // The coordinator no longer gates, so the harness states its own signal
+    // definition. Was `shouldInvokeAI`; identical threshold, owned here.
+    if ((result.checklistResult?.conditionsMet ?? 5) < HARNESS_MIN_CONDITIONS) continue;
     signals++;
 
     // ── Squeeze route ────────────────────────────────────────────────
