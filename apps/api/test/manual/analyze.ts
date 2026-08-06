@@ -36,7 +36,7 @@ import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-break
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { ANALYSIS_TIMEFRAME } from '../../src/common/constants/timeframes';
-import { ANALYSIS_CANDLE_LIMIT } from '../../src/analysis-coordinator/analysis-coordinator.service';
+import { AnalyzeService } from '../../src/analysis-coordinator/analyze.service';
 import { logRun } from '../../src/common/run-log';
 import {
   ATR_TIMEFRAME,
@@ -83,27 +83,30 @@ const pct = (n: number) => `${n.toFixed(2)}%`;
 
 async function main() {
   const indicators = new IndicatorsService();
-  const sr = new SupportResistanceService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
-  const levelMap = new LevelMapService(binance, sr, indicators);
-  const planner = new TradePlanService();
   const regimeSvc = new MarketRegimeService(binance, indicators);
-  const coordinator = new AnalysisCoordinatorService(
-    regimeSvc,
-    new SqueezeBreakoutService(binance),
-    new ChecklistService(),
+
+  // Manual construction instead of a Nest bootstrap: `analyze` must run
+  // without Docker, and the services take plain constructor arguments.
+  const analyzer = new AnalyzeService(
     binance,
     indicators,
-    new SupportResistanceService(),
+    regimeSvc,
+    new AnalysisCoordinatorService(
+      regimeSvc,
+      new SqueezeBreakoutService(binance),
+      new ChecklistService(),
+      binance,
+      indicators,
+      new SupportResistanceService(),
+    ),
+    new LevelMapService(binance, new SupportResistanceService(), indicators),
+    new TradePlanService(),
   );
 
   const startedAt = Date.now();
-  const candles = await binance.getCandles(coin, ANALYSIS_TIMEFRAME, ANALYSIS_CANDLE_LIMIT);
-  const ctx = indicators.buildContext(coin, ANALYSIS_TIMEFRAME, candles);
-  const regime = regimeSvc.classifyFromContext(ctx);
-  const result = coordinator.routeFromRegime(ctx, ANALYSIS_TIMEFRAME, regime);
-
-  const lastClose = ctx.closes[ctx.closes.length - 1];
+  const analysis = await analyzer.analyze(coin);
+  const { regime, map, plans } = analysis;
 
   console.log(`\n${coin}/USDT`);
   console.log(
@@ -119,11 +122,9 @@ async function main() {
           : ' — no percentile history'
       })`,
   );
-  console.log(`route       ${result.strategyRoute}`);
+  console.log(`route       ${analysis.route}`);
 
   // ── Level map: multi-timeframe, playbook order ────────────────────────
-  const map = await levelMap.build(coin);
-
   console.log(
     `spot        $${map.spot.toLocaleString()}  (${LEVEL_TIMEFRAMES[LEVEL_TIMEFRAMES.length - 1]} close)`,
   );
@@ -146,8 +147,6 @@ async function main() {
   }
 
   // ── Plans: both directions, always ────────────────────────────────────
-  const plans = planner.buildPlans(map.zones, map.spot, map.atr);
-
   if (plans.length === 0) {
     console.log('\nno zone on either side of spot — nothing to plan against');
   }
@@ -197,8 +196,8 @@ async function main() {
     }
   }
 
-  if (result.checklistResult) {
-    const c = result.checklistResult;
+  if (analysis.checklist) {
+    const c = analysis.checklist;
     console.log(
       `\nchecklist   ${c.conditionsMet}/5 conditions met (needs 3) · ${c.tradeType}`,
     );
@@ -211,8 +210,8 @@ async function main() {
     );
   }
 
-  if (result.squeezeSetup) {
-    const s = result.squeezeSetup;
+  if (analysis.squeeze) {
+    const s = analysis.squeeze;
     console.log('\nsqueeze setup');
     console.table({
       upperTrigger: s.upperTriggerPrice,
@@ -235,19 +234,19 @@ async function main() {
     adx: regime.metrics.adx,
     bandWidth: regime.metrics.bandWidth,
     bandWidthPercentile: regime.metrics.bandWidthPercentile,
-    route: result.strategyRoute,
-    direction: result.checklistResult?.tradeType ?? null,
-    conditionsMet: result.checklistResult?.conditionsMet ?? null,
+    route: analysis.route,
+    direction: analysis.checklist?.tradeType ?? null,
+    conditionsMet: analysis.checklist?.conditionsMet ?? null,
     conditions:
-      result.checklistResult?.conditions.map((c) => ({
+      analysis.checklist?.conditions.map((c) => ({
         name: c.name,
         passed: c.passed,
         value: c.value ?? null,
       })) ?? null,
-    squeezeSetup: result.squeezeSetup
+    squeezeSetup: analysis.squeeze
       ? {
-          upper: result.squeezeSetup.upperTriggerPrice,
-          lower: result.squeezeSetup.lowerTriggerPrice,
+          upper: analysis.squeeze.upperTriggerPrice,
+          lower: analysis.squeeze.lowerTriggerPrice,
         }
       : null,
     spot: map.spot,
@@ -290,7 +289,7 @@ async function main() {
     map,
     plans,
     regime,
-    checklist: result.checklistResult,
+    checklist: analysis.checklist,
     regimeTimeframe: ANALYSIS_TIMEFRAME,
   };
 
