@@ -11,6 +11,7 @@ import { ValidationController } from './controllers/validation.controller';
 import { ChecklistService } from './services/checklist.service';
 import { SupportResistanceService } from './services/support-resistance.service';
 import { LevelMapService } from './services/level-map.service';
+import { TradePlanService } from './services/trade-plan.service';
 
 @Module({
   imports: [MarketDataModule, IndicatorsModule, AiModule, PrismaModule, RiskManagementModule, PerformanceModule],
@@ -19,11 +20,13 @@ import { LevelMapService } from './services/level-map.service';
     ChecklistService,
     SupportResistanceService,
     LevelMapService,
+    TradePlanService,
   ],
   exports: [
     ChecklistService,
     SupportResistanceService,
     LevelMapService,
+    TradePlanService,
     RiskManagementModule,
     PerformanceModule,
   ],

@@ -30,6 +30,10 @@ import {
   LevelMapService,
   LEVEL_TIMEFRAMES,
 } from '../../src/analysis/services/level-map.service';
+import {
+  TradePlanService,
+  ZONE_BANDS,
+} from '../../src/analysis/services/trade-plan.service';
 
 // ponytail: BinanceService only calls get/set/del — a Map covers it.
 // Swap for the real CacheModule if this ever needs TTL semantics.
@@ -44,6 +48,12 @@ const [, , coinArg, tfArg, ...flags] = process.argv;
 const coin = (coinArg ?? 'BTC').toUpperCase();
 const timeframe = (tfArg ?? '1h') as TimeInterval;
 const withAI = flags.includes('--ai');
+// Sizing needs an account size, and inventing a default would put a made-up
+// number in the output. Omitted unless supplied.
+const balance = (() => {
+  const i = flags.indexOf('--balance');
+  return i >= 0 && flags[i + 1] ? Number(flags[i + 1]) : 0;
+})();
 
 const pct = (n: number) => `${n.toFixed(2)}%`;
 
@@ -51,7 +61,8 @@ async function main() {
   const indicators = new IndicatorsService();
   const sr = new SupportResistanceService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
-  const levelMap = new LevelMapService(binance, sr);
+  const levelMap = new LevelMapService(binance, sr, indicators);
+  const planner = new TradePlanService();
   const regimeSvc = new MarketRegimeService(binance, indicators);
   const coordinator = new AnalysisCoordinatorService(
     regimeSvc,
@@ -105,15 +116,58 @@ async function main() {
     console.log('confluence  none — no two independent sources agree within 0.5%');
   } else {
     console.log(`confluence  ${map.zones.length} zone(s)`);
-    console.table(
-      map.zones.slice(0, 6).map((z) => ({
-        zone: `$${z.low.toFixed(2)} – $${z.high.toFixed(2)}`,
-        type: z.type,
-        away: `${z.distancePercent >= 0 ? '+' : ''}${z.distancePercent.toFixed(2)}%`,
-        span: `${z.spanPercent.toFixed(2)}%`,
-        sources: z.sources.join(' + '),
-      })),
+  }
+
+  // ── Plans: both directions, always ────────────────────────────────────
+  const plans = planner.buildPlans(map.zones, map.spot, map.atr);
+
+  if (plans.length === 0) {
+    console.log('\nno zone on either side of spot — nothing to plan against');
+  }
+
+  for (const plan of plans) {
+    const away = `${plan.distanceToZonePercent >= 0 ? '+' : ''}${plan.distanceToZonePercent.toFixed(2)}%`;
+    console.log(
+      `\n── ${plan.direction.toUpperCase()}  ${plan.state}  (${away} to zone)  ` +
+        `${plan.zone.sources.length} sources  ${plan.blendedR.toFixed(2)}R blended ` +
+        '─'.repeat(8),
     );
+    console.log(
+      `zone      $${plan.zone.low.toFixed(2)} – $${plan.zone.high.toFixed(2)}` +
+        `   ${plan.zone.sources.join(' + ')}`,
+    );
+    console.log(
+      `entries   ` +
+        plan.entries
+          .map((e) => `${e.weightPercent}% @ ${e.price.toFixed(2)}`)
+          .join('  ·  '),
+    );
+    console.log(
+      `stop      $${plan.stop.toFixed(2)}   ` +
+        `(zone ${plan.direction === 'long' ? 'low' : 'high'} ${plan.direction === 'long' ? '-' : '+'} 1xATR(${map.atrTimeframe}) ${map.atr.toFixed(2)})   ` +
+        `risk ${plan.riskPercent.toFixed(2)}% of entry`,
+    );
+    if (plan.targets.length === 0) {
+      console.log('targets   none — no further zone in that direction');
+    } else {
+      console.table(
+        plan.targets.map((t, i) => ({
+          tp: `TP${i + 1}`,
+          price: t.price.toFixed(2),
+          take: `${t.weightPercent}%`,
+          R: t.rMultiple.toFixed(2),
+          at: t.source,
+        })),
+      );
+    }
+    console.log(`come back  ${plan.comeBackWhen}`);
+    if (balance > 0) {
+      console.log(
+        `sizing     at 1% of $${balance.toLocaleString()} = ` +
+          `${((balance * 0.01) / plan.riskPerUnit).toFixed(4)} units ` +
+          `(1R = $${plan.riskPerUnit.toFixed(2)} of price)`,
+      );
+    }
   }
 
   if (result.checklistResult) {
@@ -174,6 +228,22 @@ async function main() {
       low: z.low, high: z.high, type: z.type,
       distancePercent: z.distancePercent, sources: z.sources,
     })),
+    plans: plans.map((p) => ({
+      direction: p.direction,
+      state: p.state,
+      distanceToZonePercent: p.distanceToZonePercent,
+      zone: { low: p.zone.low, high: p.zone.high, sources: p.zone.sources },
+      entries: p.entries,
+      averageEntry: p.averageEntry,
+      stop: p.stop,
+      riskPercent: p.riskPercent,
+      targets: p.targets,
+      blendedR: p.blendedR,
+      comeBackWhen: p.comeBackWhen,
+    })),
+    atr: map.atr,
+    atrTimeframe: map.atrTimeframe,
+    zoneBands: ZONE_BANDS,
     shouldInvokeAI: result.shouldInvokeAI,
     durationMs: Date.now() - startedAt,
   });

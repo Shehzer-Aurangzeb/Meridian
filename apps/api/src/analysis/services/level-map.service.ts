@@ -12,6 +12,7 @@ import {
   MarkedLevel,
 } from '../interfaces/support-resistance.types';
 import { SupportResistanceService } from './support-resistance.service';
+import { IndicatorsService } from '../../indicators/indicators.service';
 
 /**
  * Timeframes the level map is built from, highest first.
@@ -42,12 +43,43 @@ export const LEVEL_TIMEFRAMES: Timeframe[] = [
  */
 export const FIB_ANCHOR_TIMEFRAME: Timeframe = TIMEFRAMES.TWELVE_HOUR;
 
+/**
+ * Timeframe whose ATR sets stop distance.
+ *
+ * This must be DECLARED, not inherited from whatever timeframe a caller
+ * happened to ask about, because it dominates risk/reward completely.
+ * Measured across BTC/ETH/SOL with identical zones, varying only this:
+ *
+ *   1d ATR -> blended R 0.09-0.67    (unusable)
+ *   4h ATR -> blended R 0.22-1.76
+ *   1h ATR -> blended R 0.41-3.61
+ *
+ * The reason is scale mismatch: confluence zones here sit ~0.4% apart while
+ * a 1d ATR is ~2.4% of price, so ATR swamps the zone geometry and risk
+ * becomes ATR, making R little more than target-distance / ATR. A number
+ * that moves 10x on an argument nobody chose deliberately is not a property
+ * of the setup.
+ *
+ * 4h is the choice: it is the playbook's own swing timeframe (p9, "4-hour:
+ * Swing trading"), it sits between the level timeframes rather than outside
+ * them, and it keeps stops wide enough not to be wicked out while leaving R
+ * meaningful. It is surfaced in the output so it is never implicit.
+ *
+ * Note the tempting fix — fewer, stronger zones — was measured and makes R
+ * WORSE (minSources 2 -> 3 took BTC long from 0.32R to 0.09R), because the
+ * intermediate zones being removed are the targets.
+ */
+export const ATR_TIMEFRAME: Timeframe = TIMEFRAMES.FOUR_HOUR;
+
 export interface LevelMap {
   symbol: string;
   /** Latest close of the lowest timeframe — the freshest candle-derived price. */
   spot: number;
   anchor: { timeframe: Timeframe; low: number; high: number } | null;
   fib: FibLevel[];
+  /** ATR from `ATR_TIMEFRAME`, which is what stop distance is built from. */
+  atr: number;
+  atrTimeframe: Timeframe;
   marks: MarkedLevel[];
   zones: ConfluenceZone[];
   /** How many S/R levels each timeframe contributed. */
@@ -72,6 +104,7 @@ export class LevelMapService {
   constructor(
     private readonly binanceService: BinanceService,
     private readonly supportResistanceService: SupportResistanceService,
+    private readonly indicatorsService: IndicatorsService,
   ) {}
 
   async build(symbol: string): Promise<LevelMap> {
@@ -149,11 +182,36 @@ export class LevelMapService {
 
     const zones = this.supportResistanceService.findConfluenceZones(marks, spot);
 
+    // ATR on its own declared timeframe, fetched separately when it is not
+    // already one of the level timeframes.
+    const atrCandles =
+      byTimeframe.get(ATR_TIMEFRAME) ??
+      (await this.binanceService.getCandles(
+        symbol,
+        ATR_TIMEFRAME as TimeInterval,
+        CANDLE_LIMITS[ATR_TIMEFRAME],
+      ));
+    const atr = this.indicatorsService.buildContext(
+      symbol,
+      ATR_TIMEFRAME,
+      atrCandles,
+    ).atr;
+
     this.logger.debug(
       `${symbol}: ${marks.length} marks across ${LEVEL_TIMEFRAMES.join('/')} ` +
         `=> ${zones.length} confluence zone(s)`,
     );
 
-    return { symbol, spot, anchor, fib, marks, zones, perTimeframe };
+    return {
+      symbol,
+      spot,
+      anchor,
+      fib,
+      atr,
+      atrTimeframe: ATR_TIMEFRAME,
+      marks,
+      zones,
+      perTimeframe,
+    };
   }
 }

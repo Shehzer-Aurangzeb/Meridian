@@ -1,7 +1,9 @@
 import { BinanceService } from '../../market-data/market-data.service';
 import { Candle } from '../../common/types/candle.types';
 import { SupportResistanceService } from './support-resistance.service';
+import { IndicatorsService } from '../../indicators/indicators.service';
 import {
+  ATR_TIMEFRAME,
   FIB_ANCHOR_TIMEFRAME,
   LEVEL_TIMEFRAMES,
   LevelMapService,
@@ -39,7 +41,7 @@ describe('LevelMapService', () => {
     },
   } as unknown as BinanceService;
 
-  const service = new LevelMapService(binance, new SupportResistanceService());
+  const service = new LevelMapService(binance, new SupportResistanceService(), new IndicatorsService());
 
   beforeEach(() => (fetched.length = 0));
 
@@ -88,10 +90,22 @@ describe('LevelMapService', () => {
     expect(withTouches.every((m) => (m.touchCount ?? 0) >= 2)).toBe(true);
   });
 
+  it('reports the ATR timeframe, because it dominates risk/reward', async () => {
+    const map = await service.build('BTC');
+
+    // Measured: identical zones give blended R of 0.09-0.67 on a 1d ATR and
+    // 0.41-3.61 on a 1h ATR. A number that moves 10x on an unstated argument
+    // is not a property of the setup, so the choice has to be declared and
+    // surfaced rather than inherited from a caller.
+    expect(map.atrTimeframe).toBe(ATR_TIMEFRAME);
+    expect(map.atr).toBeGreaterThan(0);
+  });
+
   it('refuses to build a map with no candles rather than reporting a zero spot', async () => {
     const empty = new LevelMapService(
       { getCandles: () => Promise.resolve([]) } as unknown as BinanceService,
       new SupportResistanceService(),
+      new IndicatorsService(),
     );
     await expect(empty.build('BTC')).rejects.toThrow(/cannot build a level map/);
   });
