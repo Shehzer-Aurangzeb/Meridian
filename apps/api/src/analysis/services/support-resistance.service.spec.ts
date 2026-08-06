@@ -159,6 +159,51 @@ describe('SupportResistanceService — confluence zones', () => {
     expect(above[0].distancePercent).toBeGreaterThan(0);
   });
 
+  it('types zones by position, not by the historical swing type', () => {
+    // A swing HIGH sitting below spot is a former resistance being retested
+    // as support. For a plan, what matters is that it is below price — that
+    // is where a long goes. The historical reading stays in `sources`.
+    const zones = service.findConfluenceZones(
+      [
+        mark(27_000, 'old resistance', 'resistance'),
+        mark(27_050, '4h resistance', 'resistance'),
+      ],
+      spot,
+    );
+
+    expect(zones[0].type).toBe('support');
+    expect(zones[0].sources).toEqual(['old resistance', '4h resistance']);
+  });
+
+  it('caps total span so a chain cannot drift into a fake wide zone', () => {
+    // Each mark is within 0.5% of the RUNNING MEAN, so unbounded greedy
+    // grouping would swallow all of these into one ~2% "zone". Real data hit
+    // this: a BTC zone spanned 0.76% against the playbook's ~0.5% band.
+    const drifting = [
+      mark(30_000, 'a'), mark(30_140, 'b'), mark(30_280, 'c'),
+      mark(30_420, 'd'), mark(30_560, 'e'), mark(30_700, 'f'),
+    ];
+    const zones = service.findConfluenceZones(drifting, spot);
+
+    expect(zones.length).toBeGreaterThan(1); // split, not one wide band
+    for (const z of zones) {
+      expect(z.spanPercent).toBeLessThanOrEqual(1.0); // 2x the 0.5% threshold
+    }
+  });
+
+  it("still admits the playbook's own 0.524%-span zone", () => {
+    // p53: 28,600 - 28,750. The cap must be looser than the pairwise
+    // threshold or it would reject the document's worked example.
+    const zones = service.findConfluenceZones(
+      [mark(28_600, 'trendline'), mark(28_675, '4h support'), mark(28_750, '0.25 Fib')],
+      30_000,
+    );
+
+    expect(zones).toHaveLength(1);
+    expect(zones[0].sources).toHaveLength(3);
+    expect(zones[0].spanPercent).toBeCloseTo(0.524, 2);
+  });
+
   it('orders by proximity to spot', () => {
     const zones = service.findConfluenceZones(
       [
