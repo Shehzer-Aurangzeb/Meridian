@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 import { ClaudeAnalysisResponse } from '../ai/interfaces/claude-response.types';
+import { AnalysisRecord } from './analyze.service';
 
 /**
  * Input payload for a single coordinator run record.
@@ -87,6 +88,37 @@ export class CoordinatorPersistenceService {
           `CoordinatorRun error-row persistence failed | symbol=${args.symbol} | message=${message}`,
         );
       });
+  }
+
+  /**
+   * Persist a full `AnalysisRecord` — regime leg AND level leg.
+   *
+   * Separate from `persist` because that one stores `CoordinatorAnalysisResult`,
+   * which carries regime/route/checklist but NOT the level map or the plans.
+   * Every row written before this method existed is missing the entire level
+   * leg, which is most of what an analysis is.
+   *
+   * Awaited, unlike `persist`: a scheduled run that silently failed to save
+   * has done nothing at all, whereas the SSE stream must not block on the DB.
+   */
+  async persistAnalysis(record: AnalysisRecord): Promise<{ id: string }> {
+    return this.prisma.coordinatorRun.create({
+      data: {
+        symbol: record.symbol,
+        timeframe: record.timeframes.regime,
+        regime: record.regime.regime,
+        strategyRoute: record.route,
+        // Records whether a Claude call ran. Nothing narrates on this path
+        // yet — narration is a caller's flag, not a pipeline stage.
+        shouldInvokeAI: false,
+        aiAction: null,
+        aiConfidence: null,
+        coordinatorPayload: record as unknown as Prisma.InputJsonValue,
+        aiPayload: Prisma.JsonNull,
+        durationMs: record.durationMs,
+      },
+      select: { id: true },
+    });
   }
 
   private async write(input: CoordinatorRunInput): Promise<void> {

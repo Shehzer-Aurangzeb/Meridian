@@ -9,6 +9,8 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { RiskManagementModule } from '../risk-management/risk-management.module';
 import { AnalysisCoordinatorService } from './analysis-coordinator.service';
 import { AnalysisCoordinatorController } from './analysis-coordinator.controller';
+import { AnalysesController } from './analyses.controller';
+import { AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { MultiTimeframeScannerService } from './multi-timeframe-scanner.service';
 
@@ -23,14 +25,16 @@ import { MultiTimeframeScannerService } from './multi-timeframe-scanner.service'
     PrismaModule,
     RiskManagementModule,
   ],
-  controllers: [AnalysisCoordinatorController],
+  controllers: [AnalysisCoordinatorController, AnalysesController],
   providers: [
     AnalysisCoordinatorService,
+    AnalyzeService,
     CoordinatorPersistenceService,
     MultiTimeframeScannerService,
   ],
   exports: [
     AnalysisCoordinatorService,
+    AnalyzeService,
     CoordinatorPersistenceService,
     MultiTimeframeScannerService,
   ],
