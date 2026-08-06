@@ -1,5 +1,5 @@
 import { Timeframe } from '../../common/constants/timeframes';
-import { IndicatorResults, ExtendedIndicatorResults, QQEResult, KeyLevel } from '../../indicators/interfaces/indicator.types';
+import { IndicatorResults, QQEResult } from '../../indicators/interfaces/indicator.types';
 import { Candle } from '../../common/types/candle.types';
 import { EntryChecklistResult } from './checklist.types';
 
@@ -33,7 +33,6 @@ export type Bias = 'bullish' | 'bearish' | 'neutral';
 export interface TimeframeAnalysis {
   timeframe: Timeframe;
   indicators: IndicatorResults;
-  extendedIndicators?: ExtendedIndicatorResults;
   marketStructure: MarketStructureAnalysis;
   bias: Bias;
   confidence: number; // 0-100

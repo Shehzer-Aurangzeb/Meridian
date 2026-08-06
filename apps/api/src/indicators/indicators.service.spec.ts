@@ -467,53 +467,6 @@ describe('IndicatorsService - Accuracy Validation', () => {
     });
   });
 
-  // ==========================================
-  // KEY LEVELS IDENTIFICATION TESTS
-  // ==========================================
-  describe('Key Levels Identification', () => {
-    it('should identify swing highs and lows', () => {
-      const candles = BTC_DAILY_TEST_DATA.candles;
-      const currentPrice = candles[candles.length - 1].close;
-      const keyLevels = service.identifyKeyLevels(candles, currentPrice);
-
-      console.log(`Found ${keyLevels.length} key levels`);
-
-      // Should find some levels
-      expect(keyLevels.length).toBeGreaterThan(0);
-
-      // Each level should have required properties
-      keyLevels.forEach((level) => {
-        expect(level).toHaveProperty('price');
-        expect(level).toHaveProperty('type');
-        expect(level).toHaveProperty('strength');
-        expect(level).toHaveProperty('distance');
-        expect(['support', 'resistance']).toContain(level.type);
-      });
-    });
-
-    it('should return empty array for insufficient data', () => {
-      const shortCandles = BTC_DAILY_TEST_DATA.candles.slice(0, 10);
-      const keyLevels = service.identifyKeyLevels(shortCandles, 50000);
-
-      expect(keyLevels).toEqual([]);
-    });
-
-    it('should sort levels by strength', () => {
-      const candles = BTC_DAILY_TEST_DATA.candles;
-      const currentPrice = candles[candles.length - 1].close;
-      const keyLevels = service.identifyKeyLevels(candles, currentPrice);
-
-      if (keyLevels.length > 1) {
-        for (let i = 1; i < keyLevels.length; i++) {
-          // Either strength is lower or equal, or if equal, distance is >= previous
-          const prevStrength = keyLevels[i - 1].strength;
-          const currStrength = keyLevels[i].strength;
-
-          expect(currStrength).toBeLessThanOrEqual(prevStrength);
-        }
-      }
-    });
-  });
 
   // ==========================================
   // FULL TIMEFRAME ANALYSIS TESTS
@@ -545,29 +498,4 @@ describe('IndicatorsService - Accuracy Validation', () => {
     });
   });
 
-  // ==========================================
-  // EXTENDED TIMEFRAME ANALYSIS TESTS
-  // ==========================================
-  describe('Extended Timeframe Analysis', () => {
-    it('should include QQE and band width', () => {
-      const result = service.analyzeTimeframeExtended(BTC_DAILY_TEST_DATA.candles);
-
-      expect(result).toHaveProperty('qqe');
-      expect(result).toHaveProperty('bandWidth');
-      expect(result).toHaveProperty('keyLevels');
-
-      // Includes basic indicators too
-      expect(result).toHaveProperty('rsi');
-      expect(result).toHaveProperty('bollingerBands');
-      expect(result).toHaveProperty('atr');
-    });
-
-    it('should have valid QQE structure', () => {
-      const result = service.analyzeTimeframeExtended(BTC_DAILY_TEST_DATA.candles);
-
-      expect(result.qqe).toHaveProperty('color');
-      expect(result.qqe).toHaveProperty('value');
-      expect(result.qqe).toHaveProperty('trend');
-    });
-  });
 });

@@ -85,23 +85,6 @@ describe('ClaudePromptService', () => {
       support: 28600,
       resistance: 30500,
     },
-    extendedIndicators: {
-      // Base IndicatorResults properties
-      rsi: bias === 'bullish' ? 28 : bias === 'bearish' ? 72 : 50,
-      bollingerBands: { upper: 30000, middle: 29000, lower: 28000 },
-      atr: 450,
-      support: 28600,
-      resistance: 30500,
-      // Extended properties
-      qqe: { 
-        value: 50, 
-        color: bias === 'bullish' ? 'green' : 'red', 
-        previousColor: bias === 'bullish' ? 'green' : 'red',
-        trend: bias === 'bullish' ? 'rising' : 'falling',
-      },
-      bandWidth: 6.9,
-      keyLevels: [],
-    },
     marketStructure: {
       structure: bias === 'bullish' ? 'bullish' : bias === 'bearish' ? 'bearish' : 'ranging',
       pattern: bias === 'bullish' ? 'HH/HL' : bias === 'bearish' ? 'LH/LL' : 'ranging',

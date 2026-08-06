@@ -10,11 +10,9 @@ import { Candle } from '../common/types/candle.types';
 import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
   IndicatorResults,
-  ExtendedIndicatorResults,
   BollingerBandsResult,
   SupportResistanceResult,
   QQEResult,
-  KeyLevel,
   ADXResult,
 } from './interfaces/indicator.types';
 
@@ -304,123 +302,6 @@ export class IndicatorsService {
     return (width / bands.middle) * 100;
   }
 
-  /**
-   * Identify key support and resistance levels with strength metrics
-   * Strength is measured by how many times price has tested the level
-   */
-  identifyKeyLevels(candles: Candle[], currentPrice: number, tolerance: number = 0.5): KeyLevel[] {
-    if (candles.length < 20) {
-      return [];
-    }
-
-    const levels: Map<number, { type: 'support' | 'resistance'; touches: number }> = new Map();
-
-    // Round price to create price zones (0.5% tolerance)
-    const roundToZone = (price: number): number => {
-      const zone = currentPrice * (tolerance / 100);
-      return Math.round(price / zone) * zone;
-    };
-
-    // Find swing highs and lows
-    for (let i = 2; i < candles.length - 2; i++) {
-      const current = candles[i];
-
-      // Swing high (resistance)
-      if (
-        current.high > candles[i - 1].high &&
-        current.high > candles[i - 2].high &&
-        current.high > candles[i + 1].high &&
-        current.high > candles[i + 2].high
-      ) {
-        const zone = roundToZone(current.high);
-        const existing = levels.get(zone);
-        if (existing && existing.type === 'resistance') {
-          existing.touches++;
-        } else {
-          levels.set(zone, { type: 'resistance', touches: 1 });
-        }
-      }
-
-      // Swing low (support)
-      if (
-        current.low < candles[i - 1].low &&
-        current.low < candles[i - 2].low &&
-        current.low < candles[i + 1].low &&
-        current.low < candles[i + 2].low
-      ) {
-        const zone = roundToZone(current.low);
-        const existing = levels.get(zone);
-        if (existing && existing.type === 'support') {
-          existing.touches++;
-        } else {
-          levels.set(zone, { type: 'support', touches: 1 });
-        }
-      }
-    }
-
-    // Convert to array and calculate distance
-    const keyLevels: KeyLevel[] = [];
-    levels.forEach((data, price) => {
-      const distance = ((price - currentPrice) / currentPrice) * 100;
-      keyLevels.push({
-        price,
-        type: data.type,
-        strength: data.touches,
-        distance,
-      });
-    });
-
-    // Sort by strength (descending) then distance (ascending)
-    return keyLevels.sort((a, b) => {
-      if (b.strength !== a.strength) return b.strength - a.strength;
-      return Math.abs(a.distance) - Math.abs(b.distance);
-    });
-  }
-
-  /**
-   * Find nearest support or resistance level
-   */
-  findNearestLevel(
-    keyLevels: KeyLevel[],
-    currentPrice: number,
-    type: 'support' | 'resistance' | 'any' = 'any',
-  ): KeyLevel | null {
-    const filtered =
-      type === 'any' ? keyLevels : keyLevels.filter((l) => l.type === type);
-
-    if (filtered.length === 0) return null;
-
-    // Find nearest by distance
-    return filtered.reduce((nearest, level) => {
-      const nearestDist = Math.abs(nearest.distance);
-      const levelDist = Math.abs(level.distance);
-      return levelDist < nearestDist ? level : nearest;
-    });
-  }
-
-  /**
-   * Extended timeframe analysis with QQE, band width, and key levels
-   */
-  analyzeTimeframeExtended(candles: Candle[]): ExtendedIndicatorResults {
-    // Get basic indicators
-    const basic = this.analyzeTimeframe(candles);
-
-    // Extract closes for QQE
-    const closes = candles.map((c) => c.close);
-    const currentPrice = closes[closes.length - 1];
-
-    // Calculate extended indicators
-    const qqe = this.calculateQQE(closes);
-    const bandWidth = this.calculateBandWidth(basic.bollingerBands);
-    const keyLevels = this.identifyKeyLevels(candles, currentPrice);
-
-    return {
-      ...basic,
-      qqe,
-      bandWidth,
-      keyLevels,
-    };
-  }
 
   /**
    * Calculate ADX (Average Directional Index) with +DI / -DI.

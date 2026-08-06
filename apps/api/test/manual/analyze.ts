@@ -15,6 +15,7 @@ dotenv.config({ path: `.env.${process.env.NODE_ENV ?? 'local'}` });
 
 import { AnalysisCoordinatorService } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { ChecklistService } from '../../src/analysis/services/checklist.service';
+import { SupportResistanceService } from '../../src/analysis/services/support-resistance.service';
 import { ClaudePromptService } from '../../src/ai/ai-prompt.service';
 import { ClaudeService } from '../../src/ai/ai.service';
 import { IndicatorsService } from '../../src/indicators/indicators.service';
@@ -51,6 +52,7 @@ async function main() {
     new ChecklistService(),
     binance,
     indicators,
+    new SupportResistanceService(binance),
   );
 
   const startedAt = Date.now();

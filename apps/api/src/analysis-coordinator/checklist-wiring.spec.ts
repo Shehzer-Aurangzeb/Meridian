@@ -3,6 +3,7 @@ import { IndicatorsService } from '../indicators/indicators.service';
 import { MarketRegimeService } from '../market-regime/market-regime.service';
 import { SqueezeBreakoutService } from '../squeeze-breakout/squeeze-breakout.service';
 import { ChecklistService } from '../analysis/services/checklist.service';
+import { SupportResistanceService } from '../analysis/services/support-resistance.service';
 import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisCoordinatorService } from './analysis-coordinator.service';
 
@@ -71,6 +72,7 @@ describe('AnalysisCoordinatorService — checklist input wiring', () => {
     new ChecklistService(),
     binance,
     indicators,
+    new SupportResistanceService(binance),
   );
 
   const candles = buildCandles();

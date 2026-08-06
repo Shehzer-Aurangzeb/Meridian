@@ -36,6 +36,7 @@ import {
   ANALYSIS_CANDLE_LIMIT,
 } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { ChecklistService } from '../../src/analysis/services/checklist.service';
+import { SupportResistanceService } from '../../src/analysis/services/support-resistance.service';
 import { IndicatorsService } from '../../src/indicators/indicators.service';
 import { MarketRegimeService } from '../../src/market-regime/market-regime.service';
 import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-breakout.service';
@@ -98,6 +99,7 @@ async function run(coin: string, t: Tally) {
     new ChecklistService(),
     binance,
     indicators,
+    new SupportResistanceService(binance),
   );
 
   const candles = await binance.getCandlesPaged(coin, timeframe, LIMIT);

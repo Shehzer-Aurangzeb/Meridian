@@ -36,6 +36,8 @@ import {
   ANALYSIS_CANDLE_LIMIT,
 } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { ChecklistService } from '../../src/analysis/services/checklist.service';
+import { SupportResistanceService } from '../../src/analysis/services/support-resistance.service';
+import { Timeframe } from '../../src/common/constants/timeframes';
 import { MarketRegimeService } from '../../src/market-regime/market-regime.service';
 import { SqueezeBreakoutService } from '../../src/squeeze-breakout/squeeze-breakout.service';
 import { IndicatorsService } from '../../src/indicators/indicators.service';
@@ -107,6 +109,7 @@ function quantiles(xs: number[], label: string) {
 async function run(coin: string) {
   const indicators = new IndicatorsService();
   const binance = new BinanceService(cache, new CacheTelemetryService());
+  const sr = new SupportResistanceService(binance);
   const regimeSvc = new MarketRegimeService(binance, indicators);
   const coordinator = new AnalysisCoordinatorService(
     regimeSvc,
@@ -114,6 +117,7 @@ async function run(coin: string) {
     new ChecklistService(),
     binance,
     indicators,
+    new SupportResistanceService(binance),
   );
   const candles = await binance.getCandlesPaged(coin, timeframe, LIMIT);
   if (candles.length <= ANALYSIS_CANDLE_LIMIT) return;
@@ -142,10 +146,14 @@ async function run(coin: string) {
     bandWidths.push(ctx.bandWidth);
 
     // ── nearest level, from the engine the condition actually uses ────
-    const levels = indicators.identifyKeyLevels([...ctx.candles], price);
+    const levels = sr.levelsFromCandles(
+      [...ctx.candles],
+      ctx.timeframe as Timeframe,
+      price,
+    );
     const nearest = levels.length
       ? levels.reduce((best, l) =>
-          Math.abs(l.price - price) < Math.abs(best.price - price) ? l : best,
+          Math.abs(l.distancePercent) < Math.abs(best.distancePercent) ? l : best,
         )
       : null;
     const dist = nearest ? (Math.abs(nearest.price - price) / price) * 100 : NaN;
