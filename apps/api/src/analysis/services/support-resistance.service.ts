@@ -36,12 +36,36 @@ export class SupportResistanceService {
 
     this.logger.log(`Finding S/R levels for ${symbol} on ${timeframe}`);
 
-    // 1. Fetch sufficient candles
     const candles = await this.binanceService.getCandles(
       symbol,
       timeframe as TimeInterval,
       lookbackCandles,
     );
+
+    return this.levelsFromCandles(candles, timeframe, currentPrice, options);
+  }
+
+  /**
+   * The pure half of `findLevels`: swing detection → clustering → touch
+   * filtering → strength. No I/O.
+   *
+   * Exists so callers that already hold a candle window (the coordinator's
+   * shared `IndicatorContext`) can get levels without a second fetch. This
+   * is the ONLY level engine — the price-anchored grid it replaced snapped
+   * swings onto a lattice derived from current price, so a 0.07% move could
+   * relabel a level from "support, 4 touches" to "resistance, 1 test".
+   */
+  levelsFromCandles(
+    candles: Candle[],
+    timeframe: Timeframe = TIMEFRAMES.DAILY,
+    currentPrice: number,
+    options: SRDetectionOptions = {},
+  ): SupportResistanceLevel[] {
+    const {
+      clusterThreshold = SR_DEFAULTS.CLUSTER_THRESHOLD,
+      minTouches = SR_DEFAULTS.MIN_TOUCHES,
+      maxLevels = SR_DEFAULTS.MAX_LEVELS,
+    } = options;
 
     if (candles.length < 20) {
       this.logger.warn(`Insufficient candles for S/R analysis: ${candles.length}`);

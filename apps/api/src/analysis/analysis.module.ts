@@ -7,14 +7,13 @@ import { RiskManagementModule } from '../risk-management/risk-management.module'
 import { PerformanceModule } from '../performance/performance.module';
 import { AnalysisController } from './analysis.controller';
 import { HistoryController } from './controllers/history.controller';
-import { LevelsController } from './controllers/levels.controller';
 import { ValidationController } from './controllers/validation.controller';
 import { ChecklistService } from './services/checklist.service';
 import { SupportResistanceService } from './services/support-resistance.service';
 
 @Module({
   imports: [MarketDataModule, IndicatorsModule, AiModule, PrismaModule, RiskManagementModule, PerformanceModule],
-  controllers: [AnalysisController, HistoryController, LevelsController, ValidationController],
+  controllers: [AnalysisController, HistoryController, ValidationController],
   providers: [
     ChecklistService,
     SupportResistanceService,

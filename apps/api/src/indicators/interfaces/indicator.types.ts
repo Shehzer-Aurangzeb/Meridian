@@ -22,31 +22,12 @@ export interface QQEResult {
   trend: 'rising' | 'falling' | 'flat';
 }
 
-/**
- * Key price level with strength metric
- */
-export interface KeyLevel {
-  price: number;
-  type: 'support' | 'resistance';
-  strength: number; // Number of tests/touches
-  distance: number; // Distance from current price as percentage
-}
-
 export interface IndicatorResults {
   rsi: number;
   bollingerBands: BollingerBandsResult;
   atr: number;
   support: number | null;
   resistance: number | null;
-}
-
-/**
- * Extended indicator results including QQE and band width
- */
-export interface ExtendedIndicatorResults extends IndicatorResults {
-  qqe: QQEResult;
-  bandWidth: number; // Bollinger band width as percentage
-  keyLevels: KeyLevel[];
 }
 
 /**

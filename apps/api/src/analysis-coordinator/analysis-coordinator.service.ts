@@ -4,6 +4,8 @@ import { SqueezeBreakoutService } from '../squeeze-breakout/squeeze-breakout.ser
 import { ChecklistService } from '../analysis/services/checklist.service';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
+import { SupportResistanceService } from '../analysis/services/support-resistance.service';
+import { Timeframe } from '../common/constants/timeframes';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
@@ -51,6 +53,7 @@ export class AnalysisCoordinatorService {
     private readonly checklistService: ChecklistService,
     private readonly binanceService: BinanceService,
     private readonly indicatorsService: IndicatorsService,
+    private readonly supportResistanceService: SupportResistanceService,
   ) {}
 
   /**
@@ -232,14 +235,24 @@ export class AnalysisCoordinatorService {
     }
 
     // Nearest key level + volume context.
-    const keyLevels = this.indicatorsService.identifyKeyLevels(
+    //
+    // Uses the swing-clustered, touch-counted engine — the same one the
+    // levels endpoints use — rather than the old price-anchored grid, which
+    // measured a lattice from zero with spacing derived from current price,
+    // so a 0.07% move could relabel a level from "support, 4 touches" to
+    // "resistance, 1 test". `levelsFromCandles` is the pure half of
+    // `findLevels`, so this costs no extra fetch.
+    const levels = this.supportResistanceService.levelsFromCandles(
       candlesArr,
+      context.timeframe as Timeframe,
       currentPrice,
     );
-    const nearestLevel = this.indicatorsService.findNearestLevel(
-      keyLevels,
-      currentPrice,
-    );
+    const nearestLevel =
+      levels.length > 0
+        ? levels.reduce((best, l) =>
+            Math.abs(l.distancePercent) < Math.abs(best.distancePercent) ? l : best,
+          )
+        : null;
 
     // Direction is an INPUT when the caller knows it. A confirmation filter
     // must be told which side it is confirming; deciding for itself and then
