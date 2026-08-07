@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import axios from 'axios';
@@ -305,8 +305,7 @@ export class BinanceService {
             continue;
           }
 
-          const message = error.response?.data?.msg || error.message;
-          throw new Error(`Binance API error fetching candles for ${tradingPair}: ${message}`);
+          throw this.binanceError(error, 'candles', tradingPair);
         }
 
         if (attempt === retries) {
@@ -316,6 +315,42 @@ export class BinanceService {
     }
 
     throw new Error(`Failed to fetch candles for ${tradingPair}`);
+  }
+
+
+  /**
+   * Turn a Binance failure into the right kind of error, in one place.
+   *
+   * An unrecognised trading pair is the CALLER's mistake, not ours: it must
+   * not surface as a 500. `pnpm analyze NOTACOIN` and
+   * `POST /analyses?symbol=NOTACOIN` both reached here, and the second
+   * answered "Internal server error" — which reads as an outage for what is
+   * a typo, and would page you at 3am for one.
+   *
+   * Binance signals it with code -1121 / "Invalid symbol." on an HTTP 400.
+   * Everything else stays a plain Error and keeps its 500, because it IS ours.
+   */
+  private binanceError(
+    error: unknown,
+    what: string,
+    tradingPair: string,
+  ): Error {
+    if (!axios.isAxiosError(error)) {
+      return new Error(`Binance API error fetching ${what} for ${tradingPair}`);
+    }
+
+    const data = error.response?.data as { code?: number; msg?: string } | undefined;
+    const message = data?.msg || error.message;
+
+    if (data?.code === -1121 || /invalid symbol/i.test(message)) {
+      return new NotFoundException(
+        `Unknown symbol ${tradingPair} — Binance does not list it`,
+      );
+    }
+
+    return new Error(
+      `Binance API error fetching ${what} for ${tradingPair}: ${message}`,
+    );
   }
 
   /**
@@ -355,8 +390,7 @@ export class BinanceService {
             continue;
           }
 
-          const message = error.response?.data?.msg || error.message;
-          throw new Error(`Binance API error fetching price for ${tradingPair}: ${message}`);
+          throw this.binanceError(error, 'price', tradingPair);
         }
 
         if (attempt === retries) {
