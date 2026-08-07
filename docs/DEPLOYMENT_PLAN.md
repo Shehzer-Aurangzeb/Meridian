@@ -273,8 +273,20 @@ is a runtime failure Nest cannot typecheck. It caught two things on first run:
 a `?limit=-5` that returned one row instead of the default, and the fact that
 `CACHE_MANAGER` reaches `BinanceService` only via AppModule's `isGlobal` cache.
 
-Still unverified against a live database — Docker was not running. The route
-handlers are covered by mocks; a real `POST /analyses` has not been executed.
+**Verified against a live database, 7 Aug 2026.** Full flow exercised end to
+end: login → `POST /analyses?symbol=BTC` (201, 611ms, id returned, both plans
+persisted) → `GET /analyses` (28 rows incl. 25 legacy) → `GET /analyses/:id`
+(payload + live price + freshness `LIVE`). Error branches on real data: legacy
+May row → 422, unknown id → 404, `symbol=../etc` → 400, `limit=abc` → default.
+`/health` reports cache/binance/database all ok.
+
+One bug found and fixed by that run: an unlisted symbol returned **500**.
+`POST /analyses?symbol=NOTACOIN` answered "Internal server error" for what is
+a typo — an outage signal for a caller mistake. Binance flags it with code
+-1121, so both throw sites in `market-data.service.ts` now route through one
+classifier that returns 404 for an unknown pair and leaves every other failure
+a 500, since those are genuinely ours. The CLI gets the same readable message
+instead of a stack.
 
 ## Known debt, not blocking
 
