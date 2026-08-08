@@ -7,9 +7,9 @@ describe('AnalystNarrationService — price provenance', () => {
   let service: AnalystNarrationService;
 
   beforeAll(() => {
-    process.env.ANTHROPIC_API_KEY ??= 'test-key-not-used';
-    // Construction only builds the SDK client; no network call is made by the
-    // provenance path being tested here.
+    // No API key needed to construct: the client is built on first use, so a
+    // deployment without one still boots and serves everything but narration.
+    delete process.env.ANTHROPIC_API_KEY;
     service = new AnalystNarrationService();
   });
 
