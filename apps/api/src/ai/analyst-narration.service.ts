@@ -57,22 +57,39 @@ export class PriceProvenanceError extends Error {
 @Injectable()
 export class AnalystNarrationService {
   private readonly logger = new Logger(AnalystNarrationService.name);
-  private readonly client: Anthropic;
   private readonly model = 'claude-opus-5';
+  private client?: Anthropic;
 
-  constructor() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+  /**
+   * Built on first use, not in the constructor.
+   *
+   * Nest instantiates every provider at boot, so throwing here for a missing
+   * key took down the WHOLE APPLICATION — including routes that never
+   * narrate. On Lambda that means a cold start that dies instead of serving,
+   * for a key the served routes do not need. Found by lambda.spec.ts.
+   *
+   * Still fails closed, just at the right moment: narration without a key is
+   * impossible and says so, while everything else runs.
+   */
+  private anthropic(): Anthropic {
+    if (!this.client) {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error(
+          'ANTHROPIC_API_KEY is not set — narration is unavailable. Every ' +
+            'other part of the analysis runs without it.',
+        );
+      }
+      this.client = new Anthropic({ apiKey });
     }
-    this.client = new Anthropic({ apiKey });
+    return this.client;
   }
 
   async narrate(input: NarrationInput): Promise<Narration> {
     const allowed = this.allowedPrices(input);
     const prompt = this.buildPrompt(input);
 
-    const response = await this.client.messages.create({
+    const response = await this.anthropic().messages.create({
       model: this.model,
       // Thinking is ON by default on this model, and max_tokens caps thinking
       // PLUS response text together — a tight budget truncates mid-sentence.
