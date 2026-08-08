@@ -5,9 +5,13 @@ import type {
   Context,
   Handler,
 } from 'aws-lambda';
+import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { configureApp, docsEnabled } from './configure-app';
+import { AnalyzeService } from './analysis-coordinator/analyze.service';
+import { CoordinatorPersistenceService } from './analysis-coordinator/coordinator-persistence.service';
+import { loadSecrets } from './load-secrets';
 
 /**
  * AWS Lambda entry point.
@@ -15,65 +19,116 @@ import { configureApp, docsEnabled } from './configure-app';
  * ─── What a Lambda handler actually is ───────────────────────────────────
  * A plain exported function. AWS calls it with two arguments:
  *
- *   event    what happened — for an HTTP API, the request: method, path,
- *            headers, body, query string.
- *   context  facts about this invocation — request id, how many
- *            milliseconds of execution time remain, memory limit.
+ *   event    what happened. For an HTTP request: method, path, headers, body.
+ *            For a scheduled run: whatever the schedule was configured to send.
+ *   context  facts about this invocation — request id, milliseconds remaining.
  *
- * Whatever the function returns becomes the HTTP response. There is no
- * server, no port, and nothing listening. AWS starts a container, calls the
- * function, and returns the value.
+ * Whatever the function returns becomes the response. There is no server and
+ * no port. AWS starts a container, calls the function, returns the value.
  *
- * ─── What serverless-express does ────────────────────────────────────────
- * Nest is an Express app underneath, and Express expects `(req, res)` objects
- * from a real socket. serverless-express translates: it converts the Lambda
- * event into a fake Express request, runs it through the app, and converts
- * the Express response back into the object Lambda wants. That is all it is —
- * an adapter between two calling conventions.
+ * ─── One function, two kinds of event ────────────────────────────────────
+ * This function is wired to two triggers: an HTTP API (you, or the frontend)
+ * and a schedule (the cron that runs the analyses). They send DIFFERENT event
+ * shapes, so the first thing the handler does is work out which one it got.
+ *
+ * That is the part of Lambda worth internalising: an event is just JSON, and
+ * "HTTP request" is only one of many things it can describe.
  *
  * ─── Why the app is cached outside the handler ───────────────────────────
- * This is the single most important line in the file.
- *
  * AWS keeps the container alive after an invocation and reuses it for the
- * next request — typically for minutes. Code at module scope (out here) runs
+ * next request, typically for minutes. Code out here at module scope runs
  * ONCE per container; code inside the handler runs on EVERY request.
  *
- * Booting Nest takes ~1-2 seconds: it constructs every service and resolves
- * the whole dependency graph. Doing that per request would add that to every
- * call. By caching the built handler in a module-scope variable, only the
- * FIRST request into a fresh container pays for it — that is the "cold
- * start" — and every subsequent one reuses it and answers in milliseconds.
- *
- * ─── One consequence worth knowing ───────────────────────────────────────
- * Because containers are reused, anything you put in a module-scope variable
- * survives between requests. That is exactly what makes this caching work,
- * and also why you must never store one user's data there.
+ * Booting Nest takes ~1-2 seconds — it constructs every service and resolves
+ * the whole dependency graph. Caching it means only the FIRST request into a
+ * fresh container pays that (the "cold start"); every one after answers in
+ * milliseconds.
  */
-let cachedHandler: Handler | undefined;
+let cachedApp: INestApplication | undefined;
+let cachedHttp: Handler | undefined;
 
-async function bootstrap(): Promise<Handler> {
-  const app = await NestFactory.create(AppModule);
+/** The event the schedule sends. Shape is ours — see the CDK stack. */
+interface ScheduledEvent {
+  scheduled: { symbols: string[] };
+}
 
-  // Identical configuration to the local server — same validation, same CORS,
-  // same guards. `docsEnabled` reads NODE_ENV, which in Lambda comes from the
-  // function's environment variables, not from a .env file.
-  configureApp(app, { docs: docsEnabled(process.env.NODE_ENV ?? 'production') });
+function isScheduled(event: unknown): event is ScheduledEvent {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    Array.isArray((event as ScheduledEvent).scheduled?.symbols)
+  );
+}
 
-  // `init()` instead of `listen()`: build the app, but do not open a port.
-  // Nothing is listening in Lambda — AWS delivers the request as an argument.
-  await app.init();
+async function getApp(): Promise<INestApplication> {
+  if (!cachedApp) {
+    // Secrets first: AuthGuard reads MERIDIAN_API_KEY in its constructor and
+    // refuses to boot without it, so they must be in place before Nest starts.
+    await loadSecrets();
 
-  const expressApp = app.getHttpAdapter().getInstance();
-  return serverlessExpress({ app: expressApp });
+    const app = await NestFactory.create(AppModule);
+    // Identical configuration to the local server — same validation, same
+    // CORS, same guards.
+    configureApp(app, {
+      docs: docsEnabled(process.env.NODE_ENV ?? 'production'),
+    });
+    // `init()`, not `listen()`: build the app but do not open a port. Nothing
+    // listens in Lambda; AWS hands the request over as an argument.
+    await app.init();
+    cachedApp = app;
+  }
+  return cachedApp;
+}
+
+/**
+ * The scheduled run. Calls the service directly rather than making an HTTP
+ * request to itself — that would pay a second invocation, a second cold
+ * start, and need a credential to talk to its own API.
+ *
+ * Never throws: one bad symbol must not abort the rest of the batch, and a
+ * scheduled invocation that throws gets retried by AWS, which would
+ * re-analyse the symbols that already succeeded.
+ */
+async function runScheduled(event: ScheduledEvent): Promise<{
+  saved: string[];
+  failed: Record<string, string>;
+}> {
+  const app = await getApp();
+  const analyzer = app.get(AnalyzeService);
+  const persistence = app.get(CoordinatorPersistenceService);
+
+  const saved: string[] = [];
+  const failed: Record<string, string> = {};
+
+  for (const symbol of event.scheduled.symbols) {
+    try {
+      const analysis = await analyzer.analyze(symbol);
+      const { id } = await persistence.persistAnalysis(analysis);
+      saved.push(`${symbol}:${id}`);
+    } catch (err) {
+      failed[symbol] = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // Returned so it lands in the CloudWatch log for the invocation.
+  console.log(JSON.stringify({ saved, failed }));
+  return { saved, failed };
 }
 
 export const handler = async (
-  event: APIGatewayProxyEventV2,
+  event: APIGatewayProxyEventV2 | ScheduledEvent,
   context: Context,
   callback: Parameters<Handler>[2],
-): Promise<APIGatewayProxyResultV2> => {
-  // `??=` means "only if not already set", so the boot happens once per
-  // container and every warm request skips straight to serving.
-  cachedHandler ??= await bootstrap();
-  return cachedHandler(event, context, callback) as Promise<APIGatewayProxyResultV2>;
+): Promise<APIGatewayProxyResultV2 | { saved: string[]; failed: Record<string, string> }> => {
+  if (isScheduled(event)) {
+    return runScheduled(event);
+  }
+
+  if (!cachedHttp) {
+    const app = await getApp();
+    const expressApp = app.getHttpAdapter().getInstance();
+    cachedHttp = serverlessExpress({ app: expressApp });
+  }
+
+  return cachedHttp(event, context, callback) as Promise<APIGatewayProxyResultV2>;
 };
