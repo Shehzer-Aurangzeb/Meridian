@@ -21,7 +21,7 @@ dotenv.config({ path: `.env.${process.env.NODE_ENV ?? 'local'}` });
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { Candle } from '../../src/common/types/candle.types';
-import { findFirstFill, findFirstOutcome } from '../../src/performance/replay';
+import { findFirstFill, findFirstOutcome } from '../../src/common/replay/replay';
 import { logRun, readRuns } from '../../src/common/run-log';
 
 const JOURNAL = process.env.MERIDIAN_JOURNAL ?? 'logs/journal.jsonl';

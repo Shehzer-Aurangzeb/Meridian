@@ -1,4 +1,4 @@
-import { Candle } from '../../src/common/types/candle.types';
+import { Candle } from '../types/candle.types';
 import { completedAsOf, scoreLadder, TIMEFRAME_MS } from './plan-replay';
 
 const HOUR = 3_600_000;

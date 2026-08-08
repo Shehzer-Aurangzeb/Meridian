@@ -22,7 +22,7 @@ describe('AnalysesController', () => {
       findMany: jest.fn(),
     },
   };
-  const binance = { getCurrentPrice: jest.fn() };
+  const binance = { getCurrentPrice: jest.fn(), getCandlesPaged: jest.fn() };
   const analyzer = { analyze: jest.fn() };
   const persistence = { persistAnalysis: jest.fn() };
 
@@ -89,12 +89,17 @@ describe('AnalysesController', () => {
       coordinatorPayload: { map: { zones: [{ center: 500 }] } },
     });
     binance.getCurrentPrice.mockResolvedValue(120);
+    binance.getCandlesPaged.mockResolvedValue([]);
 
     const res = await controller.detail('run_1');
     // Price is above the long's stop so it is not invalidated, but the newest
     // map kept none of its zones.
     expect(res.freshness).toBe('SUPERSEDED');
     expect(res.currentPrice).toBe(120);
+    // No candles, so no fill — and the fixture is dated 1970, so the fill
+    // window is long gone: the plan was passed by, not still waiting.
+    expect(res.outcomes.map((o) => o.outcome)).toEqual(['MISSED']);
+    expect(res.outcomes[0].r).toBeNull();
     // The newest-row lookup must exclude the row being read, or every
     // analysis would be compared against itself and never go stale.
     expect(prisma.coordinatorRun.findFirst.mock.calls[0][0].where).toEqual({

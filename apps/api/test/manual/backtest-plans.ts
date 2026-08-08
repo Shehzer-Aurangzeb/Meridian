@@ -63,8 +63,8 @@ import {
 import { TradePlanService, TradePlan, ZoneState } from '../../src/analysis/services/trade-plan.service';
 import { CANDLE_LIMITS } from '../../src/common/constants/timeframes';
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
-import { findFirstFill } from '../../src/performance/replay';
-import { completedAsOf, scoreLadder, TIMEFRAME_MS } from './plan-replay';
+import { findFirstFill } from '../../src/common/replay/replay';
+import { completedAsOf, scoreLadder, TIMEFRAME_MS } from '../../src/common/replay/plan-replay';
 import { makeRng } from './rng';
 
 // Per-bar map builds log three lines each at debug level. 1000 bars of that

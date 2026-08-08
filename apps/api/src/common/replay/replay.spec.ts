@@ -1,4 +1,4 @@
-import { Candle } from '../common/types/candle.types';
+import { Candle } from '../types/candle.types';
 import { findFirstFill, findFirstOutcome } from './replay';
 
 const bar = (low: number, high: number): Candle => ({

@@ -7,7 +7,6 @@ import { AnalysisCoordinatorModule } from '../analysis-coordinator/analysis-coor
 import { AiModule } from '../ai/ai.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { RiskManagementModule } from '../risk-management/risk-management.module';
-import { PerformanceModule } from '../performance/performance.module';
 
 /**
  * ServicesModule - Convenience module that re-exports all feature modules
@@ -23,7 +22,6 @@ import { PerformanceModule } from '../performance/performance.module';
     AiModule,
     AnalysisModule,
     RiskManagementModule,
-    PerformanceModule,
   ],
   exports: [
     MarketDataModule,
@@ -34,7 +32,6 @@ import { PerformanceModule } from '../performance/performance.module';
     AiModule,
     AnalysisModule,
     RiskManagementModule,
-    PerformanceModule,
   ],
 })
 export class ServicesModule {}

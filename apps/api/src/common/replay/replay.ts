@@ -1,4 +1,4 @@
-import { Candle } from '../common/types/candle.types';
+import { Candle } from '../types/candle.types';
 
 export type ReplayOutcome = 'TARGET_HIT' | 'STOPPED_OUT' | 'OPEN';
 
