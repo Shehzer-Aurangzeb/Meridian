@@ -5,7 +5,7 @@
  * a mis-scored exit ladder both produce plausible numbers rather than errors —
  * which is how the retracted results in docs/STATE_OF_PLAY.md §14c happened.
  */
-import { Candle } from '../../src/common/types/candle.types';
+import { Candle } from '../types/candle.types';
 
 export const TIMEFRAME_MS: Record<string, number> = {
   '1h': 3_600_000,

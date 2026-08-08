@@ -15,6 +15,12 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
+import { PlanResult, scorePlans } from './outcome';
+import { Candle, TimeInterval } from '../common/types/candle.types';
+
+/** Outcome replay series: 1h wicks, 30 days — see the detail route. */
+const OUTCOME_TIMEFRAME: TimeInterval = '1h';
+const OUTCOME_CANDLES = 720;
 
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
@@ -100,12 +106,15 @@ export class AnalysesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'One saved analysis with its current freshness' })
+  @ApiOperation({
+    summary: 'One saved analysis with its current freshness and outcome',
+  })
   async detail(@Param('id') id: string): Promise<{
     id: string;
     createdAt: Date;
     currentPrice: number;
     freshness: Freshness;
+    outcomes: PlanResult[];
     analysis: AnalysisRecord;
   }> {
     const row = await this.prisma.coordinatorRun.findUnique({
@@ -127,15 +136,22 @@ export class AnalysesController {
       );
     }
 
-    // Both freshness inputs, fetched together: the price the chart needs
-    // anyway, and the newest analysis for this symbol.
-    const [currentPrice, newestRow] = await Promise.all([
+    // Everything the two verdicts need, in one round of I/O: the price the
+    // chart wants anyway, the newest analysis for this symbol, and the
+    // candles since this one was taken.
+    const [currentPrice, newestRow, candles] = await Promise.all([
       this.binance.getCurrentPrice(row.symbol),
       this.prisma.coordinatorRun.findFirst({
         where: { symbol: row.symbol, id: { not: row.id } },
         orderBy: { createdAt: 'desc' },
         select: { coordinatorPayload: true },
       }),
+      // 1h is the finest series paged cheaply, so a stop or target touched
+      // intraday is not missed by a coarser candle. 720 = 30 days, which is
+      // well past the 24h in which every backtested fill happened.
+      this.binance
+        .getCandlesPaged(row.symbol, OUTCOME_TIMEFRAME, OUTCOME_CANDLES)
+        .catch(() => [] as Candle[]),
     ]);
 
     const newest = newestRow?.coordinatorPayload as unknown as AnalysisRecord | undefined;
@@ -148,6 +164,14 @@ export class AnalysesController {
         analysis,
         currentPrice,
         newest?.map ? { map: newest.map } : null,
+      ),
+      // Strictly after the analysis: a candle already forming when it was
+      // taken must not be allowed to "fill" a plan retroactively.
+      outcomes: scorePlans(
+        analysis.plans,
+        candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
+        row.createdAt,
+        Date.now(),
       ),
       analysis,
     };

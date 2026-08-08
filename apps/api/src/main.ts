@@ -46,29 +46,41 @@ async function bootstrap() {
     maxAge: 86_400,
   });
 
-  const config = new DocumentBuilder()
-    .setTitle('Meridian API')
-    .setDescription('Trading analysis API with AI-powered insights')
-    .setVersion('1.0')
-    .addTag('health', 'Health check endpoints')
-    .addTag('analysis', 'Market analysis endpoints')
-    .addTag('analysis-coordinator', 'Strategy coordination & SSE streaming')
-    .addTag('risk-management', 'Risk management calculations')
-    .addTag('performance', 'Performance tracking')
-    .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
-    .build();
+  // Swagger is mounted by SwaggerModule.setup, which sits OUTSIDE Nest's
+  // guard chain — AuthGuard cannot protect it. Rather than bolt on basic-auth
+  // middleware to guard a page nobody needs in production, it is simply not
+  // mounted there. Set ENABLE_DOCS=true to get it back on a deployed
+  // instance, deliberately and temporarily.
+  const docsEnabled = env === 'local' || process.env.ENABLE_DOCS === 'true';
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document, {
-    jsonDocumentUrl: 'docs-json',
-  });
+  if (docsEnabled) {
+    const config = new DocumentBuilder()
+      .setTitle('Meridian API')
+      .setDescription('Trading analysis API')
+      .setVersion('1.0')
+      .addTag('health', 'Health check endpoints')
+      .addTag('auth', 'Login and credential check')
+      .addTag('analyses', 'Run, list and read saved analyses')
+      .addTag('risk-management', 'Risk management calculations')
+      .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
+      .addBearerAuth()
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document, {
+      jsonDocumentUrl: 'docs-json',
+    });
+  }
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`🚀 Meridian API running on http://localhost:${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
-  console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
-  console.log(`📄 OpenAPI JSON: http://localhost:${port}/docs-json`);
+  console.log(
+    docsEnabled
+      ? `📚 Swagger docs: http://localhost:${port}/docs`
+      : '📚 Swagger docs: disabled (set ENABLE_DOCS=true to mount)',
+  );
 }
 
 bootstrap();

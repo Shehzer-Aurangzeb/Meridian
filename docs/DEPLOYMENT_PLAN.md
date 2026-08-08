@@ -288,6 +288,96 @@ classifier that returns 404 for an unknown pair and leaves every other failure
 a 500, since those are genuinely ours. The CLI gets the same readable message
 instead of a stack.
 
+## 8. ✅ DONE — legacy surface deleted
+
+2,944 lines removed. Route count 22 → 12. Every deletion was provably dead,
+not merely unused:
+
+| deleted | why |
+|---|---|
+| `POST /analysis/analyze` | superseded by `POST /analyses`; sole writer of `TradeAnalysis` |
+| `GET /analysis/history/:coin` | superseded by `GET /analyses?symbol=` |
+| `GET /analysis/validate/:coin` | already carried `@deprecated Not consumed by frontend` |
+| `SSE /analysis-coordinator/stream` | regime-leg only; unusable from a browser since auth (EventSource cannot set headers) |
+| `POST /analysis-coordinator/coordinate` | regime-leg only, legacy Claude prompt |
+| `POST /analysis-coordinator/portfolio-scan` | scanner not in the product |
+| `GET /analysis/performance/*` | both data sources dead: `TradeAnalysis` (nothing writes it) and `aiPayload`/`aiAction` (null on every new row) |
+| `ClaudeService`, `ClaudePromptService` | last consumers were the controllers above |
+| `MultiTimeframeScannerService` | only consumer was the scan route |
+
+That closes two long-standing debts by deletion rather than repair: the SSE
+path that still used the legacy prompt, and `checklistResult.passed`, whose
+only reader was `ClaudePromptService`.
+
+`replay.ts` and `plan-replay.ts` consolidated into `src/common/replay/` —
+`performance/` would otherwise be a folder named after a service that no
+longer exists.
+
+**Kept, though currently unused:** `/analysis/*` risk-management (6 routes —
+position sizing, leverage constraints). Implemented, playbook-derived, and
+plausibly wanted by the frontend. Unused is not the same as dead.
+
+## 9. ✅ DONE — outcome scoring (the pass/fail badge)
+
+`GET /analyses/:id` now returns `outcomes[]` alongside `freshness`, computed
+on read from the same code the plan backtest uses (`findFirstFill`,
+`scoreLadder`) — a badge scored differently from the harness would quietly
+disagree with every number in STATE_OF_PLAY.md §14h.
+
+```
+PENDING   price has not reached the entry, still inside the fill window
+MISSED    never reached it, and the window has passed
+OPEN      filled, unresolved, marked to market
+STOPPED / PARTIAL / ALL_TARGETS   with the realised R
+```
+
+`FILL_WINDOW_HOURS = 24` is measured, not guessed: across the 582 backtested
+trades, 100% of plans that ever filled did so within 24h, median 3h.
+
+Live, one hour after the analyses were taken:
+
+```
+LINK  LIVE  long:PARTIAL +0.19R · short:PENDING
+AVAX  LIVE  long:PENDING · short:OPEN +0.00R
+SOL   LIVE  short:OPEN -0.24R · long:PENDING
+ETH   LIVE  short:OPEN +0.07R · long:PENDING
+BTC   LIVE  long:PENDING · short:PENDING
+```
+
+## 10. ✅ DONE — /docs no longer mounted in production
+
+`SwaggerModule.setup` sits outside Nest's guard chain, so `AuthGuard` cannot
+protect it. Rather than bolt basic-auth middleware onto a page nobody needs
+deployed, it is simply not mounted unless `NODE_ENV=local` or
+`ENABLE_DOCS=true`.
+
+## 11. Remaining: the Lambda handler
+
+The compiled build is verified — `pnpm build` succeeds and `node dist/src/main.js`
+boots, serves `/health/live` 200 and `/analyses` 401. What is not written is
+the handler, because its shape depends on a decision not yet made:
+
+- **`@codegenie/serverless-express`** — one handler file, one dependency,
+  plain zip deploy. Standard for Nest.
+- **AWS Lambda Web Adapter** — a layer or container image, **zero code and
+  zero dependencies**: the same artifact runs locally and in Lambda.
+
+Pick the deployment shape (SAM / CDK / Serverless / container) and the
+handler follows in minutes. Writing it before that is scaffolding that gets
+thrown away.
+
+### Prod environment
+
+```
+MERIDIAN_API_KEY        machine credential for the scheduler
+MERIDIAN_TOKEN_SECRET   session signing key — rotating it logs everyone out
+MERIDIAN_PASSWORD_HASH  from: npx ts-node src/auth/session-token.ts '<pw>'
+DATABASE_URL            Neon
+CORS_ORIGINS            the Vercel domain
+ANTHROPIC_API_KEY       only if something narrates
+ENABLE_DOCS             omit
+```
+
 ## Known debt, not blocking
 
 - SSE/REST still calls the legacy `analyzeWithChecklist`, not
