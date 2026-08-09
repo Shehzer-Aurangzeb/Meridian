@@ -70,12 +70,21 @@ jobs:
       # An unset secret makes role-to-assume empty, and the action then fails
       # with "Could not load credentials from any providers" — which sounds
       # like an AWS problem and is actually a missing repo secret.
+      # The role and the OIDC provider are created by the stack ONLY when a
+      # repo is named, which is easy to forget because every other deploy
+      # succeeds without it. Missing, the next step fails with "The web
+      # identity token provided could not be validated" — which reads as a
+      # token problem and is actually a resource that was never created.
       - name: Check the deploy role secret is set
         run: |
           if [ -z "${{ secrets.AWS_DEPLOY_ROLE_ARN }}" ]; then
             echo "AWS_DEPLOY_ROLE_ARN is not set."
             echo "Settings -> Secrets and variables -> ACTIONS (not Dependabot):"
             echo "  arn:aws:iam::<account>:role/meridian-github-deploy"
+            echo ""
+            echo "If the role does not exist yet, create it once from a laptop:"
+            echo "  pnpm --filter infra exec cdk deploy -c region=eu-central-1 \\"
+            echo "    -c githubRepo=${{ github.repository }}"
             exit 1
           fi
 
