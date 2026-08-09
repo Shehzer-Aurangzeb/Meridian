@@ -14,17 +14,8 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
 export const FEATURES = {
   DASHBOARD: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_DASHBOARD, true),
 
-  // Off until their pages stop calling deleted routes: the analysis page still
-  // goes through useCoordinateAnalysis, the history page through
-  // usePerformance. Both replaced by use-analyses.ts, neither rewired yet.
-  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, false),
-  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, false),
-
-  // Aggregate performance has no endpoint, deliberately: those numbers belong
-  // to the measurement harness, and showing them in the app would make a
-  // research result look like a live one. Per-plan outcomes come from
-  // GET /analyses/:id instead.
-  PERFORMANCE: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_PERFORMANCE, false),
+  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, true),
+  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, true),
 
   // Mock array in the component. Needs somewhere to persist a per-user list,
   // and this is a single-password app with no user table.
@@ -46,8 +37,9 @@ export const ROUTE_FEATURE_MAP: Record<string, keyof typeof FEATURES> = {
   '/settings': 'SETTINGS',
 };
 
+/** Matches on the first segment, so /history/<id> follows /history. */
 export function isRouteEnabled(route: string): boolean {
-  const feature = ROUTE_FEATURE_MAP[route];
+  const feature = ROUTE_FEATURE_MAP[`/${route.split('/')[1]}`];
   if (!feature) return true;
   return FEATURES[feature];
 }

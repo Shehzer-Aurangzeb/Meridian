@@ -48,7 +48,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  const feature = ROUTE_FEATURE_MAP[pathname];
+  // Match the first segment, not the whole path: an exact lookup leaves
+  // /history/<id> ungated while /history is gated.
+  const feature = ROUTE_FEATURE_MAP[`/${pathname.split('/')[1]}`];
   if (feature && !FEATURES[feature]) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }

@@ -1,218 +1,84 @@
 'use client';
 
-import { useCallback, useMemo, useReducer } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePerformance } from '@/lib/hooks/use-performance';
+import { useAnalyses } from '@/lib/hooks/use-analyses';
+import { summariseAnalyses } from '@/lib/summarise-analyses';
+import type { AnalysisListItem } from '@/types/analyses';
 import {
-  mapToSummaryStats,
-  mapToHistoryEntries,
-  filterHistoryEntries,
-  sortHistoryEntries,
-} from '@/lib/utils/history-mapper';
-import type { SummaryStatsData } from '@/components/features/history/summary-stats';
-import type { HistoryEntry } from '@/components/features/history/history-table';
-import type { HistoryFilters } from '@/components/features/history/filter-bar';
+  DEFAULT_FILTERS,
+  type HistoryFilters,
+} from '@/components/features/history/filter-bar';
 import type { PaginationState } from '@/components/features/history/pagination';
 
-interface HistoryPageState {
-  filters: HistoryFilters;
-  pagination: PaginationState;
-}
+/**
+ * One fetch, then filter, sort and page in memory.
+ *
+ * ponytail: 200 rows is the API's ceiling and roughly a week of scheduled runs
+ * at ten coins every 8 hours. Move filtering server-side when that stops
+ * covering the range you want to look at.
+ */
+const FETCH_LIMIT = 200;
+const PAGE_SIZE = 12;
 
-type HistoryPageAction =
-  | { type: 'SET_FILTERS'; filters: HistoryFilters }
-  | { type: 'SET_SEARCH'; search: string }
-  | { type: 'SET_SIGNAL_FILTER'; signal: HistoryFilters['signal'] }
-  | { type: 'SET_OUTCOME_FILTER'; outcome: HistoryFilters['outcome'] }
-  | { type: 'SET_DATE_RANGE'; dateRange: HistoryFilters['dateRange'] }
-  | { type: 'SET_SORT'; sort: HistoryFilters['sort'] }
-  | { type: 'SET_PAGE'; page: number }
-  | { type: 'SET_PAGE_SIZE'; pageSize: number }
-  | { type: 'RESET_FILTERS' };
-
-const DEFAULT_FILTERS: HistoryFilters = {
-  search: '',
-  signal: 'all',
-  outcome: 'all',
-  dateRange: '30d',
-  sort: 'newest',
+const RANGE_MS: Record<HistoryFilters['dateRange'], number> = {
+  '24h': 24 * 3600_000,
+  '7d': 7 * 24 * 3600_000,
+  '30d': 30 * 24 * 3600_000,
+  all: Number.POSITIVE_INFINITY,
 };
-
-const DEFAULT_PAGINATION: PaginationState = {
-  page: 1,
-  pageSize: 12,
-  totalCount: 0,
-};
-
-const initialState: HistoryPageState = {
-  filters: DEFAULT_FILTERS,
-  pagination: DEFAULT_PAGINATION,
-};
-
-function historyReducer(state: HistoryPageState, action: HistoryPageAction): HistoryPageState {
-  switch (action.type) {
-    case 'SET_FILTERS':
-      return {
-        ...state,
-        filters: action.filters,
-        pagination: { ...state.pagination, page: 1 }, // Reset to page 1 on filter change
-      };
-
-    case 'SET_SEARCH':
-      return {
-        ...state,
-        filters: { ...state.filters, search: action.search },
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    case 'SET_SIGNAL_FILTER':
-      return {
-        ...state,
-        filters: { ...state.filters, signal: action.signal },
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    case 'SET_OUTCOME_FILTER':
-      return {
-        ...state,
-        filters: { ...state.filters, outcome: action.outcome },
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    case 'SET_DATE_RANGE':
-      return {
-        ...state,
-        filters: { ...state.filters, dateRange: action.dateRange },
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    case 'SET_SORT':
-      return {
-        ...state,
-        filters: { ...state.filters, sort: action.sort },
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    case 'SET_PAGE':
-      return {
-        ...state,
-        pagination: { ...state.pagination, page: action.page },
-      };
-
-    case 'SET_PAGE_SIZE':
-      return {
-        ...state,
-        pagination: { ...state.pagination, pageSize: action.pageSize, page: 1 },
-      };
-
-    case 'RESET_FILTERS':
-      return {
-        ...state,
-        filters: DEFAULT_FILTERS,
-        pagination: { ...state.pagination, page: 1 },
-      };
-
-    default:
-      return state;
-  }
-}
 
 export function useHistoryPage() {
   const router = useRouter();
-  const [state, dispatch] = useReducer(historyReducer, initialState);
+  const [filters, setFiltersState] = useState<HistoryFilters>(DEFAULT_FILTERS);
+  const [page, setPage] = useState(1);
 
-  const { data: performanceResponse, isLoading, error } = usePerformance({ limit: 100 });
+  const { data, isLoading, error } = useAnalyses({ limit: FETCH_LIMIT });
+  const rows = useMemo(() => data?.analyses ?? [], [data]);
 
-  const summaryStats: SummaryStatsData | null = useMemo(() => {
-    if (!performanceResponse?.success || !performanceResponse.data) return null;
-    return mapToSummaryStats(performanceResponse.data);
-  }, [performanceResponse]);
+  const summaryStats = useMemo(() => summariseAnalyses(rows), [rows]);
 
-  const allEntries: HistoryEntry[] = useMemo(() => {
-    if (!performanceResponse?.success || !performanceResponse.data) return [];
-    return mapToHistoryEntries(performanceResponse.data.recentAnalyses);
-  }, [performanceResponse]);
+  const matched = useMemo(() => {
+    const search = filters.search.trim().toUpperCase();
+    const cutoff = Date.now() - RANGE_MS[filters.dateRange];
 
-  const filteredEntries = useMemo(() => {
-    return filterHistoryEntries(allEntries, {
-      search: state.filters.search,
-      signal: state.filters.signal,
-      outcome: state.filters.outcome,
+    const result = rows.filter((row) => {
+      if (search && !row.symbol.includes(search)) return false;
+      if (filters.regime !== 'all' && row.regime !== filters.regime) return false;
+      if (filters.route !== 'all' && row.strategyRoute !== filters.route) return false;
+      return new Date(row.createdAt).getTime() >= cutoff;
     });
-  }, [allEntries, state.filters.search, state.filters.signal, state.filters.outcome]);
 
-  const sortedEntries = useMemo(() => {
-    return sortHistoryEntries(filteredEntries, state.filters.sort);
-  }, [filteredEntries, state.filters.sort]);
+    // Already newest-first from the API; oldest-first is the same list reversed.
+    return filters.sort === 'oldest' ? [...result].reverse() : result;
+  }, [rows, filters]);
 
-  const paginatedEntries = useMemo(() => {
-    const start = (state.pagination.page - 1) * state.pagination.pageSize;
-    const end = start + state.pagination.pageSize;
-    return sortedEntries.slice(start, end);
-  }, [sortedEntries, state.pagination.page, state.pagination.pageSize]);
+  const entries = useMemo(
+    () => matched.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [matched, page]
+  );
 
-  const pagination: PaginationState = useMemo(() => ({
-    ...state.pagination,
-    totalCount: sortedEntries.length,
-  }), [state.pagination, sortedEntries.length]);
-
-  const setFilters = useCallback((filters: HistoryFilters) => {
-    dispatch({ type: 'SET_FILTERS', filters });
-  }, []);
-
-  const setSearch = useCallback((search: string) => {
-    dispatch({ type: 'SET_SEARCH', search });
-  }, []);
-
-  const setSignalFilter = useCallback((signal: HistoryFilters['signal']) => {
-    dispatch({ type: 'SET_SIGNAL_FILTER', signal });
-  }, []);
-
-  const setOutcomeFilter = useCallback((outcome: HistoryFilters['outcome']) => {
-    dispatch({ type: 'SET_OUTCOME_FILTER', outcome });
-  }, []);
-
-  const setDateRange = useCallback((dateRange: HistoryFilters['dateRange']) => {
-    dispatch({ type: 'SET_DATE_RANGE', dateRange });
-  }, []);
-
-  const setSort = useCallback((sort: HistoryFilters['sort']) => {
-    dispatch({ type: 'SET_SORT', sort });
-  }, []);
-
-  const setPage = useCallback((page: number) => {
-    dispatch({ type: 'SET_PAGE', page });
-  }, []);
-
-  const resetFilters = useCallback(() => {
-    dispatch({ type: 'RESET_FILTERS' });
-  }, []);
-
-  const handleRowClick = useCallback((entry: HistoryEntry) => {
-    router.push(`/analysis?id=${entry.id}`);
-  }, [router]);
+  const pagination: PaginationState = {
+    page,
+    pageSize: PAGE_SIZE,
+    totalCount: matched.length,
+  };
 
   return {
     summaryStats,
-    entries: paginatedEntries,
-    totalFiltered: sortedEntries.length,
-
-    filters: state.filters,
+    entries,
+    totalFiltered: matched.length,
+    totalFetched: rows.length,
+    filters,
     pagination,
-
     isLoading,
     error: error?.message ?? null,
-
-    setFilters,
-    setSearch,
-    setSignalFilter,
-    setOutcomeFilter,
-    setDateRange,
-    setSort,
-    resetFilters,
-
+    // Any filter change invalidates the current page number.
+    setFilters: (next: HistoryFilters) => {
+      setFiltersState(next);
+      setPage(1);
+    },
     setPage,
-
-    handleRowClick,
+    openAnalysis: (entry: AnalysisListItem) => router.push(`/history/${entry.id}`),
   };
 }
