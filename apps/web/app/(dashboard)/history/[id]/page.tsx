@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { formatCurrency, formatFullDate, formatRelative } from '@/lib/format';
 import { useAnalysis } from '@/lib/hooks/use-analyses';
 import { FreshnessBadge } from '@/components/features/analysis-detail/badges';
+import { VerdictCard } from '@/components/features/analysis-detail/verdict-card';
 import { PlanCard } from '@/components/features/analysis-detail/plan-card';
 import { RegimeCard } from '@/components/features/analysis-detail/regime-card';
 import { LevelMapCard } from '@/components/features/analysis-detail/level-map';
@@ -51,7 +52,7 @@ export default function AnalysisDetailPage() {
     );
   }
 
-  const { analysis, outcomes, freshness, currentPrice, createdAt } = data;
+  const { analysis, outcomes, freshness, currentPrice, createdAt, verdict, narration } = data;
   const drift = ((currentPrice - analysis.map.spot) / analysis.map.spot) * 100;
 
   return (
@@ -86,7 +87,19 @@ export default function AnalysisDetailPage() {
         </div>
       </header>
 
-      <RegimeCard analysis={analysis} />
+      <VerdictCard
+        id={data.id}
+        verdict={verdict}
+        narration={narration}
+        freshness={freshness}
+      />
+
+      <section className="mt-8">
+        <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary mb-3">
+          The evidence
+        </div>
+        <RegimeCard analysis={analysis} />
+      </section>
 
       <section className="mt-8">
         <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary mb-3">

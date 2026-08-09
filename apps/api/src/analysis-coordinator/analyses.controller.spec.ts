@@ -6,12 +6,28 @@ import { AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
+import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { AnalysisCoordinatorModule } from './analysis-coordinator.module';
 
 const payload = {
   symbol: 'BTC',
-  map: { zones: [{ center: 100 }] },
-  plans: [{ direction: 'long', stop: 90, zone: { center: 100 } }],
+  map: { spot: 100, zones: [{ center: 100 }] },
+  plans: [
+    {
+      direction: 'long',
+      state: 'ACTIONABLE',
+      stop: 90,
+      zone: { low: 98, high: 102, center: 100, type: 'support', sources: ['1h', '4h'] },
+      distanceToZonePercent: -0.5,
+      riskPercent: 1,
+      targets: [{ price: 110, rMultiple: 2 }],
+      blendedR: 2,
+    },
+  ],
+  regime: { timeframe: '12h', regime: 'TRENDING', metrics: { adx: 30 } },
+  route: 'CONFLUENCE_CHECKLIST',
+  checklist: null,
+  timeframes: { regime: '12h' },
 };
 
 describe('AnalysesController', () => {
@@ -20,17 +36,20 @@ describe('AnalysesController', () => {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      update: jest.fn(),
     },
   };
   const binance = { getCurrentPrice: jest.fn(), getCandlesPaged: jest.fn() };
   const analyzer = { analyze: jest.fn() };
   const persistence = { persistAnalysis: jest.fn() };
+  const narrator = { narrate: jest.fn() };
 
   const controller = new AnalysesController(
     analyzer as unknown as AnalyzeService,
     persistence as unknown as CoordinatorPersistenceService,
     prisma as unknown as PrismaService,
     binance as unknown as BinanceService,
+    narrator as unknown as AnalystNarrationService,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -74,7 +93,7 @@ describe('AnalysesController', () => {
       coordinatorPayload: { symbol: 'BTC', regimeResult: {} },
     });
     await expect(controller.detail('old')).rejects.toThrow(
-      /predates the level map/,
+      /predates the current analysis shape/,
     );
   });
 
@@ -129,5 +148,77 @@ describe('AnalysisCoordinatorModule wiring', () => {
 
     expect(moduleRef.get(AnalysesController)).toBeDefined();
     expect(moduleRef.get(AnalyzeService)).toBeDefined();
+  });
+});
+
+describe('AnalysesController.narrate', () => {
+  const prisma = {
+    coordinatorRun: { findUnique: jest.fn(), update: jest.fn() },
+  };
+  const narrator = { narrate: jest.fn() };
+  const controller = new AnalysesController(
+    {} as unknown as AnalyzeService,
+    {} as unknown as CoordinatorPersistenceService,
+    prisma as unknown as PrismaService,
+    {} as unknown as BinanceService,
+    narrator as unknown as AnalystNarrationService,
+  );
+
+  const full = payload;
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns the cached narration without paying for a second call', async () => {
+    prisma.coordinatorRun.findUnique.mockResolvedValue({
+      id: 'a',
+      coordinatorPayload: full,
+      aiPayload: { text: 'already written', citedPrices: [], model: 'x', narratedAt: 'y' },
+    });
+
+    const result = await controller.narrate('a');
+
+    expect(result.text).toBe('already written');
+    expect(narrator.narrate).not.toHaveBeenCalled();
+    expect(prisma.coordinatorRun.update).not.toHaveBeenCalled();
+  });
+
+  it('ignores the legacy aiPayload shape and narrates instead', async () => {
+    // Old rows hold a trade action here, not a narration. Returning one as
+    // text would render `undefined` on the page.
+    prisma.coordinatorRun.findUnique.mockResolvedValue({
+      id: 'a',
+      coordinatorPayload: full,
+      aiPayload: { action: 'LONG', confidence: 70 },
+    });
+    narrator.narrate.mockResolvedValue({
+      text: 'fresh read',
+      citedPrices: [100],
+      model: 'claude-opus-5',
+      inputTokens: 1,
+      outputTokens: 2,
+    });
+
+    const result = await controller.narrate('a');
+
+    expect(narrator.narrate).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('fresh read');
+    expect(prisma.coordinatorRun.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a narration failure as unavailable, never as a broken analysis', async () => {
+    prisma.coordinatorRun.findUnique.mockResolvedValue({
+      id: 'a',
+      coordinatorPayload: full,
+      aiPayload: null,
+    });
+    narrator.narrate.mockRejectedValue(new Error('ANTHROPIC_API_KEY is not set'));
+
+    await expect(controller.narrate('a')).rejects.toMatchObject({ status: 503 });
+    expect(prisma.coordinatorRun.update).not.toHaveBeenCalled();
+  });
+
+  it('404s an unknown id', async () => {
+    prisma.coordinatorRun.findUnique.mockResolvedValue(null);
+    await expect(controller.narrate('nope')).rejects.toMatchObject({ status: 404 });
   });
 });

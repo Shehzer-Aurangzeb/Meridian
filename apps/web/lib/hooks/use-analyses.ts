@@ -6,6 +6,7 @@ import type {
   AnalysisDetail,
   AnalysisListResponse,
   RunAnalysisResponse,
+  SavedNarration,
 } from '@/types/analyses';
 import { queryKeys } from './query-keys';
 
@@ -52,6 +53,31 @@ export function useRunAnalysis() {
     onSuccess: () => {
       // The new row tops every list, and may have superseded an open detail view.
       queryClient.invalidateQueries({ queryKey: queryKeys.analyses.all });
+    },
+  });
+}
+
+/**
+ * Claude's read of one analysis.
+ *
+ * Costs a model call the first time and nothing after — the backend caches it
+ * on the row. Kept out of `useAnalysis` deliberately: the analysis must render
+ * whether or not anyone wants the prose, and whether or not Claude is even
+ * reachable.
+ */
+export function useNarrate(id: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      fetchApi<SavedNarration>(`/api/analyses/${id}/narrate`, { method: 'POST' }),
+    onSuccess: (narration) => {
+      // Write it straight into the open detail view rather than refetching —
+      // that would re-run the outcome replay for a field we already hold.
+      queryClient.setQueryData<AnalysisDetail>(
+        queryKeys.analyses.detail(id),
+        (current) => (current ? { ...current, narration } : current),
+      );
     },
   });
 }
