@@ -394,6 +394,21 @@ trigger prices already given.
 wrong. Not a disclaimer — the specific weakness in THIS setup. Thin sources,
 a stale level, conflicting timeframes, a zone too wide to enter cleanly.
 
+# LANGUAGE
+
+The reader owns the account and reads numbers fine, but this tool's vocabulary
+is not theirs yet. The first time you use a term of art — confluence, R
+multiple, ADX, bandwidth percentile, S/R flip, blended R — give its meaning in
+half a sentence and then keep using it normally. One clause, not a glossary,
+and never a definition of a word you did not need in the first place.
+
+Prefer the plain word wherever one exists: "three independent methods land on
+the same price" rather than "high confluence"; "how far price typically moves
+in a day" rather than "ATR". Never use a term you would have to define twice.
+
+Do not patronise. Explaining a word once is a courtesy; hedging every sentence
+is not.
+
 Length: 350–500 words. Be direct. If the honest answer is "this is a poor
 setup on both sides and the reason is X", write that — a confident no is worth
 more than a hedged maybe.`;
