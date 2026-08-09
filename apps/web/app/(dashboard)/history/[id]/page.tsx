@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import { formatCurrency, formatFullDate, formatRelative } from '@/lib/format';
 import { useAnalysis } from '@/lib/hooks/use-analyses';
 import { useLiveCandle } from '@/lib/hooks/use-live-candle';
@@ -84,16 +85,34 @@ export default function AnalysisDetailPage() {
           </p>
         </div>
 
-        <div className="text-right">
-          <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary">
-            Price now
+        {/* Both prices, side by side: the drift below is the difference
+            between them, and it is unreadable without the number it is from. */}
+        <div className="flex items-end gap-7">
+          <div className="text-right">
+            <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary">
+              At analysis
+            </div>
+            <div className="font-display text-[22px] font-semibold leading-none text-text-secondary mt-1.5">
+              {formatCurrency(analysis.map.spot)}
+            </div>
           </div>
-          <div className="font-display text-[32px] font-semibold leading-none text-text-primary mt-1.5">
-            {formatCurrency(price)}
-          </div>
-          <div className="font-mono text-[11px] text-text-tertiary mt-1.5">
-            {drift >= 0 ? '+' : ''}
-            {drift.toFixed(2)}% since the analysis
+
+          <div className="text-right">
+            <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary">
+              Price now
+            </div>
+            <div className="font-display text-[32px] font-semibold leading-none text-text-primary mt-1.5">
+              {formatCurrency(price)}
+            </div>
+            <div
+              className={cn(
+                'font-mono text-[11px] mt-1.5',
+                drift >= 0 ? 'text-green' : 'text-rust',
+              )}
+            >
+              {drift >= 0 ? '+' : ''}
+              {drift.toFixed(2)}% since
+            </div>
           </div>
         </div>
       </header>

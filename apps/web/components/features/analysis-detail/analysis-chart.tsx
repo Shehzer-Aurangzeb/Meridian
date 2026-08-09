@@ -208,6 +208,17 @@ export function AnalysisChart({
     if (!series || !candles?.length) return;
 
     const lines = [
+      // Where price actually was when this was computed. Every zone distance,
+      // every plan state and the drift percentage are measured from it, so it
+      // belongs on the chart next to the arrow marking *when*.
+      {
+        price: analysis.map.spot,
+        color: cssColor('--text-tertiary'),
+        lineWidth: 1 as const,
+        lineStyle: LineStyle.LargeDashed,
+        axisLabelVisible: true,
+        title: 'spot at analysis',
+      },
       ...analysis.map.zones.flatMap((zone) => {
         const color = cssColor(zone.type === 'support' ? '--green' : '--red', 0.3);
         return [zone.low, zone.high].map((price) => ({
@@ -251,7 +262,7 @@ export function AnalysisChart({
 
     const drawn = lines.map((line) => series.createPriceLine(line));
     return () => drawn.forEach((line) => series.removePriceLine(line));
-  }, [analysis.map.zones, plan, candles, resolvedTheme, interval]);
+  }, [analysis.map, plan, candles, resolvedTheme, interval]);
 
   const readout = hover ?? (live ? { open: live.open, high: live.high, low: live.low, close: live.close } : null);
 
