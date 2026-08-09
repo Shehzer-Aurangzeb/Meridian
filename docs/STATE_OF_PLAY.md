@@ -1159,6 +1159,63 @@ those. That remains the only instrument that can answer the actual question.
 
 ---
 
+## 14i. 🔬 FORWARD TEST — running, first read due September 2026
+
+Since 9 Aug 2026 the deployed schedule analyses ten coins every eight hours
+(`cron(0 0/8 * * ? *)` — three runs a day, ~900 analyses a month). `pnpm
+forward-test` scores what it saved.
+
+```
+pnpm forward-test                       # everything saved so far
+pnpm forward-test --since 2026-08-09    # from a date
+pnpm forward-test --self-check          # dedup rule only, no db, no network
+```
+
+**§14h still applies to the deployed code.** `git diff b85d0ab..HEAD` over
+`analysis/`, `indicators/`, `market-regime/`, `risk-management/` is empty —
+everything since is controllers, deleted DTOs, and read-side code. The engine
+that produced net **−0.039R, CI [−0.121, +0.058]** is the engine in Lambda.
+
+Why this is worth running despite §14h: it is the only measurement here that is
+genuinely out of sample. No sweep, no `--max-bars`, no hindsight. §14h's edge
+over random survived only at one value of a harness knob (rule 17); forward
+output has no knob to move.
+
+What it deliberately does not print: **a p-value.** One month of schedule
+output is one month-cluster, and the unit of evidence is the month (rule 7).
+Ten coins moving together inside one regime is closer to one observation than
+to a thousand. The honest verdict after 30 days is "consistent with §14h" or
+"inconsistent with §14h".
+
+Design choices, all matched to §14h so the two are comparable:
+
+- **One opportunity per zone.** The same coin re-emits the same plan on the
+  same zone three times a day; counting all three triples n and turns one good
+  zone into three wins. A later plan is a repeat if its zone overlaps the open
+  one within `--cooldown` (24h). Standing analogue of the backtest's cooldown —
+  and on the first 23 rows it removed 15 of 46 emitted plans, so it is not a
+  theoretical concern.
+- **Same scoring code** (`scorePlans` → `findFirstFill`, `scoreLadder`) as both
+  the harness and the detail-page badge. A third implementation would quietly
+  disagree with this document.
+- **Cost = round-trip % ÷ risk %**, as everywhere else (rule 3).
+- **Control = the same plans at another saved analysis's timestamp**, matched
+  in count, averaged over `--draws` draws (rules 2 and 13).
+- **Open positions are marked to market and their share is printed** — 9% of
+  §14h trades carried its sign (rule 18).
+
+The funnel is instrumented per stage (rule 9): plans emitted → repeats removed
+→ opportunities → never reached entry / still inside the window / filled /
+still open. Whichever stage dominates is the thing to fix:
+
+| dominant stage | what it means | where to look |
+|---|---|---|
+| never reached entry | the ladder sits too deep inside the zone | `TradePlanService` entry weights |
+| STOPPED | the stop is too tight for the zone width | ATR multiple, zone-anchored offset |
+| ALL_TARGETS but net R still negative | targets too close — §14h measured median RR 0.21–0.25, which needs a >80% win rate | target selection, not entry |
+
+---
+
 ## 15. Where six experiments left us *(superseded by §14 — kept for the record)*
 
 | # | experiment | result |
