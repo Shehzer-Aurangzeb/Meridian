@@ -84,19 +84,6 @@ describe('AnalysesController', () => {
     await expect(controller.detail('nope')).rejects.toThrow(HttpException);
   });
 
-  it('refuses a legacy row instead of scoring freshness off nothing', async () => {
-    // Rows written before AnalyzeService hold a regime-leg-only payload.
-    prisma.coordinatorRun.findUnique.mockResolvedValue({
-      id: 'old',
-      symbol: 'BTC',
-      createdAt: new Date(0),
-      coordinatorPayload: { symbol: 'BTC', regimeResult: {} },
-    });
-    await expect(controller.detail('old')).rejects.toThrow(
-      /predates the current analysis shape/,
-    );
-  });
-
   it('returns freshness computed against the live price and the newest row', async () => {
     prisma.coordinatorRun.findUnique.mockResolvedValue({
       id: 'run_1',

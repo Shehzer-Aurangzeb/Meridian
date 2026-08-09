@@ -20,11 +20,7 @@ import { buildVerdict, Verdict } from './verdict';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 
-/**
- * A saved narration. Stored in `aiPayload`, a column that used to hold a
- * Claude trade action — hence the `text` check before trusting a row's
- * contents, since old rows hold the other shape.
- */
+/** A saved narration, stored in the `aiPayload` Json column. */
 export interface SavedNarration {
   text: string;
   citedPrices: number[];
@@ -32,20 +28,7 @@ export interface SavedNarration {
   narratedAt: string;
 }
 
-/**
- * Is this payload the shape the current code reads?
- *
- * `coordinatorPayload` is a Json column, so it holds whatever the code of the
- * day wrote — rows predating AnalyzeService carry a regime-leg-only result.
- * One guard for every consumer: checking `plans && map` and then touching
- * `regime.timeframe` downstream is how a legacy row turns into a 500.
- */
-function isCurrentShape(analysis: AnalysisRecord | null): boolean {
-  return Boolean(
-    analysis?.plans && analysis?.map && analysis?.regime?.metrics && analysis?.timeframes,
-  );
-}
-
+/** `aiPayload` is null until someone asks Claude to read the analysis. */
 function readNarration(payload: unknown): SavedNarration | null {
   const value = payload as Partial<SavedNarration> | null;
   return typeof value?.text === 'string' ? (value as SavedNarration) : null;
@@ -165,12 +148,6 @@ export class AnalysesController {
     }
 
     const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
-    if (!isCurrentShape(analysis)) {
-      throw new HttpException(
-        'This row predates the current analysis shape and cannot be read',
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
 
     // Everything the two verdicts need, in one round of I/O: the price the
     // chart wants anyway, the newest analysis for this symbol, and the
@@ -249,12 +226,6 @@ export class AnalysesController {
     if (cached) return cached;
 
     const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
-    if (!isCurrentShape(analysis)) {
-      throw new HttpException(
-        'This row predates the current analysis shape and cannot be narrated',
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
 
     let narration;
     try {
