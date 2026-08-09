@@ -1,13 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import { RSI, BollingerBands, ATR, EMA } from 'technicalindicators';
+import {
+  adxLatest,
+  atrLatest,
+  bollingerSeries,
+  emaSeries,
+  rsiSeries as rsiSeriesOf,
+} from './series';
 import { Candle } from '../common/types/candle.types';
+import { IndicatorContext } from '../common/types/indicator-context.types';
 import {
   IndicatorResults,
-  ExtendedIndicatorResults,
   BollingerBandsResult,
   SupportResistanceResult,
   QQEResult,
-  KeyLevel,
+  ADXResult,
 } from './interfaces/indicator.types';
 
 @Injectable()
@@ -19,16 +25,29 @@ export class IndicatorsService {
    * @returns Latest RSI value
    */
   calculateRSI(closes: number[], period: number = 14): number {
+    const rsiValues = this.calculateRSISeries(closes, period);
+    return rsiValues[rsiValues.length - 1];
+  }
+
+  /**
+   * Calculate the full RSI series (not just the latest value).
+   *
+   * The checklist needs a trailing window of *RSI* values to compute a
+   * relative-momentum Z-score. `RSI.calculate` already produces the whole
+   * series, so exposing it costs nothing over `calculateRSI`.
+   *
+   * @param closes - Array of closing prices
+   * @param period - RSI period (default 14)
+   * @returns RSI values, oldest first. Last element is guaranteed finite.
+   */
+  calculateRSISeries(closes: number[], period: number = 14): number[] {
     if (closes.length < period + 1) {
       throw new Error(
         `Insufficient data for RSI calculation. Need at least ${period + 1} candles, got ${closes.length}`,
       );
     }
 
-    const rsiValues = RSI.calculate({
-      values: closes,
-      period,
-    });
+    const rsiValues = rsiSeriesOf(closes, period);
 
     if (rsiValues.length === 0) {
       throw new Error('RSI calculation returned no values');
@@ -39,7 +58,7 @@ export class IndicatorsService {
       throw new Error('RSI calculation returned invalid value');
     }
 
-    return latestRSI;
+    return rsiValues;
   }
 
   /**
@@ -60,11 +79,7 @@ export class IndicatorsService {
       );
     }
 
-    const bbValues = BollingerBands.calculate({
-      values: closes,
-      period,
-      stdDev,
-    });
+    const bbValues = bollingerSeries(closes, period, stdDev);
 
     if (bbValues.length === 0) {
       throw new Error('Bollinger Bands calculation returned no values');
@@ -111,19 +126,8 @@ export class IndicatorsService {
       );
     }
 
-    const atrValues = ATR.calculate({
-      high: highs,
-      low: lows,
-      close: closes,
-      period,
-    });
-
-    if (atrValues.length === 0) {
-      throw new Error('ATR calculation returned no values');
-    }
-
-    const latestATR = atrValues[atrValues.length - 1];
-    if (latestATR === undefined || isNaN(latestATR)) {
+    const latestATR = atrLatest(highs, lows, closes, period);
+    if (isNaN(latestATR)) {
       throw new Error('ATR calculation returned invalid value');
     }
 
@@ -209,7 +213,7 @@ export class IndicatorsService {
     }
 
     // Calculate RSI values
-    const rsiValues = RSI.calculate({ values: closes, period });
+    const rsiValues = rsiSeriesOf(closes, period);
 
     if (rsiValues.length < 5) {
       return {
@@ -222,10 +226,7 @@ export class IndicatorsService {
 
     // Smooth RSI with EMA (QQE uses smoothed RSI)
     const smoothingPeriod = 5;
-    const smoothedRSI = EMA.calculate({
-      values: rsiValues,
-      period: smoothingPeriod,
-    });
+    const smoothedRSI = emaSeries(rsiValues, smoothingPeriod);
 
     if (smoothedRSI.length < 2) {
       return {
@@ -301,121 +302,165 @@ export class IndicatorsService {
     return (width / bands.middle) * 100;
   }
 
+
   /**
-   * Identify key support and resistance levels with strength metrics
-   * Strength is measured by how many times price has tested the level
+   * Calculate ADX (Average Directional Index) with +DI / -DI.
+   *
+   * Uses Wilder's smoothing via `trading-signals` (see ./series.ts).
+   * Requires roughly 2 * period candles to produce a stable value.
+   *
+   * @param highs  - Array of high prices
+   * @param lows   - Array of low prices
+   * @param closes - Array of closing prices
+   * @param period - ADX period (default 14)
+   * @returns Latest ADX, +DI, -DI and DX values
    */
-  identifyKeyLevels(candles: Candle[], currentPrice: number, tolerance: number = 0.5): KeyLevel[] {
-    if (candles.length < 20) {
-      return [];
+  calculateADX(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number = 14,
+  ): ADXResult {
+    const minRequired = period * 2 + 1;
+    if (
+      highs.length < minRequired ||
+      lows.length < minRequired ||
+      closes.length < minRequired
+    ) {
+      throw new Error(
+        `Insufficient data for ADX calculation. Need at least ${minRequired} candles, got ${Math.min(highs.length, lows.length, closes.length)}`,
+      );
     }
 
-    const levels: Map<number, { type: 'support' | 'resistance'; touches: number }> = new Map();
-
-    // Round price to create price zones (0.5% tolerance)
-    const roundToZone = (price: number): number => {
-      const zone = currentPrice * (tolerance / 100);
-      return Math.round(price / zone) * zone;
-    };
-
-    // Find swing highs and lows
-    for (let i = 2; i < candles.length - 2; i++) {
-      const current = candles[i];
-
-      // Swing high (resistance)
-      if (
-        current.high > candles[i - 1].high &&
-        current.high > candles[i - 2].high &&
-        current.high > candles[i + 1].high &&
-        current.high > candles[i + 2].high
-      ) {
-        const zone = roundToZone(current.high);
-        const existing = levels.get(zone);
-        if (existing && existing.type === 'resistance') {
-          existing.touches++;
-        } else {
-          levels.set(zone, { type: 'resistance', touches: 1 });
-        }
-      }
-
-      // Swing low (support)
-      if (
-        current.low < candles[i - 1].low &&
-        current.low < candles[i - 2].low &&
-        current.low < candles[i + 1].low &&
-        current.low < candles[i + 2].low
-      ) {
-        const zone = roundToZone(current.low);
-        const existing = levels.get(zone);
-        if (existing && existing.type === 'support') {
-          existing.touches++;
-        } else {
-          levels.set(zone, { type: 'support', touches: 1 });
-        }
-      }
+    const latest = adxLatest(highs, lows, closes, period);
+    if (isNaN(latest.adx) || isNaN(latest.pdi) || isNaN(latest.mdi)) {
+      throw new Error('ADX calculation returned invalid values');
     }
 
-    // Convert to array and calculate distance
-    const keyLevels: KeyLevel[] = [];
-    levels.forEach((data, price) => {
-      const distance = ((price - currentPrice) / currentPrice) * 100;
-      keyLevels.push({
-        price,
-        type: data.type,
-        strength: data.touches,
-        distance,
-      });
-    });
-
-    // Sort by strength (descending) then distance (ascending)
-    return keyLevels.sort((a, b) => {
-      if (b.strength !== a.strength) return b.strength - a.strength;
-      return Math.abs(a.distance) - Math.abs(b.distance);
-    });
-  }
-
-  /**
-   * Find nearest support or resistance level
-   */
-  findNearestLevel(
-    keyLevels: KeyLevel[],
-    currentPrice: number,
-    type: 'support' | 'resistance' | 'any' = 'any',
-  ): KeyLevel | null {
-    const filtered =
-      type === 'any' ? keyLevels : keyLevels.filter((l) => l.type === type);
-
-    if (filtered.length === 0) return null;
-
-    // Find nearest by distance
-    return filtered.reduce((nearest, level) => {
-      const nearestDist = Math.abs(nearest.distance);
-      const levelDist = Math.abs(level.distance);
-      return levelDist < nearestDist ? level : nearest;
-    });
-  }
-
-  /**
-   * Extended timeframe analysis with QQE, band width, and key levels
-   */
-  analyzeTimeframeExtended(candles: Candle[]): ExtendedIndicatorResults {
-    // Get basic indicators
-    const basic = this.analyzeTimeframe(candles);
-
-    // Extract closes for QQE
-    const closes = candles.map((c) => c.close);
-    const currentPrice = closes[closes.length - 1];
-
-    // Calculate extended indicators
-    const qqe = this.calculateQQE(closes);
-    const bandWidth = this.calculateBandWidth(basic.bollingerBands);
-    const keyLevels = this.identifyKeyLevels(candles, currentPrice);
+    // DX is the pre-smoothed directional index for the latest bar.
+    const diSum = latest.pdi + latest.mdi;
+    const dx = diSum === 0 ? 0 : (Math.abs(latest.pdi - latest.mdi) / diSum) * 100;
 
     return {
-      ...basic,
-      qqe,
+      adx: latest.adx,
+      pdi: latest.pdi,
+      mdi: latest.mdi,
+      dx,
+    };
+  }
+
+  /**
+   * Calculate a rolling series of Bollinger Band widths (as percentages of
+   * the middle band) over the supplied closes. Used to derive the historical
+   * percentile distribution required by the regime classifier.
+   */
+  calculateBandWidthSeries(
+    closes: number[],
+    period: number = 20,
+    stdDev: number = 2,
+  ): number[] {
+    if (closes.length < period) return [];
+
+    const bbSeries = bollingerSeries(closes, period, stdDev);
+    const widths: number[] = [];
+    for (const bb of bbSeries) {
+      if (
+        bb &&
+        bb.upper !== undefined &&
+        bb.lower !== undefined &&
+        bb.middle !== undefined &&
+        bb.middle !== 0 &&
+        !isNaN(bb.upper) &&
+        !isNaN(bb.lower) &&
+        !isNaN(bb.middle)
+      ) {
+        widths.push(((bb.upper - bb.lower) / bb.middle) * 100);
+      }
+    }
+    return widths;
+  }
+
+  /**
+   * Compute the percentile rank (0-100) of `value` within `series`,
+   * using the inclusive (<=) definition.
+   */
+  percentileRank(value: number, series: number[]): number {
+    if (series.length === 0) return 0;
+    let countLE = 0;
+    for (const v of series) if (v <= value) countLE++;
+    return (countLE / series.length) * 100;
+  }
+
+  /**
+   * Build an `IndicatorContext` from a candle series.
+   *
+   * Computes every baseline indicator needed by downstream strategy
+   * services (regime classifier, squeeze breakout, checklist) exactly
+   * once, so the coordinator can share a single context object across
+   * the entire analysis pipeline.
+   *
+   * Pure function: no I/O, no caching, no side effects. The returned
+   * object is mathematically identical to what each service would have
+   * computed on its own from the same candle dataset.
+   *
+   * @param symbol    Base symbol (uppercased for the context).
+   * @param timeframe Candle interval used for the fetch.
+   * @param candles   Raw OHLCV series (already fetched by BinanceService).
+   *
+   * @throws If the supplied candle series is too small to compute the
+   *         core indicators (RSI / BB / ADX require >= 30 candles).
+   */
+  buildContext(
+    symbol: string,
+    timeframe: string,
+    candles: Candle[],
+  ): IndicatorContext {
+    if (candles.length < 30) {
+      throw new Error(
+        `Insufficient candles to build IndicatorContext for ${symbol} ${timeframe}: ` +
+          `got ${candles.length}, need at least 30`,
+      );
+    }
+
+    const closes = candles.map((c) => c.close);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const volumes = candles.map((c) => c.volume);
+
+    const rsiSeries = this.calculateRSISeries(closes);
+    const rsi = rsiSeries[rsiSeries.length - 1];
+    const bollingerBands = this.calculateBollingerBands(closes);
+    const bandWidth = this.calculateBandWidth(bollingerBands);
+    const bandWidthSeries = this.calculateBandWidthSeries(closes);
+    const atr = this.calculateATR(highs, lows, closes);
+    const adx = this.calculateADX(highs, lows, closes);
+    const qqe = this.calculateQQE(closes);
+
+    // Trailing window of RSI values, used by the checklist to Z-score the
+    // current RSI against its own recent distribution.
+    //
+    // This previously held the last 100 *closes*, so the checklist computed
+    // (rsi - mean(price)) / stdDev(price) — for BTC at ~$100k that yields
+    // Z ≈ -66 every run, which made every LONG pass condition 1 for free
+    // and every SHORT fail it.
+    const rsiHistory = rsiSeries.slice(-100);
+
+    return {
+      symbol: symbol.toUpperCase(),
+      timeframe,
+      candles,
+      closes,
+      highs,
+      lows,
+      volumes,
+      rsi,
+      rsiHistory,
+      adx,
+      atr,
+      bollingerBands,
       bandWidth,
-      keyLevels,
+      bandWidthSeries,
+      qqe,
     };
   }
 }

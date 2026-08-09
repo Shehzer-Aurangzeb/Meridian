@@ -20,7 +20,7 @@ describe('LeverageService', () => {
     it('should recommend appropriate leverage for daily swing trade', () => {
       const result = service.recommendLeverage({
         timeframe: '1d',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 450,
         currentPrice: 28000,
         stopLossPercentage: 5,
@@ -35,7 +35,7 @@ describe('LeverageService', () => {
     it('should recommend higher leverage for 4h day trade', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 85,
+        conditionsMet: 4,
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -47,25 +47,28 @@ describe('LeverageService', () => {
       expect(result.tradeStyle).toBe('day');
     });
     
-    it('should reduce leverage for low confidence score (< 80)', () => {
+    it('should reduce leverage below 4 of 5 conditions', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 60, // Minimum passing
+        conditionsMet: 3, // Minimum passing
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 3,
         experienceLevel: 'advanced',
       });
       
-      // Base 5x * 0.8 (low confidence) = 4x
+      // Base 5x * 0.8 = 4x. The adjustment must be stated in the reasoning,
+      // and now names the condition count rather than a score.
       expect(result.recommended).toBeLessThanOrEqual(5);
-      expect(result.adjustments.some(a => a.includes('checklist'))).toBe(true);
+      expect(
+        result.adjustments.some((a) => a.includes('conditions met')),
+      ).toBe(true);
     });
     
-    it('should reduce leverage more for very low confidence (< 60)', () => {
+    it('should reduce leverage more below the playbook minimum', () => {
       const highConfidence = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -74,7 +77,7 @@ describe('LeverageService', () => {
       
       const lowConfidence = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 50,
+        conditionsMet: 2,
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -87,7 +90,7 @@ describe('LeverageService', () => {
     it('should cap leverage at experience level for beginners', () => {
       const result = service.recommendLeverage({
         timeframe: '15m', // Base 10x
-        checklistScore: 100,
+        conditionsMet: 4,
         atr: 200,
         currentPrice: 28000,
         stopLossPercentage: 2,
@@ -100,7 +103,7 @@ describe('LeverageService', () => {
     it('should cap leverage at experience level for intermediate', () => {
       const result = service.recommendLeverage({
         timeframe: '5m', // Base 12x
-        checklistScore: 100,
+        conditionsMet: 4,
         atr: 150,
         currentPrice: 28000,
         stopLossPercentage: 2,
@@ -113,7 +116,7 @@ describe('LeverageService', () => {
     it('should reduce leverage for high volatility', () => {
       const result = service.recommendLeverage({
         timeframe: '1h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 1500, // Very high ATR (5.4% of price)
         currentPrice: 28000,
         stopLossPercentage: 4,
@@ -127,7 +130,7 @@ describe('LeverageService', () => {
     it('should not reduce leverage for low volatility', () => {
       const lowVol = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 280, // 1% of price - low
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -136,7 +139,7 @@ describe('LeverageService', () => {
       
       const highVol = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 1400, // 5% of price - high
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -149,7 +152,7 @@ describe('LeverageService', () => {
     it('should ensure liquidation is beyond stop loss', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 30000,
         stopLossPercentage: 8, // Wide stop
@@ -163,7 +166,7 @@ describe('LeverageService', () => {
     it('should limit leverage with very tight stop loss', () => {
       const result = service.recommendLeverage({
         timeframe: '1h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 10, // Very wide stop
@@ -177,7 +180,7 @@ describe('LeverageService', () => {
     it('should provide three leverage options', () => {
       const result = service.recommendLeverage({
         timeframe: '1h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -193,7 +196,7 @@ describe('LeverageService', () => {
     it('should warn for high leverage (10x+)', () => {
       const result = service.recommendLeverage({
         timeframe: '15m',
-        checklistScore: 100,
+        conditionsMet: 4,
         atr: 200,
         currentPrice: 28000,
         stopLossPercentage: 2,
@@ -209,7 +212,7 @@ describe('LeverageService', () => {
     it('should warn for very high leverage (15x+)', () => {
       const result = service.recommendLeverage({
         timeframe: '1m',
-        checklistScore: 100,
+        conditionsMet: 4,
         atr: 100,
         currentPrice: 28000,
         stopLossPercentage: 1,
@@ -224,7 +227,7 @@ describe('LeverageService', () => {
     it('should adjust for bear market', () => {
       const bullResult = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -234,7 +237,7 @@ describe('LeverageService', () => {
       
       const bearResult = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -248,7 +251,7 @@ describe('LeverageService', () => {
     it('should adjust for ranging market', () => {
       const bullResult = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -258,7 +261,7 @@ describe('LeverageService', () => {
       
       const rangingResult = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -272,7 +275,7 @@ describe('LeverageService', () => {
     it('should apply conservative risk tolerance', () => {
       const moderate = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -282,7 +285,7 @@ describe('LeverageService', () => {
       
       const conservative = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -296,7 +299,7 @@ describe('LeverageService', () => {
     it('should apply aggressive risk tolerance', () => {
       const moderate = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -306,7 +309,7 @@ describe('LeverageService', () => {
       
       const aggressive = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -320,7 +323,7 @@ describe('LeverageService', () => {
     it('should infer swing trade style for daily timeframe', () => {
       const result = service.recommendLeverage({
         timeframe: '1d',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 450,
         currentPrice: 28000,
         stopLossPercentage: 5,
@@ -333,7 +336,7 @@ describe('LeverageService', () => {
     it('should infer day trade style for 4h timeframe', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 300,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -346,7 +349,7 @@ describe('LeverageService', () => {
     it('should infer scalp trade style for 15m timeframe', () => {
       const result = service.recommendLeverage({
         timeframe: '15m',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 200,
         currentPrice: 28000,
         stopLossPercentage: 2,
@@ -359,7 +362,7 @@ describe('LeverageService', () => {
     it('should infer ultra-scalp trade style for 1m timeframe', () => {
       const result = service.recommendLeverage({
         timeframe: '1m',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 100,
         currentPrice: 28000,
         stopLossPercentage: 1,
@@ -372,7 +375,7 @@ describe('LeverageService', () => {
     it('should calculate correct liquidation price', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 30000,
         stopLossPercentage: 3,
@@ -387,7 +390,7 @@ describe('LeverageService', () => {
     it('should return correct risk level for low leverage', () => {
       const result = service.recommendLeverage({
         timeframe: '1d',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 450,
         currentPrice: 28000,
         stopLossPercentage: 5,
@@ -400,7 +403,7 @@ describe('LeverageService', () => {
     it('should return correct risk level for medium leverage', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -415,7 +418,7 @@ describe('LeverageService', () => {
     it('should include reasoning in response', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -429,7 +432,7 @@ describe('LeverageService', () => {
     it('should include max drawdown in response', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -444,7 +447,7 @@ describe('LeverageService', () => {
     it('should use provided trade style override', () => {
       const result = service.recommendLeverage({
         timeframe: '4h',
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
@@ -455,19 +458,44 @@ describe('LeverageService', () => {
       expect(result.tradeStyle).toBe('scalp');
     });
     
-    it('should handle unknown timeframe with default base leverage', () => {
-      const result = service.recommendLeverage({
+    // Was: 'should handle unknown timeframe with default base leverage',
+    // asserting a silent fallback to 5x. That fallback was the bug — a risk
+    // control that grants leverage on input it does not recognise, producing
+    // a plausible number instead of an error. A "conservative" 1x default
+    // would be no better: still a made-up answer. If leverage cannot be
+    // determined the service must refuse to produce a plan.
+    it('throws on an unrecognised timeframe rather than fabricating leverage', () => {
+      const unknown = {
         timeframe: '2h', // Not in the map
-        checklistScore: 80,
+        conditionsMet: 4,
         atr: 400,
         currentPrice: 28000,
         stopLossPercentage: 3,
-        experienceLevel: 'intermediate',
-      });
-      
-      // Should use default of 5x
-      expect(result.recommended).toBeLessThanOrEqual(5);
+        experienceLevel: 'intermediate' as const,
+      };
+
+      expect(() => service.recommendLeverage(unknown)).toThrow(
+        /unrecognised timeframe "2h"/i,
+      );
+      // The error names the valid options so a caller can correct the input.
+      expect(() => service.recommendLeverage(unknown)).toThrow(/1w, 1d, 12h, 4h/);
     });
+
+    it.each(['', '1H', '1D', '60m', 'daily', 'nonsense'])(
+      'rejects "%s" instead of silently defaulting',
+      (timeframe) => {
+        expect(() =>
+          service.recommendLeverage({
+            timeframe,
+            conditionsMet: 3,
+            atr: 500,
+            currentPrice: 60000,
+            stopLossPercentage: 3,
+            experienceLevel: 'intermediate',
+          }),
+        ).toThrow();
+      },
+    );
   });
   
   describe('getLeverageConstraints', () => {

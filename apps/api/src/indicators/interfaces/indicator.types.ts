@@ -22,16 +22,6 @@ export interface QQEResult {
   trend: 'rising' | 'falling' | 'flat';
 }
 
-/**
- * Key price level with strength metric
- */
-export interface KeyLevel {
-  price: number;
-  type: 'support' | 'resistance';
-  strength: number; // Number of tests/touches
-  distance: number; // Distance from current price as percentage
-}
-
 export interface IndicatorResults {
   rsi: number;
   bollingerBands: BollingerBandsResult;
@@ -41,10 +31,15 @@ export interface IndicatorResults {
 }
 
 /**
- * Extended indicator results including QQE and band width
+ * ADX (Average Directional Index) result
+ * adx  - Trend strength (0-100). >25 indicates a trending market.
+ * pdi  - Positive Directional Indicator (+DI)
+ * mdi  - Negative Directional Indicator (-DI)
+ * dx   - Directional Index (latest, pre-smoothed)
  */
-export interface ExtendedIndicatorResults extends IndicatorResults {
-  qqe: QQEResult;
-  bandWidth: number; // Bollinger band width as percentage
-  keyLevels: KeyLevel[];
+export interface ADXResult {
+  adx: number;
+  pdi: number;
+  mdi: number;
+  dx: number;
 }

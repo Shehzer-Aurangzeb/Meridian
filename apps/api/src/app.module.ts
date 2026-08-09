@@ -3,63 +3,24 @@ import { Controller, Get } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
-import { BinanceService } from './market-data/market-data.service';
-import { IndicatorsService } from './indicators/indicators.service';
-import { ClaudeService } from './ai/ai.service';
 import { HealthController } from './controllers/health.controller';
-import { MarketData } from './analysis/interfaces/analysis.types';
+import { AuthGuard, Public } from './common/guards/auth.guard';
+import { AuthController } from './auth/auth.controller';
 
+@ApiTags('root')
 @Controller()
 class AppController {
-  constructor(
-    private readonly binanceService: BinanceService,
-    private readonly indicatorsService: IndicatorsService,
-    private readonly claudeService: ClaudeService,
-  ) {}
-
   @Get()
+  @Public()
+  @ApiOperation({ summary: 'Service banner / liveness ping' })
   getHello(): { message: string; status: string } {
     return {
       message: 'Meridian API',
       status: 'running',
     };
-  }
-
-  // Temporary test endpoint - remove after verification
-  @Get('test-binance')
-  async testBinance() {
-    const candles = await this.binanceService.getCandles('BTC', '1h', 10);
-    const price = await this.binanceService.getCurrentPrice('BTC');
-    return { candles, price };
-  }
-
-  // Temporary test endpoint - remove after verification
-  @Get('test-indicators')
-  async testIndicators() {
-    const candles = await this.binanceService.getCandles('BTC', '1h', 100);
-    const indicators = this.indicatorsService.analyzeTimeframe(candles);
-    return indicators;
-  }
-
-  // Temporary test endpoint - remove after verification
-  @Get('test-claude')
-  async testClaude() {
-    const candles = await this.binanceService.getCandles('BTC', '4h', 100);
-    const currentPrice = await this.binanceService.getCurrentPrice('BTC');
-    const indicators = this.indicatorsService.analyzeTimeframe(candles);
-
-    const marketData: MarketData = {
-      coin: 'BTC',
-      timeframe: '4h',
-      currentPrice,
-      indicators,
-      candles,
-    };
-
-    const analysis = await this.claudeService.analyzeMarket(marketData);
-    return analysis;
   }
 }
 
@@ -69,28 +30,36 @@ class AppController {
     // For production, use Redis: cache-manager-redis-store
     CacheModule.register({
       isGlobal: true,
-      ttl: 300, // 5 minutes default TTL
+      ttl: 300_000, // 5 minutes default TTL (in ms for cache-manager v7)
       max: 500, // Max items in cache
     }),
 
     // Rate limiting: 100 requests per 60 seconds per IP
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 60 seconds
-        limit: 100, // 100 requests
-      },
-    ]),
+    // Disabled in test environment to avoid intermittent failures
+    ThrottlerModule.forRoot(
+      process.env.NODE_ENV === 'test'
+        ? [{ ttl: 60000, limit: 10000 }] // Very high limit for tests
+        : [{ ttl: 60000, limit: 100 }],
+    ),
 
     // ServicesModule re-exports all feature modules
     ServicesModule,
     PrismaModule,
   ],
-  controllers: [AppController, HealthController],
+  controllers: [AppController, HealthController, AuthController],
   providers: [
-    // Apply throttler globally
+    // Order matters: throttle first, so a brute-force attempt against the key
+    // is rate-limited before it is ever compared.
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    // Global, not per-controller. A guard applied only to new routes leaves
+    // every legacy /analysis-coordinator route open, which is the same hole
+    // with extra steps. Opt OUT with @Public(), never opt in.
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
     },
   ],
 })

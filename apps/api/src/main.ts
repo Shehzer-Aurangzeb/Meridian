@@ -1,39 +1,34 @@
 import * as dotenv from 'dotenv';
 
-// Load environment variables based on NODE_ENV
 const env = process.env.NODE_ENV ?? 'local';
 dotenv.config({ path: `.env.${env}` });
 
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { PerformanceInterceptor } from './common/interceptors/performance.interceptor';
+import { configureApp, docsEnabled } from './configure-app';
 
+/**
+ * Local / container entry point: a normal long-running HTTP server.
+ *
+ * The AWS entry point is `lambda.ts`. Both share `configureApp` so the two
+ * cannot drift; the only difference is that this one listens on a port.
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const docs = docsEnabled(env);
 
-  // Enable global validation
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  // Enable performance monitoring
-  app.useGlobalInterceptors(new PerformanceInterceptor());
-
-  // Enable CORS for frontend communication
-  app.enableCors({
-    origin: 'http://localhost:3000',
-    credentials: true,
-  });
+  configureApp(app, { docs });
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
+
   console.log(`🚀 Meridian API running on http://localhost:${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
+  console.log(
+    docs
+      ? `📚 Swagger docs: http://localhost:${port}/docs`
+      : '📚 Swagger docs: disabled (set ENABLE_DOCS=true to mount)',
+  );
 }
 
 bootstrap();

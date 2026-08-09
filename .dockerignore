@@ -1,0 +1,17 @@
+# Secrets must never enter the build context at all. The runtime stage does
+# not copy them today, but a build ARG, a debug `--target builder`, or one
+# careless COPY would ship them — and they persist in intermediate layers and
+# the local build cache regardless.
+**/.env
+**/.env.*
+!**/.env.example
+
+**/node_modules
+**/dist
+**/.next
+**/cdk.out
+**/coverage
+**/logs
+apps/web
+docs
+.git

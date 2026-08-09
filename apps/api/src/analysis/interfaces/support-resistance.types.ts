@@ -39,29 +39,19 @@ export interface ClusteredLevel {
 }
 
 /**
- * Fibonacci retracement levels
+ * A single Fibonacci level, playbook-style.
+ *
+ * The playbook is QUARTER-based — 0 / 0.25 / 0.5 / 0.75 / 1.0 (p51) — not the
+ * classic 0.236 / 0.382 / 0.618 ratios. It also assigns support vs resistance
+ * by position in the range, not by where price happens to be now:
+ * "0 and 0.25 and 0.5: BLUE (support zones) · 0.75 and 1.0: RED (resistance)".
+ * That makes the marks a fixed function of the swing, which is what keeps them
+ * stable as price moves.
  */
-export interface FibonacciLevels {
-  level_0: number;     // 0% (swing low)
-  level_236: number;   // 23.6%
-  level_382: number;   // 38.2%
-  level_500: number;   // 50%
-  level_618: number;   // 61.8% (golden ratio)
-  level_786: number;   // 78.6%
-  level_100: number;   // 100% (swing high)
-  direction: 'up' | 'down'; // Direction of the swing
-}
-
-/**
- * Complete S/R analysis result
- */
-export interface SupportResistanceAnalysis {
-  levels: SupportResistanceLevel[];
-  nearestSupport: SupportResistanceLevel | null;
-  nearestResistance: SupportResistanceLevel | null;
-  fibonacci: FibonacciLevels | null;
-  currentPrice: number;
-  analyzedAt: Date;
+export interface FibLevel {
+  ratio: number; // 0 | 0.25 | 0.5 | 0.75 | 1
+  price: number;
+  type: 'support' | 'resistance';
 }
 
 /**
@@ -90,3 +80,32 @@ export const SR_DEFAULTS = {
     VERY_STRONG: 5,
   },
 } as const;
+
+/**
+ * A price mark from any source, ready to be tested for confluence.
+ * `source` is what gets shown to the user, so it must name its origin.
+ */
+export interface MarkedLevel {
+  price: number;
+  type: 'support' | 'resistance';
+  source: string; // '0.5 Fib (12h)', '4h swing x3'
+  touchCount?: number;
+}
+
+/**
+ * A band where several INDEPENDENT marks agree.
+ *
+ * The playbook's definition: levels within ~0.5% of each other, and its
+ * worked example (p53) spans 0.524%. Confluence is the whole point — a lone
+ * level is not a zone, which is why `sources` carries every contributor.
+ */
+export interface ConfluenceZone {
+  low: number;
+  high: number;
+  center: number;
+  type: 'support' | 'resistance';
+  sources: string[];
+  spanPercent: number;
+  /** Signed: negative = zone is below spot. */
+  distancePercent: number;
+}

@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BinanceService } from '../../market-data/market-data.service';
-import { Candle, TimeInterval } from '../../common/types/candle.types';
+import { Candle } from '../../common/types/candle.types';
 import { Timeframe, TIMEFRAMES, CANDLE_LIMITS } from '../../common/constants/timeframes';
 import {
   SupportResistanceLevel,
   SRSwingPoint,
   ClusteredLevel,
-  FibonacciLevels,
-  SupportResistanceAnalysis,
+  FibLevel,
+  MarkedLevel,
+  ConfluenceZone,
   SRDetectionOptions,
   SR_DEFAULTS,
 } from '../interfaces/support-resistance.types';
@@ -16,32 +16,27 @@ import {
 export class SupportResistanceService {
   private readonly logger = new Logger(SupportResistanceService.name);
 
-  constructor(private readonly binanceService: BinanceService) {}
-
   /**
-   * Main method to find all support and resistance levels
+   * The pure half of `findLevels`: swing detection → clustering → touch
+   * filtering → strength. No I/O.
+   *
+   * Exists so callers that already hold a candle window (the coordinator's
+   * shared `IndicatorContext`) can get levels without a second fetch. This
+   * is the ONLY level engine — the price-anchored grid it replaced snapped
+   * swings onto a lattice derived from current price, so a 0.07% move could
+   * relabel a level from "support, 4 touches" to "resistance, 1 test".
    */
-  async findLevels(
-    symbol: string,
+  levelsFromCandles(
+    candles: Candle[],
     timeframe: Timeframe = TIMEFRAMES.DAILY,
     currentPrice: number,
     options: SRDetectionOptions = {},
-  ): Promise<SupportResistanceLevel[]> {
+  ): SupportResistanceLevel[] {
     const {
       clusterThreshold = SR_DEFAULTS.CLUSTER_THRESHOLD,
       minTouches = SR_DEFAULTS.MIN_TOUCHES,
       maxLevels = SR_DEFAULTS.MAX_LEVELS,
-      lookbackCandles = SR_DEFAULTS.LOOKBACK_CANDLES,
     } = options;
-
-    this.logger.log(`Finding S/R levels for ${symbol} on ${timeframe}`);
-
-    // 1. Fetch sufficient candles
-    const candles = await this.binanceService.getCandles(
-      symbol,
-      timeframe as TimeInterval,
-      lookbackCandles,
-    );
 
     if (candles.length < 20) {
       this.logger.warn(`Insufficient candles for S/R analysis: ${candles.length}`);
@@ -259,6 +254,13 @@ export class SupportResistanceService {
   /**
    * Check if a level held (didn't get broken through)
    */
+  // ponytail: scans from the FIRST touch, so on a 250-candle window almost
+  // every level reads `held: false` — price nearly always violates by >0.5%
+  // somewhere between two touches. Measured on BTC 1d: 10 of 10 levels false.
+  // The −0.5 penalty in `calculateLevelStrength` therefore applies uniformly
+  // and does not change ORDERING, only the absolute number, so it is not
+  // urgent. Fix when "invalidated" is defined for the zone state machine:
+  // "held" should almost certainly mean "held since the MOST RECENT touch".
   private checkIfLevelHeld(cluster: ClusteredLevel, candles: Candle[]): boolean {
     const levelPrice = cluster.price;
     const tolerance = levelPrice * 0.005; // 0.5% tolerance
@@ -318,210 +320,125 @@ export class SupportResistanceService {
   }
 
   /**
-   * Find the nearest significant level to current price
+   * Playbook Fibonacci (p51, "STEP 1: Fibonacci Level Marking").
+   *
+   * Quarter-based: 0 / 0.25 / 0.5 / 0.75 / 1.0. NOT the classic
+   * 0.236 / 0.382 / 0.618 — this trader marks quarters, and the worked
+   * example (low 25,000 / high 40,000 -> 28,750 / 32,500 / 36,250) only
+   * reproduces on quarters.
+   *
+   * Types come from position in the range, per the playbook's colour code,
+   * so the marks do not move when spot does.
    */
-  async findNearestLevel(
-    symbol: string,
-    currentPrice: number,
-    timeframe: Timeframe = TIMEFRAMES.DAILY,
-    maxDistancePercent: number = 5,
-  ): Promise<SupportResistanceLevel | null> {
-    const levels = await this.findLevels(symbol, timeframe, currentPrice);
+  fibLevels(swingLow: number, swingHigh: number): FibLevel[] {
+    const range = swingHigh - swingLow;
+    if (!(range > 0)) return [];
 
-    // Filter to levels within max distance
-    const nearby = levels.filter((l) => l.distancePercent <= maxDistancePercent);
-
-    if (nearby.length === 0) return null;
-
-    // Return strongest level (highest strength score)
-    return nearby.sort((a, b) => b.strength - a.strength)[0];
+    return [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
+      ratio,
+      price: swingLow + range * ratio,
+      type: ratio <= 0.5 ? ('support' as const) : ('resistance' as const),
+    }));
   }
 
   /**
-   * Find nearest support level below current price
+   * The swing high / low that anchor the Fibonacci range.
+   *
+   * "Swing High: Highest point in recent range · Swing Low: Lowest point"
+   * (p51). Uses detected swings rather than raw min/max so a single wick
+   * cannot define the range.
    */
-  async findNearestSupport(
-    symbol: string,
-    currentPrice: number,
-    timeframe: Timeframe = TIMEFRAMES.DAILY,
-  ): Promise<SupportResistanceLevel | null> {
-    const levels = await this.findLevels(symbol, timeframe, currentPrice);
-
-    // Filter to support levels below current price
-    const supports = levels.filter(
-      (l) => l.type === 'support' && l.price < currentPrice,
-    );
-
-    if (supports.length === 0) return null;
-
-    // Return closest (by distance)
-    return supports.sort((a, b) => a.distancePercent - b.distancePercent)[0];
-  }
-
-  /**
-   * Find nearest resistance level above current price
-   */
-  async findNearestResistance(
-    symbol: string,
-    currentPrice: number,
-    timeframe: Timeframe = TIMEFRAMES.DAILY,
-  ): Promise<SupportResistanceLevel | null> {
-    const levels = await this.findLevels(symbol, timeframe, currentPrice);
-
-    // Filter to resistance levels above current price
-    const resistances = levels.filter(
-      (l) => l.type === 'resistance' && l.price > currentPrice,
-    );
-
-    if (resistances.length === 0) return null;
-
-    // Return closest (by distance)
-    return resistances.sort((a, b) => a.distancePercent - b.distancePercent)[0];
-  }
-
-  /**
-   * Get complete S/R analysis including Fibonacci levels
-   */
-  async getFullAnalysis(
-    symbol: string,
-    currentPrice: number,
-    timeframe: Timeframe = TIMEFRAMES.DAILY,
-  ): Promise<SupportResistanceAnalysis> {
-    const levels = await this.findLevels(symbol, timeframe, currentPrice);
-
-    // Find nearest support and resistance
-    const nearestSupport = levels.find(
-      (l) => l.type === 'support' && l.price < currentPrice,
-    ) || null;
-    const nearestResistance = levels.find(
-      (l) => l.type === 'resistance' && l.price > currentPrice,
-    ) || null;
-
-    // Calculate Fibonacci if we have both support and resistance
-    let fibonacci: FibonacciLevels | null = null;
-    if (nearestSupport && nearestResistance) {
-      fibonacci = this.calculateFibonacciLevels(
-        nearestSupport.price,
-        nearestResistance.price,
-        'up',
-      );
-    }
+  fibAnchors(candles: Candle[]): { low: number; high: number } | null {
+    const highs = this.findSwingHighs(candles);
+    const lows = this.findSwingLows(candles);
+    if (highs.length === 0 || lows.length === 0) return null;
 
     return {
-      levels,
-      nearestSupport,
-      nearestResistance,
-      fibonacci,
-      currentPrice,
-      analyzedAt: new Date(),
+      low: Math.min(...lows.map((p) => p.price)),
+      high: Math.max(...highs.map((p) => p.price)),
     };
   }
 
   /**
-   * Calculate Fibonacci retracement levels
+   * Group marks that agree into confluence zones.
+   *
+   * Same running-average grouping as `clusterLevels`, but over heterogeneous
+   * marks (Fib + S/R, any timeframe) rather than swing points of one type.
+   *
+   * A zone needs `minSources` INDEPENDENT contributors — that is what makes
+   * it confluence rather than one level with a wide band. Duplicate sources
+   * are collapsed, so the same level counted twice does not manufacture
+   * agreement.
+   *
+   * Callers therefore control what "independent" means through `source`.
+   * Encode the METHOD (and timeframe), not the touch count: two 1d
+   * resistance clusters sitting next to each other are one piece of
+   * evidence, whereas a resistance and a support at the same price are two
+   * — that is an S/R flip, and it is exactly what confluence should reward.
    */
-  calculateFibonacciLevels(
-    swingLow: number,
-    swingHigh: number,
-    direction: 'up' | 'down' = 'up',
-  ): FibonacciLevels {
-    const range = swingHigh - swingLow;
-
-    if (direction === 'up') {
-      // For uptrend, retracement levels go from high down
-      return {
-        level_0: swingLow,
-        level_236: swingLow + range * 0.236,
-        level_382: swingLow + range * 0.382,
-        level_500: swingLow + range * 0.5,
-        level_618: swingLow + range * 0.618,
-        level_786: swingLow + range * 0.786,
-        level_100: swingHigh,
-        direction,
-      };
-    } else {
-      // For downtrend, retracement levels go from low up
-      return {
-        level_0: swingHigh,
-        level_236: swingHigh - range * 0.236,
-        level_382: swingHigh - range * 0.382,
-        level_500: swingHigh - range * 0.5,
-        level_618: swingHigh - range * 0.618,
-        level_786: swingHigh - range * 0.786,
-        level_100: swingLow,
-        direction,
-      };
-    }
-  }
-
-  /**
-   * Analyze levels from pre-fetched candles (for use with multi-timeframe service)
-   */
-  analyzeCandlesForLevels(
-    candles: Candle[],
+  findConfluenceZones(
+    marks: MarkedLevel[],
     currentPrice: number,
-    timeframe: Timeframe,
-    options: SRDetectionOptions = {},
-  ): SupportResistanceLevel[] {
-    const {
-      clusterThreshold = SR_DEFAULTS.CLUSTER_THRESHOLD,
-      minTouches = SR_DEFAULTS.MIN_TOUCHES,
-      maxLevels = SR_DEFAULTS.MAX_LEVELS,
-    } = options;
+    thresholdPercent: number = SR_DEFAULTS.CLUSTER_THRESHOLD,
+    minSources: number = 2,
+    maxSpanPercent: number = SR_DEFAULTS.CLUSTER_THRESHOLD * 2,
+  ): ConfluenceZone[] {
+    if (marks.length === 0) return [];
 
-    if (candles.length < 20) {
-      return [];
+    const sorted = [...marks].sort((a, b) => a.price - b.price);
+    const groups: MarkedLevel[][] = [];
+    let current: MarkedLevel[] = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const avg = current.reduce((sum, m) => sum + m.price, 0) / current.length;
+      const apart = Math.abs((sorted[i].price - avg) / avg) * 100;
+
+      // Distance to the running mean alone is not enough: each mark can sit
+      // within threshold of a mean that keeps moving, so a chain drifts and
+      // the "zone" ends up far wider than the band. Cap the TOTAL span too.
+      // The playbook's own worked example spans 0.524% against a ~0.5%
+      // tolerance (p53), so the cap has to be looser than the pairwise
+      // threshold or it would reject the document's own zone.
+      const prices = current.map((m) => m.price);
+      const spanLow = Math.min(...prices, sorted[i].price);
+      const spanHigh = Math.max(...prices, sorted[i].price);
+      const span = ((spanHigh - spanLow) / ((spanHigh + spanLow) / 2)) * 100;
+
+      if (apart <= thresholdPercent && span <= maxSpanPercent) {
+        current.push(sorted[i]);
+      } else {
+        groups.push(current);
+        current = [sorted[i]];
+      }
     }
+    groups.push(current);
 
-    // Find swing highs and lows
-    const swingHighs = this.findSwingHighs(candles);
-    const swingLows = this.findSwingLows(candles);
+    return groups
+      .map((g) => {
+        const prices = g.map((m) => m.price);
+        const low = Math.min(...prices);
+        const high = Math.max(...prices);
+        const center = prices.reduce((a, b) => a + b, 0) / prices.length;
+        const sources = [...new Set(g.map((m) => m.source))];
 
-    // Cluster levels
-    const resistanceClusters = this.clusterLevels(swingHighs, clusterThreshold, 'resistance');
-    const supportClusters = this.clusterLevels(swingLows, clusterThreshold, 'support');
+        // Type is POSITIONAL, not historical. A zone below spot is where a
+        // long is placed and a zone above is where a short is; that is what
+        // the caller needs to build a plan. The historical evidence — a swing
+        // high sitting below price is a former resistance being retested as
+        // support — stays visible in `sources`, which is where it belongs.
+        const type = center < currentPrice ? ('support' as const) : ('resistance' as const);
 
-    // Convert to levels
-    const resistanceLevels = resistanceClusters
-      .filter((c) => c.count >= minTouches)
-      .map((c) => this.clusterToLevel(c, timeframe, currentPrice, candles));
-
-    const supportLevels = supportClusters
-      .filter((c) => c.count >= minTouches)
-      .map((c) => this.clusterToLevel(c, timeframe, currentPrice, candles));
-
-    // Combine and sort
-    return [...resistanceLevels, ...supportLevels]
-      .sort((a, b) => a.distancePercent - b.distancePercent)
-      .slice(0, maxLevels);
-  }
-
-  /**
-   * Find nearest level from pre-analyzed levels (for checklist integration)
-   */
-  findNearestFromLevels(
-    levels: SupportResistanceLevel[],
-    currentPrice: number,
-    tradeType: 'long' | 'short',
-    maxDistancePercent: number = 5,
-  ): SupportResistanceLevel | null {
-    const targetType = tradeType === 'long' ? 'support' : 'resistance';
-
-    // Filter by type and distance
-    const relevant = levels.filter(
-      (l) =>
-        l.type === targetType &&
-        l.distancePercent <= maxDistancePercent,
-    );
-
-    if (relevant.length === 0) return null;
-
-    // Return strongest nearby level
-    return relevant.sort((a, b) => {
-      // Prefer stronger levels
-      if (b.strength !== a.strength) return b.strength - a.strength;
-      // Then by proximity
-      return a.distancePercent - b.distancePercent;
-    })[0];
+        return {
+          low,
+          high,
+          center,
+          type,
+          sources,
+          spanPercent: center === 0 ? 0 : ((high - low) / center) * 100,
+          distancePercent: ((center - currentPrice) / currentPrice) * 100,
+        };
+      })
+      .filter((z) => z.sources.length >= minSources)
+      .sort((a, b) => Math.abs(a.distancePercent) - Math.abs(b.distancePercent));
   }
 }

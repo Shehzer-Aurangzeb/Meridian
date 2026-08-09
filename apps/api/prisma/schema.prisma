@@ -37,3 +37,30 @@ model TradeAnalysis {
   @@index([coin])
   @@index([createdAt])
 }
+
+model CoordinatorRun {
+  id              String   @id @default(cuid())
+  symbol          String
+  timeframe       String
+  regime          String
+  strategyRoute   String
+  checklistStatus String?
+  totalScore      Int?
+  shouldInvokeAI  Boolean
+  aiAction        String?
+  aiConfidence    Int?
+
+  coordinatorPayload Json
+  aiPayload          Json?
+
+  durationMs   Int
+  errorMessage String?
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  entryFilledAt DateTime?
+
+  @@index([symbol, createdAt])
+  @@index([strategyRoute, createdAt])
+  @@index([aiAction, createdAt])
+}

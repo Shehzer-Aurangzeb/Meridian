@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PositionSizingService } from './services/position-sizing.service';
 import { LeverageService } from './services/leverage.service';
@@ -12,6 +13,11 @@ import {
   GetLeverageConstraintsDto,
 } from './dto/leverage.dto';
 
+/**
+ * @deprecated Controller not consumed by frontend. Risk calculations are embedded in portfolio-scan.
+ * Retained for potential standalone risk calculator UI or API consumers.
+ */
+@ApiTags('risk-management')
 @Controller('analysis')
 export class RiskManagementController {
   constructor(
@@ -20,6 +26,7 @@ export class RiskManagementController {
   ) {}
 
   /**
+   * @deprecated Not consumed by frontend. Risk sizing is embedded in portfolio-scan.
    * Calculate Position Size
    * Based on Miraj's risk management rules:
    * - Risk Amount = accountBalance × (riskPercentage / 100)
@@ -28,6 +35,10 @@ export class RiskManagementController {
    */
   @Post('position-size')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Calculate position size. Risk sizing is embedded in portfolio-scan.',
+  })
   async calculatePositionSize(@Body() dto: CalculatePositionSizeDto) {
     try {
       const result = this.positionSizingService.calculatePositionSize({
@@ -53,12 +64,17 @@ export class RiskManagementController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. R:R is calculated in AI analysis output.
    * Calculate Risk/Reward Ratios
    * Returns R:R for each take profit level
    * Overall uses weighted average: 20% TP1, 30% TP2, 50% TP3
    */
   @Post('risk-reward')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Calculate risk/reward ratios. R:R is embedded in AI analysis.',
+  })
   async calculateRiskReward(@Body() dto: CalculateRiskRewardDto) {
     try {
       const result = this.positionSizingService.calculateRiskReward(
@@ -86,6 +102,7 @@ export class RiskManagementController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Portfolio allocation is a static strategy.
    * Get Portfolio Allocation
    * Based on Miraj's 60/20/20 rule:
    * - 60% Long-term (1x leverage, HTF trades)
@@ -94,6 +111,10 @@ export class RiskManagementController {
    */
   @Get('portfolio-allocation')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get portfolio allocation. Static 60/20/20 rule.',
+  })
   async getPortfolioAllocation(@Query() query: PortfolioAllocationQueryDto) {
     try {
       const result = this.positionSizingService.calculatePortfolioAllocation(
@@ -115,11 +136,16 @@ export class RiskManagementController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Leverage is embedded in AI recommendation.
    * Get Recommended Leverage for Timeframe
    * Returns min, max, and recommended leverage based on timeframe
    */
   @Get('leverage/:timeframe')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get recommended leverage. Embedded in AI recommendation.',
+  })
   async getRecommendedLeverage(@Param('timeframe') timeframe: string) {
     try {
       const result = this.positionSizingService.getRecommendedLeverage(timeframe);
@@ -142,16 +168,21 @@ export class RiskManagementController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Smart leverage is embedded in portfolio-scan.
    * Get Smart Leverage Recommendation
    * Considers timeframe, experience, confidence, volatility, and market conditions
    */
   @Post('leverage-recommendation')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Smart leverage recommendation. Embedded in portfolio-scan.',
+  })
   async recommendLeverage(@Body() dto: RecommendLeverageDto) {
     try {
       const result = this.leverageService.recommendLeverage({
         timeframe: dto.timeframe,
-        checklistScore: dto.checklistScore,
+        conditionsMet: dto.checklistScore ?? null,
         atr: dto.atr,
         currentPrice: dto.currentPrice,
         stopLossPercentage: dto.stopLossPercentage,
@@ -176,11 +207,16 @@ export class RiskManagementController {
   }
 
   /**
+   * @deprecated Not consumed by frontend. Constraints are internal to leverage service.
    * Get Leverage Constraints
    * Returns min/max leverage for experience level + timeframe
    */
   @Get('leverage-constraints')
   @SkipThrottle()
+  @ApiOperation({
+    deprecated: true,
+    summary: '[DEPRECATED] Get leverage constraints. Internal to leverage service.',
+  })
   async getLeverageConstraints(@Query() query: GetLeverageConstraintsDto) {
     try {
       const result = this.leverageService.getLeverageConstraints(

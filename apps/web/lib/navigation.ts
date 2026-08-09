@@ -4,6 +4,7 @@ import { HistoryIcon } from '@/assets/icons/history-icon';
 import { AlertIcon } from '@/assets/icons/alert-icon';
 import { StrategiesIcon } from '@/assets/icons/strategies-icon';
 import { ComponentType, SVGProps } from 'react';
+import { isRouteEnabled } from './feature-flags';
 
 /**
  * Navigation item type
@@ -24,9 +25,9 @@ export interface NavSection {
 }
 
 /**
- * Main navigation structure following the design system
+ * Full navigation structure (unfiltered)
  */
-export const NAVIGATION: NavSection[] = [
+const FULL_NAVIGATION: NavSection[] = [
   {
     label: 'Workspace',
     items: [
@@ -43,6 +44,24 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
 ];
+
+/**
+ * Get navigation filtered by feature flags
+ */
+export function getNavigation(): NavSection[] {
+  return FULL_NAVIGATION
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => isRouteEnabled(item.href)),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+/**
+ * Main navigation structure following the design system
+ * Filtered based on feature flags
+ */
+export const NAVIGATION: NavSection[] = getNavigation();
 
 /**
  * Flat list of all navigation items for quick access

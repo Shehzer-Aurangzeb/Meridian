@@ -1,74 +1,44 @@
 'use client';
 
-import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { ArrowRightIcon } from '@/assets/icons/arrow-right-icon';
 import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
+import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
 
-/**
- * Timeframe options
- */
-const TIMEFRAMES = ['1H', '4H', '1D', '1W'] as const;
-export type Timeframe = typeof TIMEFRAMES[number];
+// Re-export for backward compatibility
+export type { Timeframe } from '@/components/ui/timeframe-selector';
 
-/**
- * Segmented control for timeframe selection
- */
-function TimeframeSelector({
-  value,
-  onChange,
-}: {
-  value: Timeframe;
-  onChange: (tf: Timeframe) => void;
-}) {
-  return (
-    <div className="inline-flex border border-border-hover/18 dark:border-border-hover rounded-full p-[3px] bg-background gap-0">
-      {TIMEFRAMES.map((tf) => (
-        <button
-          key={tf}
-          type="button"
-          onClick={() => onChange(tf)}
-          className={cn(
-            'border-0 bg-transparent px-3.5 py-[7px]',
-            'font-mono text-xs cursor-pointer rounded-full',
-            'transition-all duration-[160ms] whitespace-nowrap',
-            value === tf
-              ? 'bg-primary text-primary-foreground'
-              : 'text-text-secondary hover:text-text-primary'
-          )}
-        >
-          {tf}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * AnalysisInput props
- */
 interface AnalysisInputProps {
-  onSubmit: (coin: string, timeframe: Timeframe) => void;
+  /** Current coin value (controlled) */
+  coin: string;
+  /** Current timeframe value (controlled) */
+  timeframe: Timeframe;
+  /** Called when coin input changes */
+  onCoinChange: (coin: string) => void;
+  /** Called when timeframe changes */
+  onTimeframeChange: (tf: Timeframe) => void;
+  /** Called when form is submitted */
+  onSubmit: () => void;
+  /** Loading state */
   isLoading?: boolean;
-  defaultCoin?: string;
 }
 
 /**
- * Analysis input form section
+ * Analysis input form - fully controlled component
  */
 export function AnalysisInput({
+  coin,
+  timeframe,
+  onCoinChange,
+  onTimeframeChange,
   onSubmit,
   isLoading = false,
-  defaultCoin = '',
 }: AnalysisInputProps) {
-  const [coin, setCoin] = useState(defaultCoin);
-  const [timeframe, setTimeframe] = useState<Timeframe>('1D');
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (coin.trim() && !isLoading) {
-      onSubmit(coin.toUpperCase(), timeframe);
+      onSubmit();
     }
   };
 
@@ -98,7 +68,7 @@ export function AnalysisInput({
               id="analysis-coin"
               type="text"
               value={coin}
-              onChange={(e) => setCoin(e.target.value)}
+              onChange={(e) => onCoinChange(e.target.value)}
               placeholder="BTC, ETH, SOL…"
               autoComplete="off"
               disabled={isLoading}
@@ -118,7 +88,11 @@ export function AnalysisInput({
             <label className="text-xs tracking-[0.16em] uppercase text-muted-2 font-medium">
               Timeframe
             </label>
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={onTimeframeChange}
+              disabled={isLoading}
+            />
           </div>
 
           {/* Submit button */}

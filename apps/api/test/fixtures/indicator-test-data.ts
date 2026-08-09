@@ -1,20 +1,3 @@
-/**
- * Indicator Test Data Fixtures
- *
- * This file contains real market data for testing indicator calculations.
- * The expected outputs have been verified against TradingView.
- *
- * HOW TO UPDATE THIS FILE:
- * 1. Go to TradingView, open BTC/USDT or ETH/USDT chart
- * 2. Set timeframe to Daily
- * 3. Copy 50-100 candles of OHLCV data
- * 4. Note down indicator values: RSI(14), BB(20,2), ATR(14)
- * 5. Update the candles and expectedOutputs below
- *
- * Last Updated: 2024-01-15
- * Data Source: Binance BTC/USDT Daily
- */
-
 import { Candle } from '../../src/common/types/candle.types';
 
 export interface TestDataFixture {

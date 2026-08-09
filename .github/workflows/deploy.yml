@@ -1,0 +1,90 @@
+name: CI / Deploy
+
+# Tests run on every push and pull request. Deploying happens only from main,
+# and only if the tests passed — that ordering is the entire point of the file.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A second push to main cancels an in-flight run rather than racing it into
+  # CloudFormation, which rejects concurrent updates to the same stack anyway.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Prisma's client is generated, not shipped — without this the
+      # typecheck fails on every `prisma.coordinatorRun` call.
+      - run: pnpm --filter api exec prisma generate
+
+      - run: pnpm --filter api exec tsc --noEmit
+      - run: pnpm --filter infra exec tsc --noEmit
+
+      # No database and no ANTHROPIC_API_KEY here on purpose: the suite must
+      # pass in a clean environment, which is what caught the boot-killing
+      # env check that only failed inside Lambda.
+      - run: pnpm --filter api exec jest
+        env:
+          MERIDIAN_API_KEY: ci-placeholder-key-not-a-real-secret
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    permissions:
+      # `id-token: write` lets this job request a signed OIDC token from
+      # GitHub, which AWS trades for temporary credentials. That is why there
+      # are no AWS access keys in this repository's secrets — nothing to leak,
+      # nothing to rotate, and the credentials expire when the job ends.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image is arm64 (Graviton) and GitHub's runners are x86, so the
+      # build needs emulation. Costs build time; buys ~20% cheaper runtime and
+      # a byte-identical artifact whether it is built here or on a laptop.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the image, pushes it to ECR, and updates CloudFormation — one
+      # command, because the image and the infrastructure are versioned
+      # together. `--require-approval never` is safe in CI only because a
+      # human reviewed the diff in the pull request.
+      - run: pnpm --filter infra exec cdk deploy --require-approval never -c region=eu-central-1

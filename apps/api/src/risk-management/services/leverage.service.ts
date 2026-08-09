@@ -44,7 +44,7 @@ export class LeverageService {
     baseLeverage = Math.min(baseLeverage, experienceCap);
     
     // 3. Adjust for checklist confidence
-    baseLeverage = this.adjustForConfidence(baseLeverage, input.checklistScore);
+    baseLeverage = this.adjustForConfidence(baseLeverage, input.conditionsMet);
     
     // 4. Adjust for volatility
     baseLeverage = this.adjustForVolatility(
@@ -123,27 +123,54 @@ export class LeverageService {
   }
   
   /**
-   * Get base leverage from timeframe
+   * Get base leverage from timeframe.
+   *
+   * Throws on an unrecognised timeframe. This previously fell back to `|| 5`,
+   * so an unknown timeframe silently received 5x leverage — a risk control
+   * granting leverage on input it does not understand.
+   *
+   * A "conservative" fallback of 1x would be no better: it is still a
+   * made-up number presented as an answer. If leverage cannot be determined
+   * the system must refuse to produce a plan, because a plausible number is
+   * exactly how this repo's earlier indicator bugs survived for months.
    */
   private getBaseLeverageFromTimeframe(timeframe: string): number {
-    return this.TIMEFRAME_BASE_LEVERAGE[timeframe] || 5;
+    const base = this.TIMEFRAME_BASE_LEVERAGE[timeframe];
+    if (base === undefined) {
+      throw new Error(
+        `Cannot determine leverage for unrecognised timeframe "${timeframe}". ` +
+          `Known timeframes: ${Object.keys(this.TIMEFRAME_BASE_LEVERAGE).join(', ')}`,
+      );
+    }
+    return base;
   }
   
   /**
-   * Adjust leverage based on checklist confidence score
-   * Low confidence (< 80) = reduce leverage
+   * Scale leverage by how much of the checklist is satisfied.
+   *
+   * Was keyed to the removed 0-100 score at >=80 / >=60 / below. Translated
+   * 1:1 onto conditions, since those boundaries were exactly 4-of-5 and
+   * 3-of-5: no aggregate score is reintroduced here.
+   *
+   * `null` means no checklist ran — the squeeze-breakout route has no
+   * conditions to count. It takes the same 20% reduction the previous
+   * `?? 60` default produced, so behaviour is unchanged; stated explicitly
+   * rather than arriving via a fallback on a missing value.
    */
   private adjustForConfidence(
     baseLeverage: number,
-    checklistScore: number,
+    conditionsMet: number | null,
   ): number {
-    if (checklistScore >= 80) {
-      return baseLeverage; // Strong setup, no reduction
-    } else if (checklistScore >= 60) {
-      return baseLeverage * 0.8; // Reduce by 20%
-    } else {
-      return baseLeverage * 0.5; // Reduce by 50% for weak setup
+    if (conditionsMet === null) {
+      return baseLeverage * 0.8; // no checklist (squeeze route)
     }
+    if (conditionsMet >= 4) {
+      return baseLeverage; // strong setup, no reduction
+    }
+    if (conditionsMet === 3) {
+      return baseLeverage * 0.8; // playbook minimum met, 20% reduction
+    }
+    return baseLeverage * 0.5; // below the playbook minimum
   }
   
   /**
@@ -277,10 +304,14 @@ export class LeverageService {
       adjustments.push(`Capped at ${experienceCap}x for ${input.experienceLevel} level`);
     }
     
-    // Confidence adjustment
-    if (input.checklistScore < 80) {
-      const reduction = input.checklistScore >= 60 ? '20%' : '50%';
-      adjustments.push(`Reduced ${reduction} due to checklist score ${input.checklistScore}/100`);
+    // Confidence adjustment — mirrors adjustForConfidence exactly
+    if (input.conditionsMet === null) {
+      adjustments.push('Reduced 20% — no checklist ran (squeeze route)');
+    } else if (input.conditionsMet < 4) {
+      const reduction = input.conditionsMet === 3 ? '20%' : '50%';
+      adjustments.push(
+        `Reduced ${reduction} — ${input.conditionsMet}/5 conditions met`,
+      );
     }
     
     // Volatility adjustment
