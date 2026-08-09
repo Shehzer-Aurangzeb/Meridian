@@ -8,8 +8,6 @@ import { SESSION_COOKIE } from '@/lib/session-cookie';
  * and CORS never comes up.
  */
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
-
 export { SESSION_COOKIE };
 
 export class ApiError extends Error {
@@ -21,6 +19,27 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * Where the API lives.
+ *
+ * The localhost default is for `pnpm dev` only. A deployed frontend that fell
+ * back to it reported "Backend unreachable", which reads as "the API is down"
+ * and sent a debugging session at AWS instead of at one missing variable.
+ * ApiError so `proxy` returns the message rather than swallowing it.
+ */
+function backendUrl(): string {
+  const url = process.env.BACKEND_URL;
+  if (url) return url;
+  if (process.env.NODE_ENV === 'production') {
+    throw new ApiError(
+      'BACKEND_URL is not set on this deployment. Set it in the hosting ' +
+        "provider's environment variables and redeploy.",
+      500,
+    );
+  }
+  return 'http://localhost:3001';
 }
 
 interface FetchOptions extends Omit<RequestInit, 'body'> {
@@ -46,7 +65,7 @@ export async function backendFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+  const response = await fetch(`${backendUrl()}${endpoint}`, {
     ...rest,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
