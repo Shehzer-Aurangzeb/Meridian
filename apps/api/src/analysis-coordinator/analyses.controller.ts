@@ -31,11 +31,8 @@ const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
  *   GET  /analyses              list saved analyses (newest first)
  *   GET  /analyses/:id          one analysis, with its freshness
  *
- * Distinct from the legacy `/analysis-coordinator` routes: those stream a
- * regime-leg-only result and predate the level map entirely.
- *
- * ponytail: no auth. Single-user personal tool behind a private URL. Add a
- * shared secret header before this is reachable from anywhere public.
+ * Every route here is protected by the global AuthGuard: a session token from
+ * the frontend, or the API key from the scheduler.
  */
 @ApiTags('analyses')
 @Controller('analyses')

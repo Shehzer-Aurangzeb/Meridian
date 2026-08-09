@@ -1,10 +1,13 @@
 'use client';
 
+/**
+ * @deprecated DEAD — every call 404s. Use `useAnalyses({ symbol })`.
+ * Delete with `use-history-page` when the history page is rewired.
+ */
+
 import { useQuery } from '@tanstack/react-query';
 import type { HistoryResponse, HistoryQueryOptions } from '@/types';
 import { queryKeys } from './query-keys';
-
-// ============ Fetch Helper ============
 
 async function fetchApi<T>(url: string): Promise<T> {
   const response = await fetch(url, {
@@ -31,12 +34,6 @@ function buildQueryString(options?: HistoryQueryOptions): string {
   return queryString ? `?${queryString}` : '';
 }
 
-// ============ Hooks ============
-
-/**
- * Hook for fetching analysis history for a specific coin
- * Used on: History page
- */
 export function useHistory(coin: string, options?: HistoryQueryOptions) {
   const queryString = buildQueryString(options);
   

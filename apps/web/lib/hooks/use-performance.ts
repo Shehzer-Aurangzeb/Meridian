@@ -1,10 +1,14 @@
 'use client';
 
+/**
+ * @deprecated DEAD — every call 404s, and there is deliberately no replacement:
+ * aggregate performance belongs to the measurement harness, not the app.
+ * Per-plan outcomes come from `useAnalysis(id).outcomes`.
+ */
+
 import { useQuery } from '@tanstack/react-query';
 import type { PerformanceResponse, HistoryQueryOptions } from '@/types';
 import { queryKeys } from './query-keys';
-
-// ============ Fetch Helper ============
 
 async function fetchApi<T>(url: string): Promise<T> {
   const response = await fetch(url, {
@@ -31,13 +35,6 @@ function buildQueryString(options?: HistoryQueryOptions): string {
   return queryString ? `?${queryString}` : '';
 }
 
-// ============ Hooks ============
-
-/**
- * @deprecated Uses legacy TradeAnalysis backend. Migrate to coordinator-runs endpoint.
- * Hook for fetching global performance stats
- * Used on: Dashboard (stats strip)
- */
 export function usePerformance(options?: HistoryQueryOptions) {
   const queryString = buildQueryString(options);
   
@@ -47,11 +44,6 @@ export function usePerformance(options?: HistoryQueryOptions) {
   });
 }
 
-/**
- * @deprecated Uses legacy TradeAnalysis backend. Migrate to coordinator-runs endpoint.
- * Hook for fetching performance stats for a specific coin
- * Used on: Coin detail view
- */
 export function usePerformanceByCoin(coin: string, options?: HistoryQueryOptions) {
   const queryString = buildQueryString(options);
   
