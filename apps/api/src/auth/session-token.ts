@@ -103,14 +103,28 @@ export function verifySession(
   }
 }
 
-// Run directly to generate the env values:
-//   npx ts-node src/auth/session-token.ts 'my password'
+// Set or reset the password:
+//   pnpm --filter api set-password 'my password'
+//
+// There is nothing to "recover" — a scrypt hash is one-way, so a forgotten
+// password is replaced, never read back.
 if (require.main === module) {
   const password = process.argv[2];
   if (!password) {
-    console.error("usage: ts-node src/auth/session-token.ts '<password>'");
+    console.error("usage: pnpm --filter api set-password '<password>'");
     process.exit(1);
   }
+
   console.log(`MERIDIAN_PASSWORD_HASH="${hashPassword(password)}"`);
-  console.log(`MERIDIAN_TOKEN_SECRET="${randomBytes(32).toString('hex')}"`);
+  console.log();
+  // Printed separately, and only on request: this used to be emitted beside
+  // the hash every run, and pasting both while resetting a password signs
+  // every browser out — the two rotate for different reasons.
+  if (process.argv.includes('--new-secret')) {
+    console.log(`MERIDIAN_TOKEN_SECRET="${randomBytes(32).toString('hex')}"`);
+    console.log('# Replacing this ends every existing session.');
+  } else {
+    console.log('# Keep your existing MERIDIAN_TOKEN_SECRET.');
+    console.log('# Pass --new-secret to rotate it too, which signs out every browser.');
+  }
 }
