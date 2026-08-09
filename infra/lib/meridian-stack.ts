@@ -2,6 +2,7 @@ import * as path from 'path';
 import { Duration, RemovalPolicy, Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as ecr_assets from 'aws-cdk-lib/aws-ecr-assets';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -63,7 +64,19 @@ export class MeridianStack extends Stack {
       // locally. See apps/api/Dockerfile.lambda.
       code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, '../..'), {
         file: 'apps/api/Dockerfile.lambda',
+        // Pinned, not inherited from whatever machine runs the build. An
+        // Apple Silicon laptop produces arm64 and a GitHub x86 runner
+        // produces amd64; whichever does not match the function's
+        // `architecture` below fails at INIT with Runtime.InvalidEntrypoint —
+        // 3ms, 11MB, no logs, because Node never starts. Pinning both sides
+        // makes the artifact identical wherever it is built.
+        platform: ecr_assets.Platform.LINUX_ARM64,
       }),
+
+      // Graviton: ~20% cheaper per ms than x86, and native on an Apple
+      // Silicon machine so local builds need no emulation. CI runners are
+      // x86, so the workflow sets up QEMU to cross-build.
+      architecture: lambda.Architecture.ARM_64,
 
       // Memory also buys CPU on Lambda — they scale together. 1024MB is the
       // usual sweet spot for a Nest cold start: less is slower to boot, more
