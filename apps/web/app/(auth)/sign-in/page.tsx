@@ -1,6 +1,9 @@
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { BrandPanel } from '@/components/features/auth/brand-panel';
 import { FormPanel } from '@/components/features/auth/form-panel';
+
+export const metadata: Metadata = { title: 'Sign in' };
 
 export default function SignInPage() {
   return (

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Antonio } from 'next/font/google';
 import { Providers } from '@/components/providers';
 import './globals.css';
@@ -16,8 +16,24 @@ const antonio = Antonio({
 });
 
 export const metadata: Metadata = {
-  title: 'Meridian',
-  description: 'AI-powered crypto trading analysis assistant',
+  title: { default: 'Meridian', template: '%s · Meridian' },
+  // Says what it does, not what it is built with. "AI-powered" was also
+  // wrong: every number is computed in TypeScript, and Claude only narrates.
+  description:
+    'Finds the price levels where several timeframes agree, reads whether the market is compressing, trending or ranging, and writes the trade plan that follows.',
+  applicationName: 'Meridian',
+  // One password, one user, no public content. Nothing here should ever be
+  // indexed, and the URL leaking is not the same as wanting visitors.
+  robots: { index: false, follow: false },
+};
+
+export const viewport: Viewport = {
+  // Matches --background in globals.css, so the browser chrome does not flash
+  // white above a dark page on mobile.
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F4EFE7' },
+    { media: '(prefers-color-scheme: dark)', color: '#0F1419' },
+  ],
 };
 
 export default function RootLayout({
