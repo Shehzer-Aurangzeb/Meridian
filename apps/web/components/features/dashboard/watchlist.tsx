@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Panel, PanelHead } from './panel';
 import { PlusIcon } from '@/assets/icons/plus-icon';
+import { NotWired } from '@/components/ui/not-wired';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 
 interface WatchItem {
   symbol: string;
@@ -81,6 +83,22 @@ const MOCK_WATCHLIST: WatchItem[] = [
 ];
 
 export function Watchlist() {
+  if (!isFeatureEnabled('WATCHLIST')) {
+    return (
+      <Panel>
+        <PanelHead title="Watchlist" />
+        <NotWired
+          title="Coming soon"
+          detail="Needs somewhere to persist a saved list."
+          className="border-0 rounded-none"
+        />
+      </Panel>
+    );
+  }
+  return <WatchlistData />;
+}
+
+function WatchlistData() {
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', {
     hour: '2-digit',

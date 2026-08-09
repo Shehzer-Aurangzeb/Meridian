@@ -14,13 +14,19 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
 }
 
 // Duplicated from lib/feature-flags — middleware runs on the Edge runtime.
+// Hiding a nav link is not gating: without these, the gated pages are still
+// reachable by typing the URL.
 const FEATURES = {
+  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, false),
+  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, false),
   ALERTS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ALERTS, false),
   STRATEGIES: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_STRATEGIES, false),
   SETTINGS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_SETTINGS, false),
 };
 
 const ROUTE_FEATURE_MAP: Record<string, keyof typeof FEATURES> = {
+  '/analysis': 'ANALYSIS',
+  '/history': 'HISTORY',
   '/alerts': 'ALERTS',
   '/strategies': 'STRATEGIES',
   '/settings': 'SETTINGS',

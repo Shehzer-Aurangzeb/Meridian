@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Panel, PanelHead } from './panel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePerformance } from '@/lib/hooks/use-performance';
+import { NotWired } from '@/components/ui/not-wired';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 import { formatCurrency } from '@/lib/format';
 import type { PerformanceAnalysis } from '@/types';
 
@@ -97,6 +99,22 @@ function formatAnalysis(analysis: PerformanceAnalysis) {
 }
 
 export function LatestAnalysis() {
+  if (!isFeatureEnabled('PERFORMANCE')) {
+    return (
+      <Panel>
+        <PanelHead title="Latest analysis" />
+        <NotWired
+          title="Not wired"
+          detail="Reads a deleted endpoint. Rewire to GET /api/analyses."
+          className="border-0 rounded-none"
+        />
+      </Panel>
+    );
+  }
+  return <LatestAnalysisData />;
+}
+
+function LatestAnalysisData() {
   const { data, isLoading, error } = usePerformance();
 
   if (isLoading) {

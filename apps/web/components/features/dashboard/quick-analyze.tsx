@@ -7,8 +7,25 @@ import { ArrowRightIcon } from '@/assets/icons/arrow-right-icon';
 import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
 import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
+import { NotWired } from '@/components/ui/not-wired';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 
 export function QuickAnalyze() {
+  if (!isFeatureEnabled('ANALYSIS')) {
+    return (
+      <section className="mt-10">
+        <SectionHead eyebrow="Quick analyze" title="Start a new analysis" />
+        <NotWired
+          title="Not wired"
+          detail="The analysis screen still calls a deleted route. Rewire it to POST /api/analyses."
+        />
+      </section>
+    );
+  }
+  return <QuickAnalyzeForm />;
+}
+
+function QuickAnalyzeForm() {
   const router = useRouter();
   const [coin, setCoin] = useState('');
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');

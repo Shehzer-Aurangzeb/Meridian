@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import { SectionHead } from '@/components/ui/section-head';
 import { usePerformance } from '@/lib/hooks/use-performance';
 import { Skeleton } from '@/components/ui/skeleton';
+import { NotWired } from '@/components/ui/not-wired';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 
 interface StatData {
   label: string;
@@ -65,6 +67,21 @@ function StatsSkeleton() {
 }
 
 export function StatsStrip() {
+  if (!isFeatureEnabled('PERFORMANCE')) {
+    return (
+      <section className="mt-14">
+        <SectionHead eyebrow="Performance" title="All time stats" />
+        <NotWired
+          title="Not wired"
+          detail="Aggregate performance lives in the measurement harness, not the app. Per-analysis outcomes appear on each analysis."
+        />
+      </section>
+    );
+  }
+  return <StatsStripData />;
+}
+
+function StatsStripData() {
   const { data, isLoading, error } = usePerformance();
 
   // Build stats from API response
