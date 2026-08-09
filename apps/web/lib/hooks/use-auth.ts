@@ -16,7 +16,8 @@ export function useSession() {
   });
 }
 
-export function useLogin() {
+/** `next` must already be validated as a same-origin path by the caller. */
+export function useLogin(next = '/dashboard') {
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -28,8 +29,11 @@ export function useLogin() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.auth.session });
-      // Middleware gates on the cookie the server just set, so this refresh is
-      // what gets past the sign-in redirect.
+      // replace, not push: going Back to the sign-in form after signing in
+      // would only bounce off middleware.
+      router.replace(next);
+      // Middleware gates on the cookie the server just set, and the cached
+      // router tree predates it.
       router.refresh();
     },
   });

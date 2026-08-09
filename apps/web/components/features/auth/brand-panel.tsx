@@ -1,5 +1,21 @@
 import Link from 'next/link';
 
+/** Claims here must stay true — every one is checkable against the backend. */
+const FACTS = [
+  {
+    label: 'Deterministic',
+    text: 'TypeScript computes every level, stop and target. The model only explains them.',
+  },
+  {
+    label: 'Ten coins · every 8 hours',
+    text: 'Majors and large-cap alts, analysed on a schedule whether or not anyone is watching.',
+  },
+  {
+    label: 'Scored afterwards',
+    text: 'Each plan is replayed against what price actually did — filled, stopped, or missed.',
+  },
+];
+
 export function BrandPanel() {
   return (
     <aside className="hidden lg:flex bg-deep-green text-sidebar-text p-10 md:p-14 flex-col justify-between relative overflow-hidden">
@@ -23,20 +39,23 @@ export function BrandPanel() {
           <span className="text-gold italic font-normal normal-case tracking-normal">Careful</span> reasoning.
         </h2>
         <p className="text-white/70 text-base leading-relaxed max-w-[420px]">
-          AI-powered crypto analysis distilled from professional strategies — refreshed every market open, never in a hurry.
+          Meridian finds the price levels where four timeframes agree, reads
+          whether the market is compressing, trending or ranging, and writes the
+          trade plan that follows — entries, stop, targets, and what would prove
+          it wrong.
         </p>
       </div>
 
-      {/* Quote */}
-      <div className="relative z-10 pt-7 border-t border-gold/[0.14] max-w-[460px] mt-8 lg:mt-0">
-        <blockquote className="font-display text-xl lg:text-[22px] font-medium leading-[1.25] tracking-[0.02em] text-sidebar-text mb-4">
-          <span className="text-gold">&ldquo;</span>
-          Meridian replaced four newsletters and an indicator I never really understood. I check it once a morning.
-          <span className="text-gold">&rdquo;</span>
-        </blockquote>
-        <div className="font-mono text-xs text-gold/70 tracking-[0.08em] uppercase">
-          — J. Lin · Portfolio manager · Member since 2025
-        </div>
+      {/* What it does */}
+      <div className="relative z-10 pt-7 border-t border-gold/[0.14] max-w-[460px] mt-8 lg:mt-0 flex flex-col gap-5">
+        {FACTS.map((fact) => (
+          <div key={fact.label}>
+            <div className="font-mono text-[11px] text-gold tracking-[0.12em] uppercase mb-1.5">
+              {fact.label}
+            </div>
+            <p className="text-white/60 text-[13px] leading-relaxed">{fact.text}</p>
+          </div>
+        ))}
       </div>
     </aside>
   );
