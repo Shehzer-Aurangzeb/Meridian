@@ -1,40 +1,11 @@
-import { NextResponse } from 'next/server';
-import { backendFetch, ApiError } from '@/lib/api/server';
+import { backendFetch, proxy } from '@/lib/api/server';
+import type { HealthResponse } from '@/types/analyses';
 
-/**
- * GET /api/health
- * 
- * BFF route for health check - also validates backend connectivity
- */
+// Reads no cookie, so Next would otherwise try to prerender this at build
+// time against a backend that is not running.
+export const dynamic = 'force-dynamic';
+
+/** GET /api/health — public on the backend, so this works signed out. */
 export async function GET() {
-  try {
-    const result = await backendFetch('/health', {
-      method: 'GET',
-    });
-
-    return NextResponse.json({
-      bff: 'healthy',
-      backend: result,
-    });
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return NextResponse.json(
-        { 
-          bff: 'healthy',
-          backend: 'unhealthy',
-          error: error.message 
-        },
-        { status: 200 } // BFF is healthy, just backend is down
-      );
-    }
-    
-    return NextResponse.json(
-      { 
-        bff: 'healthy',
-        backend: 'unreachable',
-        error: 'Could not connect to backend'
-      },
-      { status: 200 }
-    );
-  }
+  return proxy(() => backendFetch<HealthResponse>('/health', { auth: false }));
 }

@@ -1,34 +1,15 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { BffHealthResponse } from '@/types';
+import { fetchApi } from '@/lib/api/client';
+import type { HealthResponse } from '@/types/analyses';
 import { queryKeys } from './query-keys';
 
-// ============ Fetch Helper ============
-
-async function fetchApi<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Request failed: ${response.status}`);
-  }
-  
-  return response.json();
-}
-
-// ============ Hooks ============
-
-/**
- * Hook for health check
- * Checks both BFF and backend health
- */
+/** Works signed out, which tells "API is down" from "session expired". */
 export function useHealth() {
   return useQuery({
     queryKey: queryKeys.health,
-    queryFn: () => fetchApi<BffHealthResponse>('/api/health'),
-    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    queryFn: () => fetchApi<HealthResponse>('/api/health'),
+    refetchInterval: 30_000,
   });
 }
