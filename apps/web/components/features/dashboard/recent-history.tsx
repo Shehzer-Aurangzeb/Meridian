@@ -6,6 +6,8 @@ import { Panel, PanelHead } from './panel';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePerformance } from '@/lib/hooks/use-performance';
+import { NotWired } from '@/components/ui/not-wired';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 import type { PerformanceAnalysis, AnalysisStatus } from '@/types';
 
 interface HistoryItem {
@@ -122,6 +124,22 @@ function mapToHistoryItem(analysis: PerformanceAnalysis): HistoryItem {
 }
 
 export function RecentHistory() {
+  if (!isFeatureEnabled('PERFORMANCE')) {
+    return (
+      <Panel>
+        <PanelHead title="Recent history" />
+        <NotWired
+          title="Not wired"
+          detail="Reads a deleted endpoint. Rewire to GET /api/analyses."
+          className="border-0 rounded-none"
+        />
+      </Panel>
+    );
+  }
+  return <RecentHistoryData />;
+}
+
+function RecentHistoryData() {
   const { data, isLoading, error } = usePerformance({ limit: 5 });
 
   if (isLoading) {

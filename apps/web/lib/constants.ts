@@ -1,11 +1,3 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
-export const NAV_ITEMS = [
-  { href: '/analysis', label: 'Analysis' },
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/history', label: 'History' },
-] as const;
-
 export const SUGGESTION_STYLES = {
   LONG: 'bg-sage text-deep-green',
   SHORT: 'bg-primary text-primary-foreground',
@@ -25,11 +17,3 @@ export const STATUS_LABELS = {
   pending: '◔ PENDING',
   neutral: '○ NEUTRAL',
 } as const;
-
-export const ANIMATION = {
-  fast: 150,
-  normal: 200,
-  slow: 300,
-} as const;
-
-export const TOAST_DURATION = 4000;
