@@ -2,9 +2,20 @@ name: CI / Deploy
 
 # Tests run on every push and pull request. Deploying happens only from main,
 # and only if the tests passed — that ordering is the entire point of the file.
+#
+# A push touching ONLY apps/web skips this workflow entirely. Vercel owns the
+# frontend, and a CSS change was rebuilding the arm64 Lambda image under QEMU
+# and shipping a new function version — minutes of emulation and a fresh cold
+# start for code that cannot affect the API. The pull_request trigger has no
+# such filter, so every change is still fully tested before it reaches main.
+#
+# Deliberately conservative: pnpm-lock.yaml sits at the root, so adding a web
+# dependency still deploys. Wasting a deploy is cheap; missing one is not.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'apps/web/**'
   pull_request:
 
 concurrency:
