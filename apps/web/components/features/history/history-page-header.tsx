@@ -3,10 +3,6 @@
 import Link from 'next/link';
 import { PlusIcon } from '@/assets/icons/plus-icon';
 
-/**
- * Header section for the History page
- * Includes eyebrow, title, description, and "New analysis" action button
- */
 export function HistoryPageHeader() {
   return (
     <header className="mb-8 flex flex-col md:flex-row md:items-start md:justify-between gap-6">

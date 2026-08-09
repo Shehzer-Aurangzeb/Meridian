@@ -1,8 +1,5 @@
 import { cn } from '@/lib/utils';
 
-/**
- * Eyebrow text with decorative rule
- */
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
     <div className="inline-flex items-center gap-2.5 whitespace-nowrap mb-4">
@@ -14,18 +11,12 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * AnalysisPageHeader props
- */
 interface AnalysisPageHeaderProps {
   issueNumber?: number;
   coin?: string;
   className?: string;
 }
 
-/**
- * Analysis page header with issue number and title
- */
 export function AnalysisPageHeader({
   issueNumber = 247,
   coin,

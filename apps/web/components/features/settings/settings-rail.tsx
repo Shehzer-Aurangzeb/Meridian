@@ -2,27 +2,18 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Settings navigation item
- */
 export interface SettingsNavItem {
   id: string;
   label: string;
   isDanger?: boolean;
 }
 
-/**
- * Settings navigation items
- */
 export const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'profile', label: 'Profile' },
   { id: 'account', label: 'Account' },
   { id: 'danger', label: 'Danger zone', isDanger: true },
 ];
 
-/**
- * Settings rail navigation
- */
 interface SettingsRailProps {
   activeSection: string;
   onNavigate: (sectionId: string) => void;

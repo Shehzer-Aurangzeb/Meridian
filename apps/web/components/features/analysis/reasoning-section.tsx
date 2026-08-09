@@ -1,27 +1,18 @@
 import { cn } from '@/lib/utils';
 import { SectionHead } from '@/components/ui/section-head';
 
-/**
- * Condition item type
- */
 export interface ConditionItem {
   label: string;
   met: boolean;
   weight: number;
 }
 
-/**
- * Reasoning data type
- */
 export interface ReasoningData {
   paragraphs: string[];
   conditions: ConditionItem[];
   strategiesCount: number;
 }
 
-/**
- * Prose section component
- */
 function ProseSection({ paragraphs }: { paragraphs: string[] }) {
   return (
     <article className="bg-surface border border-border/10 dark:border-border rounded-xl p-7 md:p-9">
@@ -41,9 +32,6 @@ function ProseSection({ paragraphs }: { paragraphs: string[] }) {
   );
 }
 
-/**
- * Conditions checklist component
- */
 function ConditionsChecklist({ conditions }: { conditions: ConditionItem[] }) {
   return (
     <aside className="bg-surface border border-border/10 dark:border-border rounded-xl p-7">
@@ -83,17 +71,11 @@ function ConditionsChecklist({ conditions }: { conditions: ConditionItem[] }) {
   );
 }
 
-/**
- * Reasoning section props
- */
 interface ReasoningSectionProps {
   reasoning: ReasoningData;
   className?: string;
 }
 
-/**
- * Reasoning section with prose and conditions checklist
- */
 export function ReasoningSection({
   reasoning,
   className,

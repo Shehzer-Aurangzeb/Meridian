@@ -15,8 +15,6 @@ import type { SignalData } from '@/components/features/analysis/signal-card';
 import type { IndicatorData } from '@/components/features/analysis/indicators-section';
 import type { ReasoningData } from '@/components/features/analysis/reasoning-section';
 
-// ============ Types ============
-
 interface AnalysisState {
   coin: string;
   timeframe: UITimeframe;
@@ -30,8 +28,6 @@ type AnalysisAction =
   | { type: 'SET_TIMEFRAME'; timeframe: UITimeframe }
   | { type: 'START_ANALYSIS' }
   | { type: 'SET_RESULTS'; signal: SignalData | null; indicators: IndicatorData[]; reasoning: ReasoningData | null };
-
-// ============ Reducer ============
 
 const initialState: AnalysisState = {
   coin: '',
@@ -61,8 +57,6 @@ function analysisReducer(state: AnalysisState, action: AnalysisAction): Analysis
   }
 }
 
-// ============ Hook ============
-
 export function useAnalysisPage() {
   const searchParams = useSearchParams();
   const { addToast } = useToast();
@@ -70,7 +64,6 @@ export function useAnalysisPage() {
 
   const [state, dispatch] = useReducer(analysisReducer, initialState);
 
-  // Sync URL params on mount only
   useEffect(() => {
     const coinParam = searchParams.get('coin');
     const tfParam = searchParams.get('tf') as UITimeframe | null;
@@ -83,7 +76,6 @@ export function useAnalysisPage() {
     }
   }, [searchParams]);
 
-  // Stable handlers
   const setCoin = useCallback((coin: string) => {
     dispatch({ type: 'SET_COIN', coin });
   }, []);
@@ -132,29 +124,24 @@ export function useAnalysisPage() {
     }
   }, [state.coin, state.timeframe, mutation, addToast]);
 
-  // Derived state
   const hasResults = useMemo(
     () => Boolean(state.signal && state.reasoning),
     [state.signal, state.reasoning]
   );
 
   return {
-    // Controlled form state
     coin: state.coin,
     timeframe: state.timeframe,
     setCoin,
     setTimeframe,
 
-    // Results
     signal: state.signal,
     indicators: state.indicators,
     reasoning: state.reasoning,
 
-    // Derived
     isLoading: mutation.isPending,
     hasResults,
 
-    // Actions
     handleAnalyze,
   };
 }

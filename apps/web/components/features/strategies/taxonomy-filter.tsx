@@ -2,18 +2,12 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Taxonomy filter option
- */
 export interface TaxonomyOption {
   id: string;
   label: string;
   count: number;
 }
 
-/**
- * Taxonomy filter chips for filtering strategies
- */
 interface TaxonomyFilterProps {
   options: TaxonomyOption[];
   activeFilter: string;
@@ -43,9 +37,6 @@ export function TaxonomyFilter({ options, activeFilter, onFilterChange }: Taxono
   );
 }
 
-/**
- * Default taxonomy options
- */
 export const TAXONOMY_OPTIONS: TaxonomyOption[] = [
   { id: 'all', label: 'All', count: 6 },
   { id: 'contrarian', label: 'Contrarian', count: 2 },

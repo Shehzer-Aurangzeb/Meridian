@@ -1,10 +1,3 @@
-/**
- * History Page Mappers
- *
- * Maps API responses to UI component data shapes.
- * Keeps transformation logic isolated from components.
- */
-
 import type {
   PerformanceData,
   PerformanceAnalysis,
@@ -14,11 +7,6 @@ import type { SummaryStatsData } from '@/components/features/history/summary-sta
 import type { HistoryEntry } from '@/components/features/history/history-table';
 import type { Action } from '@/types/analysis';
 
-// ============ Type Mappings ============
-
-/**
- * Maps API Action to UI signal type
- */
 function mapActionToSignal(action: Action | null): HistoryEntry['signal'] {
   if (!action) return 'skip';
 
@@ -33,9 +21,6 @@ function mapActionToSignal(action: Action | null): HistoryEntry['signal'] {
   }
 }
 
-/**
- * Maps API AnalysisStatus to UI outcome type
- */
 function mapStatusToOutcome(status: AnalysisStatus): HistoryEntry['outcome'] {
   switch (status) {
     case 'correct':
@@ -50,9 +35,6 @@ function mapStatusToOutcome(status: AnalysisStatus): HistoryEntry['outcome'] {
   }
 }
 
-/**
- * Formats date for display
- */
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
   return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
@@ -81,16 +63,10 @@ function calculateRValue(
   return -Math.round(rValue * 10) / 10; // Negative R for losses (capped at -1R typically)
 }
 
-// ============ Main Mappers ============
-
-/**
- * Maps PerformanceData to SummaryStatsData
- */
 export function mapToSummaryStats(data: PerformanceData): SummaryStatsData {
   const totalClosed = data.correct + data.failed;
   const hitRate = totalClosed > 0 ? Math.round((data.correct / totalClosed) * 100) : 0;
 
-  // Calculate average R from recent analyses
   const closedAnalyses = data.recentAnalyses.filter(
     (a) => a.status === 'correct' || a.status === 'failed'
   );
@@ -104,12 +80,10 @@ export function mapToSummaryStats(data: PerformanceData): SummaryStatsData {
     averageR = totalR / closedAnalyses.length;
   }
 
-  // Get open trades
   const openAnalyses = data.recentAnalyses.filter((a) => a.status === 'pending');
   const uniqueCoins = new Set(openAnalyses.map((a) => a.coin));
   const openCoins = Array.from(uniqueCoins).slice(0, 5);
 
-  // Find earliest analysis date
   const dates = data.recentAnalyses.map((a) => new Date(a.createdAt));
   const earliestDate = dates.length > 0 ? new Date(Math.min(...dates.map((d) => d.getTime()))) : new Date();
   const sinceDateLabel = `Since ${earliestDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -126,9 +100,6 @@ export function mapToSummaryStats(data: PerformanceData): SummaryStatsData {
   };
 }
 
-/**
- * Maps PerformanceAnalysis array to HistoryEntry array
- */
 export function mapToHistoryEntries(analyses: PerformanceAnalysis[]): HistoryEntry[] {
   return analyses.map((analysis) => ({
     id: analysis.id,
@@ -144,9 +115,6 @@ export function mapToHistoryEntries(analyses: PerformanceAnalysis[]): HistoryEnt
   }));
 }
 
-/**
- * Filters history entries based on filter criteria
- */
 export function filterHistoryEntries(
   entries: HistoryEntry[],
   filters: {
@@ -156,7 +124,6 @@ export function filterHistoryEntries(
   }
 ): HistoryEntry[] {
   return entries.filter((entry) => {
-    // Search filter
     if (filters.search) {
       const search = filters.search.toLowerCase();
       const matchesCoin = entry.coin.toLowerCase().includes(search);
@@ -164,14 +131,12 @@ export function filterHistoryEntries(
       if (!matchesCoin && !matchesStrategy) return false;
     }
 
-    // Signal filter
     if (filters.signal !== 'all') {
       if (filters.signal === 'skipped' && entry.signal !== 'skip') return false;
       if (filters.signal === 'long' && entry.signal !== 'long') return false;
       if (filters.signal === 'short' && entry.signal !== 'short') return false;
     }
 
-    // Outcome filter
     if (filters.outcome !== 'all') {
       if (filters.outcome === 'win' && entry.outcome !== 'win') return false;
       if (filters.outcome === 'loss' && entry.outcome !== 'loss') return false;
@@ -182,9 +147,6 @@ export function filterHistoryEntries(
   });
 }
 
-/**
- * Sorts history entries based on sort option
- */
 export function sortHistoryEntries(
   entries: HistoryEntry[],
   sort: 'newest' | 'oldest' | 'conf-desc' | 'conf-asc'

@@ -1,14 +1,11 @@
-// API Configuration
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Navigation
 export const NAV_ITEMS = [
   { href: '/analysis', label: 'Analysis' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/history', label: 'History' },
 ] as const;
 
-// Style Maps
 export const SUGGESTION_STYLES = {
   LONG: 'bg-sage text-deep-green',
   SHORT: 'bg-primary text-primary-foreground',
@@ -29,12 +26,10 @@ export const STATUS_LABELS = {
   neutral: '○ NEUTRAL',
 } as const;
 
-// Animation Durations
 export const ANIMATION = {
   fast: 150,
   normal: 200,
   slow: 300,
 } as const;
 
-// Toast Duration
 export const TOAST_DURATION = 4000;

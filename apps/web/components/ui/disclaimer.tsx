@@ -6,7 +6,6 @@ interface DisclaimerProps {
   variant?: 'default' | 'hero';
 }
 
-
 export function Disclaimer({ text, suffix, variant = 'default' }: DisclaimerProps) {
   const isHero = variant === 'hero';
 

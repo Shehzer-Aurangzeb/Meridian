@@ -8,9 +8,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { usePerformance } from '@/lib/hooks/use-performance';
 import type { PerformanceAnalysis, AnalysisStatus } from '@/types';
 
-/**
- * History item type (mapped from API)
- */
 interface HistoryItem {
   id: string;
   coin: string;
@@ -20,9 +17,6 @@ interface HistoryItem {
   priceChangePercent: number | null;
 }
 
-/**
- * History row component
- */
 function HistoryRow({ item }: { item: HistoryItem }) {
   const getBadgeContent = () => {
     if (item.status === 'pending') return 'Open';
@@ -72,9 +66,6 @@ function HistoryRow({ item }: { item: HistoryItem }) {
   );
 }
 
-/**
- * Loading skeleton
- */
 function RecentHistorySkeleton() {
   return (
     <Panel>
@@ -100,9 +91,6 @@ function RecentHistorySkeleton() {
   );
 }
 
-/**
- * Empty state
- */
 function EmptyState() {
   return (
     <Panel>
@@ -114,9 +102,6 @@ function EmptyState() {
   );
 }
 
-/**
- * Format date for display
- */
 function formatHistoryDate(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', {
@@ -125,9 +110,6 @@ function formatHistoryDate(dateStr: string): string {
   });
 }
 
-/**
- * Map API response to display format
- */
 function mapToHistoryItem(analysis: PerformanceAnalysis): HistoryItem {
   return {
     id: analysis.id,
@@ -139,9 +121,6 @@ function mapToHistoryItem(analysis: PerformanceAnalysis): HistoryItem {
   };
 }
 
-/**
- * Recent history panel
- */
 export function RecentHistory() {
   const { data, isLoading, error } = usePerformance({ limit: 5 });
 

@@ -5,9 +5,6 @@ import { SectionHead } from '@/components/ui/section-head';
 import { usePerformance } from '@/lib/hooks/use-performance';
 import { Skeleton } from '@/components/ui/skeleton';
 
-/**
- * Stat data type
- */
 interface StatData {
   label: string;
   value: string;
@@ -16,9 +13,6 @@ interface StatData {
   trend?: 'up' | 'down' | 'neutral';
 }
 
-/**
- * Individual stat card
- */
 function Stat({ stat, isLast }: { stat: StatData; isLast: boolean }) {
   return (
     <div
@@ -50,9 +44,6 @@ function Stat({ stat, isLast }: { stat: StatData; isLast: boolean }) {
   );
 }
 
-/**
- * Loading skeleton for stats
- */
 function StatsSkeleton() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 bg-surface border border-border/10 dark:border-border rounded-xl overflow-hidden">
@@ -73,9 +64,6 @@ function StatsSkeleton() {
   );
 }
 
-/**
- * Stats strip section for dashboard
- */
 export function StatsStrip() {
   const { data, isLoading, error } = usePerformance();
 

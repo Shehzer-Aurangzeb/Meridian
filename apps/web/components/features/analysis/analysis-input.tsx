@@ -24,9 +24,6 @@ interface AnalysisInputProps {
   isLoading?: boolean;
 }
 
-/**
- * Analysis input form - fully controlled component
- */
 export function AnalysisInput({
   coin,
   timeframe,

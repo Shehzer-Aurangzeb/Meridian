@@ -6,9 +6,6 @@ import { PAGE_TITLES } from '@/lib/navigation';
 import { SearchIcon } from '@/assets/icons/search-icon';
 import { MenuIcon } from '@/assets/icons/menu-icon';
 
-/**
- * Market status indicator pill
- */
 function MarketPill() {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
@@ -32,9 +29,6 @@ function MarketPill() {
   );
 }
 
-/**
- * Icon button component
- */
 function IconButton({
   children,
   onClick,
@@ -66,9 +60,6 @@ function IconButton({
   );
 }
 
-/**
- * Breadcrumb / page title component
- */
 function Breadcrumbs() {
   const pathname = usePathname();
   const pageTitle = PAGE_TITLES[pathname] || 'Dashboard';
@@ -80,18 +71,11 @@ function Breadcrumbs() {
   );
 }
 
-/**
- * Topbar props
- */
 interface TopbarProps {
   onMenuClick?: () => void;
   className?: string;
 }
 
-/**
- * Top navigation bar component
- * Displays breadcrumbs, market status, and action buttons
- */
 export function Topbar({ onMenuClick, className }: TopbarProps) {
   return (
     <header
