@@ -94,7 +94,10 @@ export function AppShell({ children }: AppShellProps) {
         <Sidebar />
         <main className="min-w-0">
           <Topbar />
-          <div className="max-w-content-max mx-auto px-5 md:px-10 py-8 md:py-14 pb-24">
+          {/* The shell owns page padding — pages add none. Five of them used
+              to add `p-5 md:p-8 lg:p-10` on top of this, which is how history
+              ended up with 80px of gutter on a desktop. */}
+          <div className="max-w-content-max mx-auto px-5 md:px-8 py-8 md:py-10 pb-24">
             {children}
           </div>
         </main>

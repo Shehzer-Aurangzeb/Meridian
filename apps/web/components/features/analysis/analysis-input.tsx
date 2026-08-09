@@ -4,59 +4,39 @@ import { cn } from '@/lib/utils';
 import { ArrowRightIcon } from '@/assets/icons/arrow-right-icon';
 import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
-import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
 
-// Re-export for backward compatibility
-export type { Timeframe } from '@/components/ui/timeframe-selector';
-
+/**
+ * Symbol only. There is no timeframe to pick: the pipeline reads 12h/4h/1h for
+ * levels, 12h for the Fib anchor and the regime, 4h for ATR — every one a
+ * declared decision, not a preference. The selector used to imply otherwise.
+ */
 interface AnalysisInputProps {
-  /** Current coin value (controlled) */
   coin: string;
-  /** Current timeframe value (controlled) */
-  timeframe: Timeframe;
-  /** Called when coin input changes */
   onCoinChange: (coin: string) => void;
-  /** Called when timeframe changes */
-  onTimeframeChange: (tf: Timeframe) => void;
-  /** Called when form is submitted */
   onSubmit: () => void;
-  /** Loading state */
   isLoading?: boolean;
 }
 
-/**
- * Analysis input form - fully controlled component
- */
 export function AnalysisInput({
   coin,
-  timeframe,
   onCoinChange,
-  onTimeframeChange,
   onSubmit,
   isLoading = false,
 }: AnalysisInputProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (coin.trim() && !isLoading) {
-      onSubmit();
-    }
+    if (coin.trim() && !isLoading) onSubmit();
   };
 
   return (
     <section>
-      <SectionHead
-        eyebrow="Begin"
-        title="Pose a question to the market"
-        linkText="Models · v4.2 · refreshed 09:42"
-        linkHref="#"
-      />
+      <SectionHead eyebrow="Begin" title="Analyse a coin" />
 
       <Card className="p-6 md:p-8">
         <form
           onSubmit={handleSubmit}
-          className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-4 items-end"
+          className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end"
         >
-          {/* Coin input */}
           <div className="flex flex-col gap-2.5">
             <label
               htmlFor="analysis-coin"
@@ -73,7 +53,7 @@ export function AnalysisInput({
               autoComplete="off"
               disabled={isLoading}
               className={cn(
-                'w-full bg-transparent border-0 border-b border-line-strong',
+                'w-full bg-transparent border-0 border-b border-border-hover/18 dark:border-border-hover',
                 'py-2.5 pb-3 outline-none',
                 'font-antonio text-[30px] font-semibold tracking-[0.06em] uppercase',
                 'text-text-primary placeholder:text-text-tertiary/50',
@@ -83,19 +63,6 @@ export function AnalysisInput({
             />
           </div>
 
-          {/* Timeframe selector */}
-          <div className="flex flex-col gap-2.5 self-stretch">
-            <label className="text-xs tracking-[0.16em] uppercase text-muted-2 font-medium">
-              Timeframe
-            </label>
-            <TimeframeSelector
-              value={timeframe}
-              onChange={onTimeframeChange}
-              disabled={isLoading}
-            />
-          </div>
-
-          {/* Submit button */}
           <div className="self-end">
             <button
               type="submit"
@@ -110,11 +77,16 @@ export function AnalysisInput({
                 'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:opacity-50'
               )}
             >
-              {isLoading ? 'Analyzing...' : 'Analyze'}
+              {isLoading ? 'Analysing…' : 'Analyse'}
               <ArrowRightIcon className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>
+
+        <p className="text-[12px] text-text-tertiary mt-5">
+          Fetches 12h, 4h and 1h from Binance, finds where they agree, and saves
+          the result. Takes a few seconds.
+        </p>
       </Card>
     </section>
   );

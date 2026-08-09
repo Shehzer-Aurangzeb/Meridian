@@ -8,12 +8,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
     "generate-types": "openapi-typescript http://localhost:3001/docs-json -o ./lib/api/generated/schema.ts",
     "generate-types:file": "openapi-typescript ./openapi.json -o ./lib/api/generated/schema.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.11",
     "clsx": "^2.1.1",
+    "lightweight-charts": "^5.2.0",
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

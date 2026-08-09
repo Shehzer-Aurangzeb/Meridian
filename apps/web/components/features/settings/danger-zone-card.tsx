@@ -1,8 +1,5 @@
 'use client';
 
-/**
- * Danger zone card with export and delete account
- */
 interface DangerZoneCardProps {
   onExport?: () => void;
   onDelete?: () => void;

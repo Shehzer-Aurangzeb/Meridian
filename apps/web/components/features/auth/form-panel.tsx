@@ -1,21 +1,36 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
-import { GoogleIcon } from '@/assets/icons/google-icon';
-import { AppleIcon } from '@/assets/icons/apple-icon';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useLogin } from '@/lib/hooks/use-auth';
+
+/**
+ * `next` normally comes back from middleware, but anyone can hand you a
+ * sign-in link with it set to anything. Only same-origin paths are followed.
+ *
+ * The second character matters as much as the first: `//evil.com` is
+ * protocol-relative, and browsers normalise the backslash in `/\evil.com` to
+ * the same thing — a `//` check alone still lets that one through.
+ */
+function safeNext(value: string | null): string {
+  if (!value || value[0] !== '/' || value[1] === '/' || value[1] === '\\') {
+    return '/dashboard';
+  }
+  return value;
+}
 
 export function FormPanel() {
-  const handleGoogleSignIn = () => {
-    // TODO: Implement Google OAuth
-    // For now, redirect to dashboard for demo
-    window.location.href = '/dashboard';
-  };
+  const searchParams = useSearchParams();
+  const [password, setPassword] = useState('');
+  const login = useLogin(safeNext(searchParams.get('next')));
 
-  const handleAppleSignIn = () => {
-    // TODO: Implement Apple OAuth
-    // For now, redirect to dashboard for demo
-    window.location.href = '/dashboard';
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password) login.mutate(password);
   };
 
   return (
@@ -35,47 +50,51 @@ export function FormPanel() {
             Welcome back
           </h1>
           <p className="text-text-secondary text-[15px] mb-9">
-            Sign in to pick up where you left off. New here? You'll be set up automatically.
+            Meridian takes one password — there is no account to create.
           </p>
 
-        {/* OAuth buttons */}
-        <button
-          onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center gap-3 px-5 py-3.5 bg-surface border border-border/20 dark:border-border rounded-full text-sm font-medium text-text-primary hover:bg-surface-hover hover:border-border-hover/18 dark:hover:border-border-hover transition-colors mb-3"
-        >
-          <GoogleIcon />
-          Continue with Google
-        </button>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <Input
+              id="password"
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••••••"
+              autoComplete="current-password"
+              autoFocus
+              required
+              error={login.error ? login.error.message : undefined}
+            />
 
-        <button
-          onClick={handleAppleSignIn}
-          className="w-full flex items-center justify-center gap-3 px-5 py-3.5 bg-primary border border-primary rounded-full text-sm font-medium text-background hover:opacity-90 transition-colors"
-        >
-          <AppleIcon />
-          Continue with Apple
-        </button>
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full rounded-full"
+              loading={login.isPending}
+              disabled={!password}
+            >
+              {login.isPending ? 'Signing in' : 'Sign in'}
+            </Button>
+          </form>
 
-        {/* Divider */}
-        <div className="flex items-center gap-4 my-7">
-          <div className="flex-1 h-px bg-border/10 dark:bg-border" />
-          <span className="text-[11px] font-medium tracking-[0.16em] uppercase text-text-tertiary">Secure sign-in</span>
-          <div className="flex-1 h-px bg-border/10 dark:bg-border" />
-        </div>
+          {/* Divider */}
+          <div className="flex items-center gap-4 my-7">
+            <div className="flex-1 h-px bg-border/10 dark:bg-border" />
+            <span className="text-[11px] font-medium tracking-[0.16em] uppercase text-text-tertiary">Secure sign-in</span>
+            <div className="flex-1 h-px bg-border/10 dark:bg-border" />
+          </div>
 
-        {/* Terms */}
-        <p className="text-center text-[13px] text-text-secondary">
-          By continuing you agree to our{' '}
-          <Link href="#" className="text-text-primary underline decoration-gold underline-offset-4">Terms</Link>
-          {' '}and{' '}
-          <Link href="#" className="text-text-primary underline decoration-gold underline-offset-4">Privacy policy</Link>.
-          We'll never post or message on your behalf.
-        </p>
+          <p className="text-center text-[13px] text-text-tertiary">
+            The password is checked on the server and exchanged for a session
+            cookie. It is never stored in your browser.
+          </p>
 
-        {/* Footer */}
-        <div className="flex justify-between items-center mt-12 pt-6 border-t border-border/10 dark:border-border font-mono text-[11px] text-text-tertiary tracking-[0.06em]">
-          <span>© Meridian 2026</span>
-          <Link href="#" className="hover:text-text-primary transition-colors">Help</Link>
-        </div>
+          {/* Footer */}
+          <div className="flex justify-between items-center mt-12 pt-6 border-t border-border/10 dark:border-border font-mono text-[11px] text-text-tertiary tracking-[0.06em]">
+            <span>© Meridian 2026</span>
+            <Link href="#" className="hover:text-text-primary transition-colors">Help</Link>
+          </div>
         </div>
       </div>
     </section>

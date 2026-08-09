@@ -2,18 +2,12 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Pagination state
- */
 export interface PaginationState {
   page: number;
   pageSize: number;
   totalCount: number;
 }
 
-/**
- * Page button component
- */
 interface PageButtonProps {
   children: React.ReactNode;
   active?: boolean;
@@ -40,9 +34,6 @@ function PageButton({ children, active, disabled, onClick }: PageButtonProps) {
   );
 }
 
-/**
- * Pagination component
- */
 interface PaginationProps {
   pagination: PaginationState;
   onPageChange?: (page: number) => void;

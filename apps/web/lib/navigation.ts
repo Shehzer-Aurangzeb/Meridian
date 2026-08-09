@@ -6,9 +6,6 @@ import { StrategiesIcon } from '@/assets/icons/strategies-icon';
 import { ComponentType, SVGProps } from 'react';
 import { isRouteEnabled } from './feature-flags';
 
-/**
- * Navigation item type
- */
 export interface NavItem {
   href: string;
   label: string;
@@ -16,17 +13,11 @@ export interface NavItem {
   badge?: number;
 }
 
-/**
- * Navigation section type
- */
 export interface NavSection {
   label: string;
   items: NavItem[];
 }
 
-/**
- * Full navigation structure (unfiltered)
- */
 const FULL_NAVIGATION: NavSection[] = [
   {
     label: 'Workspace',
@@ -45,9 +36,6 @@ const FULL_NAVIGATION: NavSection[] = [
   },
 ];
 
-/**
- * Get navigation filtered by feature flags
- */
 export function getNavigation(): NavSection[] {
   return FULL_NAVIGATION
     .map((section) => ({
@@ -63,14 +51,8 @@ export function getNavigation(): NavSection[] {
  */
 export const NAVIGATION: NavSection[] = getNavigation();
 
-/**
- * Flat list of all navigation items for quick access
- */
 export const NAV_ITEMS = NAVIGATION.flatMap((section) => section.items);
 
-/**
- * Page titles for breadcrumbs
- */
 export const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/analysis': 'Analysis',

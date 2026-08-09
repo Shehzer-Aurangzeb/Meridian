@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { PageHeader } from '@/components/features/dashboard/page-header';
 import { QuickAnalyze } from '@/components/features/dashboard/quick-analyze';
 import { StatsStrip } from '@/components/features/dashboard/stats-strip';
@@ -7,6 +8,8 @@ import { Watchlist } from '@/components/features/dashboard/watchlist';
 import { ActiveAlerts } from '@/components/features/dashboard/active-alerts';
 import { Disclaimer } from '@/components/ui/disclaimer';
 import { SectionHead } from '@/components/ui/section-head';
+
+export const metadata: Metadata = { title: 'Dashboard' };
 
 export default function DashboardPage() {
   return (

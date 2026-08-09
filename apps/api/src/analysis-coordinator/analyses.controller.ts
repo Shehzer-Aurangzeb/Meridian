@@ -16,7 +16,23 @@ import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
 import { PlanResult, scorePlans } from './outcome';
+import { buildVerdict, Verdict } from './verdict';
+import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { Candle, TimeInterval } from '../common/types/candle.types';
+
+/** A saved narration, stored in the `aiPayload` Json column. */
+export interface SavedNarration {
+  text: string;
+  citedPrices: number[];
+  model: string;
+  narratedAt: string;
+}
+
+/** `aiPayload` is null until someone asks Claude to read the analysis. */
+function readNarration(payload: unknown): SavedNarration | null {
+  const value = payload as Partial<SavedNarration> | null;
+  return typeof value?.text === 'string' ? (value as SavedNarration) : null;
+}
 
 /** Outcome replay series: 1h wicks, 30 days — see the detail route. */
 const OUTCOME_TIMEFRAME: TimeInterval = '1h';
@@ -31,11 +47,8 @@ const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
  *   GET  /analyses              list saved analyses (newest first)
  *   GET  /analyses/:id          one analysis, with its freshness
  *
- * Distinct from the legacy `/analysis-coordinator` routes: those stream a
- * regime-leg-only result and predate the level map entirely.
- *
- * ponytail: no auth. Single-user personal tool behind a private URL. Add a
- * shared secret header before this is reachable from anywhere public.
+ * Every route here is protected by the global AuthGuard: a session token from
+ * the frontend, or the API key from the scheduler.
  */
 @ApiTags('analyses')
 @Controller('analyses')
@@ -45,6 +58,7 @@ export class AnalysesController {
     private readonly persistence: CoordinatorPersistenceService,
     private readonly prisma: PrismaService,
     private readonly binance: BinanceService,
+    private readonly narrator: AnalystNarrationService,
   ) {}
 
   @Post()
@@ -115,26 +129,25 @@ export class AnalysesController {
     currentPrice: number;
     freshness: Freshness;
     outcomes: PlanResult[];
+    verdict: Verdict;
+    narration: SavedNarration | null;
     analysis: AnalysisRecord;
   }> {
     const row = await this.prisma.coordinatorRun.findUnique({
       where: { id },
-      select: { id: true, symbol: true, createdAt: true, coordinatorPayload: true },
+      select: {
+        id: true,
+        symbol: true,
+        createdAt: true,
+        coordinatorPayload: true,
+        aiPayload: true,
+      },
     });
     if (!row) {
       throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
     }
 
     const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
-    if (!analysis?.plans || !analysis?.map) {
-      // Rows written before AnalyzeService existed hold a regime-leg-only
-      // payload. Say so rather than reporting a freshness computed from
-      // nothing.
-      throw new HttpException(
-        'This row predates the level map and has no plans to score',
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
 
     // Everything the two verdicts need, in one round of I/O: the price the
     // chart wants anyway, the newest analysis for this symbol, and the
@@ -156,24 +169,98 @@ export class AnalysesController {
 
     const newest = newestRow?.coordinatorPayload as unknown as AnalysisRecord | undefined;
 
+    const freshness = analysisFreshness(
+      analysis,
+      currentPrice,
+      newest?.map ? { map: newest.map } : null,
+    );
+    // Strictly after the analysis: a candle already forming when it was taken
+    // must not be allowed to "fill" a plan retroactively.
+    const outcomes = scorePlans(
+      analysis.plans,
+      candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
+      row.createdAt,
+      Date.now(),
+    );
+
     return {
       id: row.id,
       createdAt: row.createdAt,
       currentPrice,
-      freshness: analysisFreshness(
-        analysis,
-        currentPrice,
-        newest?.map ? { map: newest.map } : null,
-      ),
-      // Strictly after the analysis: a candle already forming when it was
-      // taken must not be allowed to "fill" a plan retroactively.
-      outcomes: scorePlans(
-        analysis.plans,
-        candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
-        row.createdAt,
-        Date.now(),
-      ),
+      freshness,
+      outcomes,
+      verdict: buildVerdict(analysis, freshness, outcomes, currentPrice),
+      narration: readNarration(row.aiPayload),
       analysis,
     };
+  }
+
+  /**
+   * Claude's read of an analysis, written once and kept.
+   *
+   * On demand rather than on every scheduled run: at thirty analyses a day
+   * that is thirty model calls for the two or three anyone opens. The result
+   * is cached in `aiPayload`, so a second visit costs nothing and the text
+   * never changes under you.
+   *
+   * Narration cannot alter the analysis. Every number was computed before
+   * this runs, and `PriceProvenanceError` discards the whole text if Claude
+   * cites a price nothing produced — a missing read is strictly better than
+   * an invented level.
+   */
+  @Post(':id/narrate')
+  // One a minute: each call is a paid model request, and the answer is cached
+  // anyway, so there is no legitimate reason to hammer it.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: "Write (or return) Claude's read of this analysis" })
+  async narrate(@Param('id') id: string): Promise<SavedNarration> {
+    const row = await this.prisma.coordinatorRun.findUnique({
+      where: { id },
+      select: { id: true, coordinatorPayload: true, aiPayload: true },
+    });
+    if (!row) {
+      throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
+    }
+
+    const cached = readNarration(row.aiPayload);
+    if (cached) return cached;
+
+    const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
+
+    let narration;
+    try {
+      narration = await this.narrator.narrate({
+        map: analysis.map,
+        plans: analysis.plans,
+        regime: analysis.regime,
+        checklist: analysis.checklist,
+        regimeTimeframe: analysis.timeframes.regime,
+      });
+    } catch (err) {
+      // A missing key, a refusal, or an invented price. All three mean "no
+      // narration", and none of them says anything about the analysis — so
+      // report it as the optional extra it is, not as a broken analysis.
+      throw new HttpException(
+        err instanceof Error ? err.message : 'Narration failed',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const saved: SavedNarration = {
+      text: narration.text,
+      citedPrices: narration.citedPrices,
+      model: narration.model,
+      narratedAt: new Date().toISOString(),
+    };
+
+    await this.prisma.coordinatorRun.update({
+      where: { id: row.id },
+      data: {
+        aiPayload: saved as unknown as Prisma.InputJsonValue,
+        shouldInvokeAI: true,
+      },
+    });
+
+    return saved;
   }
 }

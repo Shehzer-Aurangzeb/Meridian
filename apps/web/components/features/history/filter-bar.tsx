@@ -3,27 +3,25 @@
 import { SearchIcon } from '@/assets/icons/search-icon';
 
 /**
- * Filter options for the history table
+ * Filters map to fields the list response actually carries. Signal and outcome
+ * used to be here; neither is knowable without each analysis's payload.
  */
 export interface HistoryFilters {
   search: string;
-  signal: 'all' | 'long' | 'short' | 'skipped';
-  outcome: 'all' | 'win' | 'loss' | 'open';
-  dateRange: '30d' | '90d' | '1y' | 'all';
-  sort: 'newest' | 'oldest' | 'conf-desc' | 'conf-asc';
+  regime: 'all' | 'COMPRESSION' | 'TRENDING' | 'MEAN_REVERSION';
+  route: 'all' | 'SQUEEZE_BREAKOUT' | 'CONFLUENCE_CHECKLIST';
+  dateRange: '24h' | '7d' | '30d' | 'all';
+  sort: 'newest' | 'oldest';
 }
 
-const DEFAULT_FILTERS: HistoryFilters = {
+export const DEFAULT_FILTERS: HistoryFilters = {
   search: '',
-  signal: 'all',
-  outcome: 'all',
+  regime: 'all',
+  route: 'all',
   dateRange: '30d',
   sort: 'newest',
 };
 
-/**
- * Section header for the filter area
- */
 interface SectionHeadProps {
   eyebrow: string;
   title: string;
@@ -46,9 +44,6 @@ function SectionHead({ eyebrow, title, meta }: SectionHeadProps) {
   );
 }
 
-/**
- * Custom select dropdown with chevron
- */
 interface FilterSelectProps {
   label: string;
   value: string;
@@ -82,18 +77,15 @@ function FilterSelect({ label, value, onChange, options }: FilterSelectProps) {
   );
 }
 
-/**
- * Filter bar with search and dropdowns
- */
 interface FilterBarProps {
-  filters?: HistoryFilters;
+  filters: HistoryFilters;
   onFiltersChange?: (filters: HistoryFilters) => void;
   totalCount: number;
   showingCount: number;
 }
 
 export function FilterBar({
-  filters = DEFAULT_FILTERS,
+  filters,
   onFiltersChange,
   totalCount,
   showingCount,
@@ -113,70 +105,66 @@ export function FilterBar({
         meta={`Showing ${showingCount} of ${totalCount}`}
       />
 
-      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-center">
-        {/* Search */}
-        <div className="flex items-center gap-2.5 px-3.5 py-2 border-b md:border-b-0 md:border-r border-border/10 dark:border-border md:col-span-2 lg:col-span-1">
+      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+        {/* Search on its own row: sharing one grid with four selects squeezed
+            every control at tablet widths. */}
+        <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-border/10 dark:border-border">
           <SearchIcon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
           <input
             type="text"
-            placeholder="Search coin or strategy…"
+            placeholder="Search coin…"
             value={filters.search}
             onChange={(e) => updateFilter('search', e.target.value)}
             className="bg-transparent border-0 outline-none w-full text-sm text-text-primary placeholder:text-text-tertiary"
           />
         </div>
 
-        {/* Signal filter */}
-        <FilterSelect
-          label="Signal"
-          value={filters.signal}
-          onChange={(v) => updateFilter('signal', v as HistoryFilters['signal'])}
-          options={[
-            { value: 'all', label: 'All signals' },
-            { value: 'long', label: 'Long' },
-            { value: 'short', label: 'Short' },
-            { value: 'skipped', label: 'Skipped' },
-          ]}
-        />
+        <div className="flex flex-wrap gap-2.5">
+          <FilterSelect
+            label="Regime"
+            value={filters.regime}
+            onChange={(v) => updateFilter('regime', v as HistoryFilters['regime'])}
+            options={[
+              { value: 'all', label: 'All regimes' },
+              { value: 'COMPRESSION', label: 'Compression' },
+              { value: 'TRENDING', label: 'Trending' },
+              { value: 'MEAN_REVERSION', label: 'Mean reversion' },
+            ]}
+          />
 
-        {/* Outcome filter */}
-        <FilterSelect
-          label="Outcome"
-          value={filters.outcome}
-          onChange={(v) => updateFilter('outcome', v as HistoryFilters['outcome'])}
-          options={[
-            { value: 'all', label: 'All outcomes' },
-            { value: 'win', label: 'Win' },
-            { value: 'loss', label: 'Loss' },
-            { value: 'open', label: 'Open' },
-          ]}
-        />
+          <FilterSelect
+            label="Strategy"
+            value={filters.route}
+            onChange={(v) => updateFilter('route', v as HistoryFilters['route'])}
+            options={[
+              { value: 'all', label: 'All strategies' },
+              { value: 'SQUEEZE_BREAKOUT', label: 'Squeeze breakout' },
+              { value: 'CONFLUENCE_CHECKLIST', label: 'Confluence checklist' },
+            ]}
+          />
 
-        {/* Date range filter */}
-        <FilterSelect
-          label="Date"
-          value={filters.dateRange}
-          onChange={(v) => updateFilter('dateRange', v as HistoryFilters['dateRange'])}
-          options={[
-            { value: '30d', label: 'Last 30 days' },
-            { value: '90d', label: 'Last 90 days' },
-            { value: '1y', label: 'Last year' },
-            { value: 'all', label: 'All time' },
-          ]}
-        />
+          <FilterSelect
+            label="Date"
+            value={filters.dateRange}
+            onChange={(v) => updateFilter('dateRange', v as HistoryFilters['dateRange'])}
+            options={[
+              { value: '24h', label: 'Last 24 hours' },
+              { value: '7d', label: 'Last 7 days' },
+              { value: '30d', label: 'Last 30 days' },
+              { value: 'all', label: 'All time' },
+            ]}
+          />
 
-        {/* Sort */}
-        <FilterSelect
-          label="Sort"
-          value={filters.sort}
-          onChange={(v) => updateFilter('sort', v as HistoryFilters['sort'])}
-          options={[
-            { value: 'newest', label: 'Newest first' },
-            { value: 'oldest', label: 'Oldest first' },
-            { value: 'conf-desc', label: 'Confidence ▼' },
-            { value: 'conf-asc', label: 'Confidence ▲' },
-          ]}
-        />
+          <FilterSelect
+            label="Sort"
+            value={filters.sort}
+            onChange={(v) => updateFilter('sort', v as HistoryFilters['sort'])}
+            options={[
+              { value: 'newest', label: 'Newest first' },
+              { value: 'oldest', label: 'Oldest first' },
+            ]}
+          />
+        </div>
       </div>
     </section>
   );

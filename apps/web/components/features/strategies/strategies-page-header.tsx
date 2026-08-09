@@ -1,8 +1,5 @@
 'use client';
 
-/**
- * Header section for the Strategies page
- */
 export function StrategiesPageHeader() {
   return (
     <header className="mb-8">

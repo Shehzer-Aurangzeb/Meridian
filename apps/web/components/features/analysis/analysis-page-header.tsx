@@ -1,8 +1,5 @@
 import { cn } from '@/lib/utils';
 
-/**
- * Eyebrow text with decorative rule
- */
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
     <div className="inline-flex items-center gap-2.5 whitespace-nowrap mb-4">
@@ -14,42 +11,24 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * AnalysisPageHeader props
- */
 interface AnalysisPageHeaderProps {
-  issueNumber?: number;
   coin?: string;
   className?: string;
 }
 
-/**
- * Analysis page header with issue number and title
- */
-export function AnalysisPageHeader({
-  issueNumber = 247,
-  coin,
-  className,
-}: AnalysisPageHeaderProps) {
-  const issueStr = String(issueNumber).padStart(4, '0');
-
+export function AnalysisPageHeader({ coin, className }: AnalysisPageHeaderProps) {
   return (
     <header className={cn('mb-2', className)}>
-      <Eyebrow>Trade Analysis · No. {issueStr}</Eyebrow>
+      <Eyebrow>Analysis</Eyebrow>
       <h1 className="font-antonio font-bold text-display-sm md:text-display leading-[0.98] tracking-headline uppercase text-text-primary m-0 mb-[18px]">
         A Considered
         <br />
-        View on{' '}
-        {coin ? (
-          <span className="text-gold">{coin}</span>
-        ) : (
-          <span className="text-gold">...</span>
-        )}
+        View on <span className="text-gold">{coin || '…'}</span>
       </h1>
       <p className="text-[17px] text-text-secondary max-w-[620px] leading-relaxed m-0">
-        AI-powered crypto analysis distilled from professional strategies. Slow
-        signals, careful reasoning, and a clear point of view — refreshed every
-        market open.
+        Where four timeframes agree on a level, what regime the market is in,
+        and the plan that follows — entries, stop, targets, and what would prove
+        it wrong.
       </p>
     </header>
   );

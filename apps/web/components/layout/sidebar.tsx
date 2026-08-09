@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { NAVIGATION, type NavItem } from '@/lib/navigation';
+import { USER } from '@/lib/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
-
 
 function Brand() {
   return (
@@ -23,7 +23,6 @@ function Brand() {
   );
 }
 
-
 function NavSectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-[11px] uppercase tracking-[0.18em] text-gold/55 font-medium px-7 pb-3 mt-1">
@@ -31,7 +30,6 @@ function NavSectionLabel({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 
 function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   const Icon = item.icon;
@@ -68,7 +66,6 @@ function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   );
 }
 
-
 function UserProfile() {
   const showSettings = isFeatureEnabled('SETTINGS');
   
@@ -78,11 +75,11 @@ function UserProfile() {
         className="w-[34px] h-[34px] rounded-full shrink-0 grid place-items-center text-text-primary font-semibold text-[13px] font-inter"
         style={{ background: 'linear-gradient(135deg, rgb(var(--gold-ink)), rgb(var(--gold-dark)))' }}
       >
-        EM
+        {USER.initials}
       </div>
       <div className="flex flex-col min-w-0">
-        <span className="text-[13px] text-sidebar-text font-medium truncate">Elena Marchetti</span>
-        <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Atelier · Pro</span>
+        <span className="text-[13px] text-sidebar-text font-medium truncate">{USER.name}</span>
+        <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Personal</span>
       </div>
     </>
   );
@@ -102,17 +99,10 @@ function UserProfile() {
   );
 }
 
-/**
- * Sidebar props
- */
 interface SidebarProps {
   className?: string;
 }
 
-/**
- * Main sidebar component
- * Displays navigation grouped by sections with user profile at bottom
- */
 export function Sidebar({ className }: SidebarProps) {
   const pathname = usePathname();
 

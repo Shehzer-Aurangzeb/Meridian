@@ -1,8 +1,5 @@
 'use client';
 
-/**
- * Header section for the Settings page
- */
 export function SettingsPageHeader() {
   return (
     <header className="mb-8">
