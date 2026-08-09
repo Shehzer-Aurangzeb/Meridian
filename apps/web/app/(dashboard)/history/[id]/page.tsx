@@ -1,12 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { formatCurrency, formatFullDate, formatRelative } from '@/lib/format';
 import { useAnalysis } from '@/lib/hooks/use-analyses';
+import { useLiveCandle } from '@/lib/hooks/use-live-candle';
 import { FreshnessBadge } from '@/components/features/analysis-detail/badges';
 import { VerdictCard } from '@/components/features/analysis-detail/verdict-card';
-import { AnalysisChart } from '@/components/features/analysis-detail/analysis-chart';
+import { AnalysisChart, type Interval } from '@/components/features/analysis-detail/analysis-chart';
 import { PlanCard } from '@/components/features/analysis-detail/plan-card';
 import { RegimeCard } from '@/components/features/analysis-detail/regime-card';
 import { LevelMapCard } from '@/components/features/analysis-detail/level-map';
@@ -27,6 +29,11 @@ function BackLink() {
 export default function AnalysisDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading, error } = useAnalysis(id);
+  const [chartInterval, setChartInterval] = useState<Interval>('1h');
+
+  // Lives here rather than inside the chart so the header price is the same
+  // tick the candle is drawing — two sockets would drift against each other.
+  const live = useLiveCandle(data?.analysis.symbol, chartInterval);
 
   if (isLoading) {
     return (
@@ -54,7 +61,10 @@ export default function AnalysisDetailPage() {
   }
 
   const { analysis, outcomes, freshness, currentPrice, createdAt, verdict, narration } = data;
-  const drift = ((currentPrice - analysis.map.spot) / analysis.map.spot) * 100;
+  // The socket when it is up, the API's price when it is not — a blocked
+  // region loses the ticking, not the number.
+  const price = live.price ?? currentPrice;
+  const drift = ((price - analysis.map.spot) / analysis.map.spot) * 100;
 
   return (
     <div>
@@ -79,7 +89,7 @@ export default function AnalysisDetailPage() {
             Price now
           </div>
           <div className="font-display text-[32px] font-semibold leading-none text-text-primary mt-1.5">
-            {formatCurrency(currentPrice)}
+            {formatCurrency(price)}
           </div>
           <div className="font-mono text-[11px] text-text-tertiary mt-1.5">
             {drift >= 0 ? '+' : ''}
@@ -96,7 +106,14 @@ export default function AnalysisDetailPage() {
       />
 
       <section className="mt-8">
-        <AnalysisChart analysis={analysis} analysedAt={createdAt} />
+        <AnalysisChart
+          analysis={analysis}
+          analysedAt={createdAt}
+          interval={chartInterval}
+          onIntervalChange={setChartInterval}
+          live={live.candle}
+          isLive={live.connected}
+        />
       </section>
 
       <section className="mt-8">
@@ -124,7 +141,7 @@ export default function AnalysisDetailPage() {
       </section>
 
       <section className="mt-8">
-        <LevelMapCard map={analysis.map} currentPrice={currentPrice} />
+        <LevelMapCard map={analysis.map} currentPrice={price} />
       </section>
 
       <Disclaimer text="Every price here is computed from the level map — none is a prediction. Outcomes are replayed from 1h candles since the analysis; a plan that never filled within 24 hours counts as missed." />
