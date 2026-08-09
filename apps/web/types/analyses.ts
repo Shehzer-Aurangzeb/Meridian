@@ -196,12 +196,30 @@ export interface AnalysisListResponse {
   analyses: AnalysisListItem[];
 }
 
+/** The analysis in sentences. Computed, not generated — see verdict.ts. */
+export interface Verdict {
+  headline: string;
+  body: string[];
+  status: string | null;
+}
+
+/** Claude's read, written on demand and kept. Null until someone asks. */
+export interface SavedNarration {
+  text: string;
+  /** Prices Claude cited that trace to a computed number. */
+  citedPrices: number[];
+  model: string;
+  narratedAt: string;
+}
+
 export interface AnalysisDetail {
   id: string;
   createdAt: string;
   currentPrice: number;
   freshness: Freshness;
   outcomes: PlanResult[];
+  verdict: Verdict;
+  narration: SavedNarration | null;
   analysis: AnalysisRecord;
 }
 

@@ -105,8 +105,10 @@ export function FilterBar({
         meta={`Showing ${showingCount} of ${totalCount}`}
       />
 
-      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-center">
-        <div className="flex items-center gap-2.5 px-3.5 py-2 border-b md:border-b-0 md:border-r border-border/10 dark:border-border md:col-span-2 lg:col-span-1">
+      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+        {/* Search on its own row: sharing one grid with four selects squeezed
+            every control at tablet widths. */}
+        <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-border/10 dark:border-border">
           <SearchIcon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
           <input
             type="text"
@@ -117,50 +119,52 @@ export function FilterBar({
           />
         </div>
 
-        <FilterSelect
-          label="Regime"
-          value={filters.regime}
-          onChange={(v) => updateFilter('regime', v as HistoryFilters['regime'])}
-          options={[
-            { value: 'all', label: 'All regimes' },
-            { value: 'COMPRESSION', label: 'Compression' },
-            { value: 'TRENDING', label: 'Trending' },
-            { value: 'MEAN_REVERSION', label: 'Mean reversion' },
-          ]}
-        />
+        <div className="flex flex-wrap gap-2.5">
+          <FilterSelect
+            label="Regime"
+            value={filters.regime}
+            onChange={(v) => updateFilter('regime', v as HistoryFilters['regime'])}
+            options={[
+              { value: 'all', label: 'All regimes' },
+              { value: 'COMPRESSION', label: 'Compression' },
+              { value: 'TRENDING', label: 'Trending' },
+              { value: 'MEAN_REVERSION', label: 'Mean reversion' },
+            ]}
+          />
 
-        <FilterSelect
-          label="Strategy"
-          value={filters.route}
-          onChange={(v) => updateFilter('route', v as HistoryFilters['route'])}
-          options={[
-            { value: 'all', label: 'All strategies' },
-            { value: 'SQUEEZE_BREAKOUT', label: 'Squeeze breakout' },
-            { value: 'CONFLUENCE_CHECKLIST', label: 'Confluence checklist' },
-          ]}
-        />
+          <FilterSelect
+            label="Strategy"
+            value={filters.route}
+            onChange={(v) => updateFilter('route', v as HistoryFilters['route'])}
+            options={[
+              { value: 'all', label: 'All strategies' },
+              { value: 'SQUEEZE_BREAKOUT', label: 'Squeeze breakout' },
+              { value: 'CONFLUENCE_CHECKLIST', label: 'Confluence checklist' },
+            ]}
+          />
 
-        <FilterSelect
-          label="Date"
-          value={filters.dateRange}
-          onChange={(v) => updateFilter('dateRange', v as HistoryFilters['dateRange'])}
-          options={[
-            { value: '24h', label: 'Last 24 hours' },
-            { value: '7d', label: 'Last 7 days' },
-            { value: '30d', label: 'Last 30 days' },
-            { value: 'all', label: 'All time' },
-          ]}
-        />
+          <FilterSelect
+            label="Date"
+            value={filters.dateRange}
+            onChange={(v) => updateFilter('dateRange', v as HistoryFilters['dateRange'])}
+            options={[
+              { value: '24h', label: 'Last 24 hours' },
+              { value: '7d', label: 'Last 7 days' },
+              { value: '30d', label: 'Last 30 days' },
+              { value: 'all', label: 'All time' },
+            ]}
+          />
 
-        <FilterSelect
-          label="Sort"
-          value={filters.sort}
-          onChange={(v) => updateFilter('sort', v as HistoryFilters['sort'])}
-          options={[
-            { value: 'newest', label: 'Newest first' },
-            { value: 'oldest', label: 'Oldest first' },
-          ]}
-        />
+          <FilterSelect
+            label="Sort"
+            value={filters.sort}
+            onChange={(v) => updateFilter('sort', v as HistoryFilters['sort'])}
+            options={[
+              { value: 'newest', label: 'Newest first' },
+              { value: 'oldest', label: 'Oldest first' },
+            ]}
+          />
+        </div>
       </div>
     </section>
   );
