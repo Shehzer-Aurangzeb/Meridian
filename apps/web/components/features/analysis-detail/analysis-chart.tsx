@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
+  CrosshairMode,
   LineStyle,
   createChart,
   createSeriesMarkers,
+  type CandlestickData,
   type IChartApi,
   type ISeriesApi,
   type UTCTimestamp,
@@ -14,29 +16,31 @@ import {
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import { useCandles } from '@/lib/hooks/use-candles';
-import { Skeleton } from '@/components/ui/skeleton';
+import type { LiveCandle } from '@/lib/hooks/use-live-candle';
 import type { AnalysisRecord, Direction, TradePlan } from '@/types/analyses';
 
 /**
  * The analysis, drawn.
  *
- * Every line here is a number the pipeline already computed — zones from the
- * level map, entries/stop/targets from the plan. Nothing is derived in this
- * component, so the chart cannot disagree with the cards below it.
+ * Every line here is a number the pipeline already computed — zone boundaries
+ * from the level map, the ladder and stop and targets from the plan. Nothing
+ * is derived in this component, so the chart cannot disagree with the cards
+ * below it.
  *
- * ponytail: zones are drawn as their two boundary price lines rather than as
- * filled bands. A band needs a custom series primitive (~150 lines of plugin);
- * two labelled lines carry the same information. Upgrade if reading the chart
- * at a glance turns out to need the fill.
+ * ponytail: zones are their two boundary lines, not filled bands. A band needs
+ * a custom series primitive; two lines carry the same information.
  */
 
-/** Read a theme colour out of CSS rather than duplicating the palette here. */
+export const INTERVALS = ['15m', '1h', '4h', '12h', '1d', '1w'] as const;
+export type Interval = (typeof INTERVALS)[number];
+
+/** Read a theme colour from CSS rather than duplicating the palette here. */
 function cssColor(name: string, alpha = 1): string {
   if (typeof window === 'undefined') return '#888';
   const triplet = getComputedStyle(document.documentElement)
     .getPropertyValue(name)
     .trim();
-  return triplet ? `rgb(${triplet.split(/\s+/).join(' ')} / ${alpha})` : '#888';
+  return triplet ? `rgb(${triplet} / ${alpha})` : '#888';
 }
 
 function leadPlan(plans: TradePlan[]): TradePlan | undefined {
@@ -47,29 +51,61 @@ function leadPlan(plans: TradePlan[]): TradePlan | undefined {
   );
 }
 
+/** Enough decimals for the coin: LINK needs two, DOGE needs six. */
+function decimalsFor(price: number): number {
+  if (price >= 1000) return 2;
+  if (price >= 1) return 4;
+  return 8;
+}
+
+interface OHLC {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 interface AnalysisChartProps {
   analysis: AnalysisRecord;
   analysedAt: string;
+  interval: Interval;
+  onIntervalChange: (interval: Interval) => void;
+  /** The candle still forming, or null when the socket is not connected. */
+  live: LiveCandle | null;
+  isLive: boolean;
 }
 
-export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
+export function AnalysisChart({
+  analysis,
+  analysedAt,
+  interval,
+  onIntervalChange,
+  live,
+  isLive,
+}: AnalysisChartProps) {
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
+  const [hover, setHover] = useState<OHLC | null>(null);
   const [direction, setDirection] = useState<Direction | null>(
     () => leadPlan(analysis.plans)?.direction ?? null,
   );
 
-  const { data: candles, isLoading, error } = useCandles(analysis.symbol, '1h', 300);
+  const { data: candles, isLoading, error } = useCandles(analysis.symbol, interval);
 
   const plan = useMemo(
     () => analysis.plans.find((p) => p.direction === direction),
     [analysis.plans, direction],
   );
 
-  // ── the chart itself, rebuilt on theme change ────────────────────────
+  const decimals = decimalsFor(analysis.map.spot);
+
+  // ── the chart, rebuilt on theme change ───────────────────────────────
+  // The container is always mounted and never `hidden`: created inside a
+  // display:none parent the chart measures zero width, and fitContent against
+  // a zero-width scale is what crushed every candle into the right edge.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -77,20 +113,30 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
     const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: cssColor('--text-secondary'),
+        textColor: cssColor('--text-tertiary'),
         fontFamily: 'var(--font-inter), sans-serif',
+        fontSize: 11,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: cssColor('--border', 0.35) },
-        horzLines: { color: cssColor('--border', 0.35) },
+        vertLines: { color: cssColor('--border', 0.28) },
+        horzLines: { color: cssColor('--border', 0.28) },
       },
-      rightPriceScale: { borderColor: cssColor('--border', 0.5) },
+      rightPriceScale: {
+        borderVisible: false,
+        scaleMargins: { top: 0.12, bottom: 0.12 },
+      },
       timeScale: {
-        borderColor: cssColor('--border', 0.5),
-        timeVisible: true,
+        borderVisible: false,
+        timeVisible: interval !== '1d' && interval !== '1w',
+        rightOffset: 6,
+        barSpacing: 8,
       },
-      crosshair: { mode: 0 },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: cssColor('--text-tertiary', 0.5), labelBackgroundColor: cssColor('--primary') },
+        horzLine: { color: cssColor('--text-tertiary', 0.5), labelBackgroundColor: cssColor('--primary') },
+      },
       autoSize: true,
     });
 
@@ -98,8 +144,16 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
       upColor: cssColor('--green'),
       downColor: cssColor('--red'),
       borderVisible: false,
-      wickUpColor: cssColor('--green', 0.6),
-      wickDownColor: cssColor('--red', 0.6),
+      wickUpColor: cssColor('--green', 0.55),
+      wickDownColor: cssColor('--red', 0.55),
+      priceFormat: { type: 'price', precision: decimals, minMove: 10 ** -decimals },
+    });
+
+    // The OHLC readout in the header — the thing that makes a chart feel like
+    // a chart rather than a picture.
+    chart.subscribeCrosshairMove((param) => {
+      const point = param.seriesData.get(series) as CandlestickData | undefined;
+      setHover(point ? { open: point.open, high: point.high, low: point.low, close: point.close } : null);
     });
 
     chartRef.current = chart;
@@ -110,19 +164,18 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [resolvedTheme]);
+  }, [resolvedTheme, interval, decimals]);
 
-  // ── data ─────────────────────────────────────────────────────────────
+  // ── history ──────────────────────────────────────────────────────────
   useEffect(() => {
     const series = seriesRef.current;
     if (!series || !candles?.length) return;
 
-    // `time` is a branded UTCTimestamp; the route already emits seconds.
     series.setData(candles.map((c) => ({ ...c, time: c.time as UTCTimestamp })));
     chartRef.current?.timeScale().fitContent();
 
-    // Where the analysis was taken. Without it the levels look arbitrary —
-    // they were computed from the candles to the LEFT of this mark.
+    // Where the analysis was taken. Without it the levels read as arbitrary
+    // rather than as something computed from the candles to its left.
     const at = Math.floor(new Date(analysedAt).getTime() / 1000);
     const nearest = candles.reduce((best, c) =>
       Math.abs(c.time - at) < Math.abs(best.time - at) ? c : best,
@@ -136,7 +189,18 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
         text: 'analysed',
       },
     ]);
-  }, [candles, analysedAt, resolvedTheme]);
+  }, [candles, analysedAt, resolvedTheme, interval]);
+
+  // ── the forming candle ───────────────────────────────────────────────
+  // `update` only accepts a time at or after the last bar, so a socket message
+  // that arrives before the history it belongs to is dropped rather than
+  // throwing.
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series || !live || !candles?.length) return;
+    if (live.time < candles[candles.length - 1].time) return;
+    series.update({ ...live, time: live.time as UTCTimestamp });
+  }, [live, candles]);
 
   // ── the analysis, as price lines ─────────────────────────────────────
   useEffect(() => {
@@ -145,10 +209,7 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
 
     const lines = [
       ...analysis.map.zones.flatMap((zone) => {
-        const color = cssColor(
-          zone.type === 'support' ? '--green' : '--red',
-          0.28,
-        );
+        const color = cssColor(zone.type === 'support' ? '--green' : '--red', 0.3);
         return [zone.low, zone.high].map((price) => ({
           price,
           color,
@@ -190,60 +251,112 @@ export function AnalysisChart({ analysis, analysedAt }: AnalysisChartProps) {
 
     const drawn = lines.map((line) => series.createPriceLine(line));
     return () => drawn.forEach((line) => series.removePriceLine(line));
-  }, [analysis.map.zones, plan, candles, resolvedTheme]);
+  }, [analysis.map.zones, plan, candles, resolvedTheme, interval]);
+
+  const readout = hover ?? (live ? { open: live.open, high: live.high, low: live.low, close: live.close } : null);
 
   return (
     <section className="bg-surface border border-border/10 dark:border-border rounded-xl overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border/10 dark:border-border">
-        <div>
-          <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary">
-            {analysis.symbol} · 1h
-          </div>
-          <p className="text-[13px] text-text-secondary mt-0.5">
-            Dotted bands are confluence zones. Solid red is the stop.
-          </p>
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3 border-b border-border/10 dark:border-border">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="font-display text-[15px] font-semibold tracking-[0.06em] uppercase text-text-primary">
+            {analysis.symbol}
+          </span>
+
+          {readout && (
+            <div className="flex items-center gap-2.5 font-mono text-[11px] text-text-tertiary">
+              {(['open', 'high', 'low', 'close'] as const).map((key) => (
+                <span key={key}>
+                  {key[0].toUpperCase()}
+                  <span className="text-text-primary ml-1">
+                    {readout[key].toFixed(decimals)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <span
+            className={cn(
+              'flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase',
+              isLive ? 'text-green' : 'text-text-tertiary',
+            )}
+          >
+            <span
+              className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                isLive ? 'bg-green animate-pulse' : 'bg-text-tertiary',
+              )}
+            />
+            {isLive ? 'Live' : 'Delayed'}
+          </span>
         </div>
 
-        {analysis.plans.length > 1 && (
-          <div className="flex gap-1.5">
-            {analysis.plans.map((p) => (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-0.5 rounded-full border border-border/10 dark:border-border p-0.5">
+            {INTERVALS.map((value) => (
               <button
-                key={p.direction}
+                key={value}
                 type="button"
-                onClick={() => setDirection(p.direction)}
+                onClick={() => onIntervalChange(value)}
                 className={cn(
-                  'rounded-full px-3.5 py-1.5 text-[12px] font-medium capitalize transition-colors',
-                  'border border-border/10 dark:border-border',
-                  p.direction === direction
-                    ? 'bg-primary text-primary-foreground border-transparent'
+                  'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  value === interval
+                    ? 'bg-primary text-primary-foreground'
                     : 'text-text-secondary hover:bg-surface-hover',
                 )}
               >
-                {p.direction}
+                {value}
               </button>
             ))}
           </div>
-        )}
+
+          {analysis.plans.length > 1 && (
+            <div className="flex gap-0.5 rounded-full border border-border/10 dark:border-border p-0.5">
+              {analysis.plans.map((p) => (
+                <button
+                  key={p.direction}
+                  type="button"
+                  onClick={() => setDirection(p.direction)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[11px] font-medium capitalize transition-colors',
+                    p.direction === direction
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-text-secondary hover:bg-surface-hover',
+                  )}
+                >
+                  {p.direction}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </header>
 
-      {isLoading && <Skeleton className="h-[420px] rounded-none" />}
+      <div className="relative h-[460px]">
+        <div ref={containerRef} className="absolute inset-0" />
 
-      {error && (
-        <div className="h-[420px] grid place-items-center px-6 text-center">
-          <div>
-            <p className="text-text-secondary text-sm">Could not load candles</p>
-            <p className="text-text-tertiary text-[13px] mt-1">
-              Every level below is unaffected — the chart is a view of them, not
-              their source.
-            </p>
+        {(isLoading || error) && (
+          <div className="absolute inset-0 grid place-items-center bg-surface px-6 text-center">
+            {isLoading ? (
+              <p className="text-text-tertiary text-sm">Loading candles…</p>
+            ) : (
+              <div>
+                <p className="text-text-secondary text-sm">Could not load candles</p>
+                <p className="text-text-tertiary text-[13px] mt-1">
+                  Every level below is unaffected — the chart is a view of them,
+                  not their source.
+                </p>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div
-        ref={containerRef}
-        className={cn('h-[420px]', (isLoading || error) && 'hidden')}
-      />
+      <p className="px-4 py-2.5 border-t border-border/10 dark:border-border text-[11px] text-text-tertiary">
+        Scroll to zoom, drag to pan. Dotted lines are confluence zones; gold is
+        the entry ladder, solid red the stop, green the targets.
+      </p>
     </section>
   );
 }

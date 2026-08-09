@@ -20,7 +20,7 @@ interface CandlesResponse {
 export function useCandles(
   symbol: string | undefined,
   interval = '1h',
-  limit = 300,
+  limit = 500,
 ) {
   return useQuery({
     queryKey: queryKeys.candles(symbol ?? '', interval),

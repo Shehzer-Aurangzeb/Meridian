@@ -15,7 +15,7 @@ import { SESSION_COOKIE } from '@/lib/session-cookie';
 const BINANCE = 'https://api.binance.com/api/v3/klines';
 
 const SYMBOL = /^[A-Z0-9]{2,15}$/;
-const INTERVALS = ['15m', '1h', '4h', '12h', '1d'] as const;
+const INTERVALS = ['15m', '1h', '4h', '12h', '1d', '1w'] as const;
 
 export interface Candle {
   /** Seconds, which is what lightweight-charts wants. */
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const symbol = (params.get('symbol') ?? '').trim().toUpperCase();
   const interval = params.get('interval') ?? '1h';
-  const limit = Math.min(Number(params.get('limit')) || 300, 1000);
+  const limit = Math.min(Number(params.get('limit')) || 500, 1000);
 
   if (!SYMBOL.test(symbol)) {
     return NextResponse.json({ message: 'Invalid symbol' }, { status: 400 });
