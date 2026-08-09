@@ -1,15 +1,14 @@
 'use client';
 
-export interface SummaryStatsData {
-  totalAnalyses: number;
-  sinceDateLabel: string;
-  hitRatePercent: number;
-  wins: number;
-  losses: number;
-  averageR: number;
-  currentlyOpenCount: number;
-  openCoins: string[];
-}
+import type { AnalysesSummary } from '@/lib/summarise-analyses';
+
+/**
+ * Counts only — every value here is derivable from the list response.
+ *
+ * Hit rate and average R used to sit in this strip. They are gone on purpose:
+ * both are measurement-harness numbers, and a live-looking win rate on a
+ * dashboard is exactly how a research result gets mistaken for a track record.
+ */
 
 interface SumCellProps {
   eyebrow: string;
@@ -35,56 +34,36 @@ function SumCell({ eyebrow, value, unit, subtext, isLast }: SumCellProps) {
           <span className="text-[16px] md:text-[18px] text-text-secondary ml-0.5">{unit}</span>
         )}
       </div>
-      <div className="font-mono text-[11px] tracking-[0.04em] text-text-tertiary mt-1.5">
+      <div className="font-mono text-[11px] tracking-[0.04em] text-text-tertiary mt-1.5 truncate">
         {subtext}
       </div>
     </div>
   );
 }
 
-/**
- * Mock data for development
- */
-export const MOCK_SUMMARY_STATS: SummaryStatsData = {
-  totalAnalyses: 128,
-  sinceDateLabel: 'Since 12 Feb 2026',
-  hitRatePercent: 68,
-  wins: 87,
-  losses: 41,
-  averageR: 1.84,
-  currentlyOpenCount: 3,
-  openCoins: ['BTC', 'ETH', 'MATIC'],
-};
-
-interface SummaryStatsProps {
-  data?: SummaryStatsData;
-}
-
-export function SummaryStats({ data = MOCK_SUMMARY_STATS }: SummaryStatsProps) {
+export function SummaryStats({ data }: { data: AnalysesSummary }) {
   return (
     <section className="mb-8">
       <div className="bg-surface border border-border/10 dark:border-border rounded-lg overflow-hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
         <SumCell
-          eyebrow="Total analyses"
+          eyebrow="Analyses"
           value={data.totalAnalyses}
           subtext={data.sinceDateLabel}
         />
         <SumCell
-          eyebrow="Hit rate"
-          value={data.hitRatePercent}
-          unit="%"
-          subtext={`${data.wins} win · ${data.losses} loss`}
+          eyebrow="Coins covered"
+          value={data.coinsCovered}
+          subtext={data.coinList}
         />
         <SumCell
-          eyebrow="Average R"
-          value={data.averageR.toFixed(2)}
-          unit="×"
-          subtext="Per closed trade"
+          eyebrow="Most recent"
+          value={data.latestCoin}
+          subtext={data.latestLabel}
         />
         <SumCell
-          eyebrow="Currently open"
-          value={data.currentlyOpenCount}
-          subtext={data.openCoins.join(', ')}
+          eyebrow="Failed runs"
+          value={data.failedCount}
+          subtext={data.failedCount === 0 ? 'All runs completed' : 'See the rows marked failed'}
           isLast
         />
       </div>

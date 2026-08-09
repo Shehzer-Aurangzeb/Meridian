@@ -6,37 +6,15 @@ import { cn } from '@/lib/utils';
 import { ArrowRightIcon } from '@/assets/icons/arrow-right-icon';
 import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
-import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
-import { NotWired } from '@/components/ui/not-wired';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 
 export function QuickAnalyze() {
-  if (!isFeatureEnabled('ANALYSIS')) {
-    return (
-      <section className="mt-10">
-        <SectionHead eyebrow="Quick analyze" title="Start a new analysis" />
-        <NotWired
-          title="Not wired"
-          detail="The analysis screen still calls a deleted route. Rewire it to POST /api/analyses."
-        />
-      </section>
-    );
-  }
-  return <QuickAnalyzeForm />;
-}
-
-function QuickAnalyzeForm() {
   const router = useRouter();
   const [coin, setCoin] = useState('');
-  const [timeframe, setTimeframe] = useState<Timeframe>('1D');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (coin.trim()) {
-      router.push(`/analysis?coin=${coin.toUpperCase()}&tf=${timeframe}`);
-    } else {
-      router.push('/analysis');
-    }
+    const symbol = coin.trim().toUpperCase();
+    router.push(symbol ? `/analysis?coin=${encodeURIComponent(symbol)}` : '/analysis');
   };
 
   return (
@@ -51,9 +29,8 @@ function QuickAnalyzeForm() {
       <Card className="p-6">
         <form
           onSubmit={handleSubmit}
-          className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-4 items-end"
+          className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end"
         >
-          {/* Coin input */}
           <div className="flex flex-col gap-2.5">
             <label
               htmlFor="quick-coin"
@@ -78,15 +55,6 @@ function QuickAnalyzeForm() {
             />
           </div>
 
-          {/* Timeframe selector */}
-          <div className="flex flex-col gap-2.5 self-stretch">
-            <label className="text-xs tracking-[0.16em] uppercase text-text-tertiary font-medium">
-              Timeframe
-            </label>
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
-          </div>
-
-          {/* Submit button */}
           <div className="self-end">
             <button
               type="submit"
