@@ -218,7 +218,12 @@ export interface AnalysisDetail {
   currentPrice: number;
   freshness: Freshness;
   outcomes: PlanResult[];
-  verdict: Verdict;
+  /**
+   * Null against an API deployed before the verdict shipped. The frontend and
+   * the API deploy on different clocks — Vercel in seconds, CDK in minutes —
+   * so every deploy has a window where this field is not there yet.
+   */
+  verdict: Verdict | null;
   narration: SavedNarration | null;
   analysis: AnalysisRecord;
 }

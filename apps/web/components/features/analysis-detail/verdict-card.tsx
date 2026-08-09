@@ -22,7 +22,7 @@ const TONE: Record<Freshness, string> = {
 
 interface VerdictCardProps {
   id: string;
-  verdict: Verdict;
+  verdict: Verdict | null;
   narration: SavedNarration | null;
   freshness: Freshness;
 }
@@ -30,6 +30,11 @@ interface VerdictCardProps {
 export function VerdictCard({ id, verdict, narration, freshness }: VerdictCardProps) {
   const narrate = useNarrate(id);
   const read = narration ?? narrate.data;
+
+  // An API deployed before the verdict shipped. The evidence below is the
+  // whole analysis and renders fine without this card, so drop it rather than
+  // take the page down with it.
+  if (!verdict) return null;
 
   return (
     <section className={cn('bg-surface border rounded-xl overflow-hidden', TONE[freshness])}>
