@@ -67,6 +67,18 @@ jobs:
         with:
           platforms: arm64
 
+      # An unset secret makes role-to-assume empty, and the action then fails
+      # with "Could not load credentials from any providers" — which sounds
+      # like an AWS problem and is actually a missing repo secret.
+      - name: Check the deploy role secret is set
+        run: |
+          if [ -z "${{ secrets.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "AWS_DEPLOY_ROLE_ARN is not set."
+            echo "Settings -> Secrets and variables -> ACTIONS (not Dependabot):"
+            echo "  arn:aws:iam::<account>:role/meridian-github-deploy"
+            exit 1
+          fi
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}

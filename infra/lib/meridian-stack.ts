@@ -12,11 +12,40 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
 /**
- * Coins the scheduled run analyses. Six runs a day across these is the cadence
- * the plan backtest supports: median time for price to reach a zone was 3h,
- * and 100% of fills happened within 24h.
+ * Coins the scheduled run analyses.
+ *
+ * BTC and ETH as the majors, plus eight long-standing large caps chosen to
+ * span different sectors — L1s, an oracle, a payments coin — rather than the
+ * top eight by market cap. Highly correlated coins produce highly correlated
+ * analyses, which is less information for the same cost.
+ *
+ * All ten verified to return a full 250-candle 12h history on Binance, which
+ * is what the regime leg needs for its bandwidth percentile.
+ *
+ * Easy swaps if you want them: DOGE, ATOM, NEAR, ARB, OP, UNI, AAVE — all
+ * checked and available.
  */
-const SCHEDULED_SYMBOLS = ['BTC', 'ETH', 'SOL'];
+const SCHEDULED_SYMBOLS = [
+  'BTC', 'ETH',
+  'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'LTC',
+];
+
+/**
+ * How often the schedule fires. Every 8 hours — 00:00, 08:00, 16:00 UTC.
+ *
+ * The measured constraint (STATE_OF_PLAY.md 14h, 582 trades): price reaches
+ * a zone in a median of 3h, 82% within 12h, 100% within 24h. So an analysis
+ * older than a day is finished, and 8h spacing keeps every run well inside
+ * that window while producing 30 analyses a day across ten coins.
+ *
+ * Going wider costs something specific: at 12h spacing, roughly half of what
+ * you open will already have filled or stopped. That is still fine for the
+ * forward-test record — the outcome badge says what happened — but worse for
+ * deciding whether to take a trade now.
+ *
+ * Crypto trades 24/7, so there is no session to align to.
+ */
+const SCHEDULE_HOURS = '0/8';
 
 export interface MeridianStackProps extends StackProps {
   /** Where the frontend is served from, for CORS. */
@@ -130,8 +159,8 @@ export class MeridianStack extends Stack {
     // of our own shape — Lambda events are just JSON, and `lambda.ts` checks
     // for this shape to tell a cron run from an HTTP request.
     new events.Rule(this, 'AnalysisSchedule', {
-      description: `Run an analysis for ${SCHEDULED_SYMBOLS.join(', ')} every 4 hours`,
-      schedule: events.Schedule.cron({ minute: '0', hour: '0/4' }),
+      description: `Analyse ${SCHEDULED_SYMBOLS.length} coins every 8 hours`,
+      schedule: events.Schedule.cron({ minute: '0', hour: SCHEDULE_HOURS }),
       targets: [
         new targets.LambdaFunction(api, {
           event: events.RuleTargetInput.fromObject({
