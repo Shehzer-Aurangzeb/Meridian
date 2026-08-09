@@ -2,6 +2,8 @@
   "app": "npx ts-node --prefer-ts-exts bin/meridian.ts",
   "context": {
     "@aws-cdk/core:newStyleStackSynthesis": true,
-    "@aws-cdk/aws-lambda:recognizeVersionProps": true
+    "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+
+    "githubRepo": "Shehzer-Aurangzeb/Meridian"
   }
 }

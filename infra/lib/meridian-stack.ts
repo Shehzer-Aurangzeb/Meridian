@@ -174,13 +174,18 @@ export class MeridianStack extends Stack {
       ],
     });
 
-    // ── CI deploy role (optional) ───────────────────────────────────────
-    // Created only when a repo is named:
-    //   cdk deploy -c githubRepo=owner/repo
-    //
+    // ── CI deploy role ──────────────────────────────────────────────────
     // GitHub Actions assumes this role using an OIDC token it signs for each
     // job. No AWS access keys exist in the repository, so there is nothing to
     // leak and nothing to rotate — the credentials expire with the job.
+    //
+    // `githubRepo` lives in cdk.json, NOT on the command line. It used to be
+    // passed as `-c githubRepo=...`, which made this block conditional on a
+    // flag the CI deploy did not pass — so the first CI deploy synthesised a
+    // template WITHOUT the role, and CloudFormation dutifully deleted the role
+    // that deploy had just authenticated with. It worked exactly once and then
+    // destroyed its own credentials. Context that the stack cannot be correct
+    // without does not belong in an argument someone has to remember.
     const githubRepo = this.node.tryGetContext('githubRepo') as string | undefined;
     if (githubRepo) {
       const provider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
