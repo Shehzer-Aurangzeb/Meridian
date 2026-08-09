@@ -1,14 +1,8 @@
 import { cn } from '@/lib/utils';
 import { SectionHead } from '@/components/ui/section-head';
 
-/**
- * Indicator flag type
- */
 export type IndicatorFlag = 'bullish' | 'neutral' | 'bearish';
 
-/**
- * Base indicator data
- */
 interface BaseIndicator {
   name: string;
   period: string;
@@ -18,17 +12,11 @@ interface BaseIndicator {
   note: string;
 }
 
-/**
- * RSI specific data
- */
 export interface RSIIndicator extends BaseIndicator {
   type: 'rsi';
   rsiValue: number;
 }
 
-/**
- * Bollinger specific data
- */
 export interface BollingerIndicator extends BaseIndicator {
   type: 'bollinger';
   lower: string;
@@ -37,9 +25,6 @@ export interface BollingerIndicator extends BaseIndicator {
   position: number; // 0-100% position within bands
 }
 
-/**
- * ATR specific data
- */
 export interface ATRIndicator extends BaseIndicator {
   type: 'atr';
   sparkData: number[];
@@ -47,9 +32,6 @@ export interface ATRIndicator extends BaseIndicator {
 
 export type IndicatorData = RSIIndicator | BollingerIndicator | ATRIndicator;
 
-/**
- * Indicator flag badge
- */
 function FlagBadge({ flag, label }: { flag: IndicatorFlag; label: string }) {
   return (
     <span
@@ -65,9 +47,6 @@ function FlagBadge({ flag, label }: { flag: IndicatorFlag; label: string }) {
   );
 }
 
-/**
- * RSI visualization component
- */
 function RSIVisualization({ value }: { value: number }) {
   const position = Math.max(0, Math.min(100, value));
 
@@ -101,9 +80,6 @@ function RSIVisualization({ value }: { value: number }) {
   );
 }
 
-/**
- * Bollinger Bands visualization
- */
 function BollingerVisualization({
   lower,
   mid,
@@ -139,9 +115,6 @@ function BollingerVisualization({
   );
 }
 
-/**
- * ATR Sparkline visualization
- */
 function ATRSparkline({ data }: { data: number[] }) {
   const max = Math.max(...data);
   const min = Math.min(...data);
@@ -172,9 +145,6 @@ function ATRSparkline({ data }: { data: number[] }) {
   );
 }
 
-/**
- * Individual indicator card
- */
 function IndicatorCard({ indicator }: { indicator: IndicatorData }) {
   return (
     <article className="bg-surface border border-border/10 dark:border-border rounded-xl p-7">
@@ -211,17 +181,11 @@ function IndicatorCard({ indicator }: { indicator: IndicatorData }) {
   );
 }
 
-/**
- * Indicators section props
- */
 interface IndicatorsSectionProps {
   indicators: IndicatorData[];
   className?: string;
 }
 
-/**
- * Technical indicators section
- */
 export function IndicatorsSection({
   indicators,
   className,

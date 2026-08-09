@@ -14,8 +14,6 @@ import type { HistoryEntry } from '@/components/features/history/history-table';
 import type { HistoryFilters } from '@/components/features/history/filter-bar';
 import type { PaginationState } from '@/components/features/history/pagination';
 
-// ============ Types ============
-
 interface HistoryPageState {
   filters: HistoryFilters;
   pagination: PaginationState;
@@ -31,8 +29,6 @@ type HistoryPageAction =
   | { type: 'SET_PAGE'; page: number }
   | { type: 'SET_PAGE_SIZE'; pageSize: number }
   | { type: 'RESET_FILTERS' };
-
-// ============ Constants ============
 
 const DEFAULT_FILTERS: HistoryFilters = {
   search: '',
@@ -52,8 +48,6 @@ const initialState: HistoryPageState = {
   filters: DEFAULT_FILTERS,
   pagination: DEFAULT_PAGINATION,
 };
-
-// ============ Reducer ============
 
 function historyReducer(state: HistoryPageState, action: HistoryPageAction): HistoryPageState {
   switch (action.type) {
@@ -123,28 +117,22 @@ function historyReducer(state: HistoryPageState, action: HistoryPageAction): His
   }
 }
 
-// ============ Hook ============
-
 export function useHistoryPage() {
   const router = useRouter();
   const [state, dispatch] = useReducer(historyReducer, initialState);
 
-  // Fetch performance data (includes recent analyses)
   const { data: performanceResponse, isLoading, error } = usePerformance({ limit: 100 });
 
-  // Map API response to UI data
   const summaryStats: SummaryStatsData | null = useMemo(() => {
     if (!performanceResponse?.success || !performanceResponse.data) return null;
     return mapToSummaryStats(performanceResponse.data);
   }, [performanceResponse]);
 
-  // Map and process history entries
   const allEntries: HistoryEntry[] = useMemo(() => {
     if (!performanceResponse?.success || !performanceResponse.data) return [];
     return mapToHistoryEntries(performanceResponse.data.recentAnalyses);
   }, [performanceResponse]);
 
-  // Apply filters
   const filteredEntries = useMemo(() => {
     return filterHistoryEntries(allEntries, {
       search: state.filters.search,
@@ -153,25 +141,20 @@ export function useHistoryPage() {
     });
   }, [allEntries, state.filters.search, state.filters.signal, state.filters.outcome]);
 
-  // Apply sorting
   const sortedEntries = useMemo(() => {
     return sortHistoryEntries(filteredEntries, state.filters.sort);
   }, [filteredEntries, state.filters.sort]);
 
-  // Apply pagination
   const paginatedEntries = useMemo(() => {
     const start = (state.pagination.page - 1) * state.pagination.pageSize;
     const end = start + state.pagination.pageSize;
     return sortedEntries.slice(start, end);
   }, [sortedEntries, state.pagination.page, state.pagination.pageSize]);
 
-  // Pagination state with correct total count
   const pagination: PaginationState = useMemo(() => ({
     ...state.pagination,
     totalCount: sortedEntries.length,
   }), [state.pagination, sortedEntries.length]);
-
-  // ============ Handlers ============
 
   const setFilters = useCallback((filters: HistoryFilters) => {
     dispatch({ type: 'SET_FILTERS', filters });
@@ -210,20 +193,16 @@ export function useHistoryPage() {
   }, [router]);
 
   return {
-    // Data
     summaryStats,
     entries: paginatedEntries,
     totalFiltered: sortedEntries.length,
 
-    // State
     filters: state.filters,
     pagination,
 
-    // Loading/Error
     isLoading,
     error: error?.message ?? null,
 
-    // Filter handlers
     setFilters,
     setSearch,
     setSignalFilter,
@@ -232,10 +211,8 @@ export function useHistoryPage() {
     setSort,
     resetFilters,
 
-    // Pagination handlers
     setPage,
 
-    // Row actions
     handleRowClick,
   };
 }

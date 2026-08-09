@@ -2,9 +2,6 @@
 
 import { useState } from 'react';
 
-/**
- * Profile data type
- */
 export interface ProfileData {
   firstName: string;
   lastName: string;
@@ -13,9 +10,6 @@ export interface ProfileData {
   initials: string;
 }
 
-/**
- * Default profile data
- */
 export const DEFAULT_PROFILE: ProfileData = {
   firstName: 'Elena',
   lastName: 'Marchetti',
@@ -24,9 +18,6 @@ export const DEFAULT_PROFILE: ProfileData = {
   initials: 'EM',
 };
 
-/**
- * Timezone options
- */
 const TIMEZONES = [
   'Europe/London · GMT+1',
   'America/New_York · GMT−4',
@@ -34,9 +25,6 @@ const TIMEZONES = [
   'Asia/Singapore · GMT+8',
 ];
 
-/**
- * Form input field
- */
 interface FieldProps {
   label: string;
   id: string;
@@ -66,9 +54,6 @@ function Field({ label, id, type = 'text', value, onChange, help }: FieldProps) 
   );
 }
 
-/**
- * Select field
- */
 interface SelectFieldProps {
   label: string;
   id: string;
@@ -97,9 +82,6 @@ function SelectField({ label, id, value, options, onChange }: SelectFieldProps) 
   );
 }
 
-/**
- * Profile settings card
- */
 interface ProfileCardProps {
   profile?: ProfileData;
   onSave?: (profile: ProfileData) => void;

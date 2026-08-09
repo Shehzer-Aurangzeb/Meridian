@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils';
 import { NAVIGATION, type NavItem } from '@/lib/navigation';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
-
 function Brand() {
   return (
     <Link href="/dashboard" className="flex items-center gap-3 px-7 pb-9 no-underline">
@@ -23,7 +22,6 @@ function Brand() {
   );
 }
 
-
 function NavSectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-[11px] uppercase tracking-[0.18em] text-gold/55 font-medium px-7 pb-3 mt-1">
@@ -31,7 +29,6 @@ function NavSectionLabel({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 
 function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   const Icon = item.icon;
@@ -68,7 +65,6 @@ function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   );
 }
 
-
 function UserProfile() {
   const showSettings = isFeatureEnabled('SETTINGS');
   
@@ -102,17 +98,10 @@ function UserProfile() {
   );
 }
 
-/**
- * Sidebar props
- */
 interface SidebarProps {
   className?: string;
 }
 
-/**
- * Main sidebar component
- * Displays navigation grouped by sections with user profile at bottom
- */
 export function Sidebar({ className }: SidebarProps) {
   const pathname = usePathname();
 

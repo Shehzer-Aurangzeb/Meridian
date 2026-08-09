@@ -2,27 +2,18 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Tab configuration
- */
 export interface AlertTab {
   id: string;
   label: string;
   count: number;
 }
 
-/**
- * Default tabs for alerts page
- */
 export const ALERTS_TABS: AlertTab[] = [
   { id: 'active', label: 'Active', count: 8 },
   { id: 'triggered', label: 'Triggered', count: 12 },
   { id: 'paused', label: 'Paused', count: 2 },
 ];
 
-/**
- * Alert tabs for filtering by status
- */
 interface AlertTabsProps {
   tabs: AlertTab[];
   activeTab: string;

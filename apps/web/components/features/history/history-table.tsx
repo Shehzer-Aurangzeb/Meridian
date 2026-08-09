@@ -2,9 +2,6 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Analysis history entry
- */
 export interface HistoryEntry {
   id: string;
   date: string;
@@ -18,9 +15,6 @@ export interface HistoryEntry {
   hasNotes: boolean;
 }
 
-/**
- * Badge for signal type
- */
 function SignalBadge({ signal }: { signal: HistoryEntry['signal'] }) {
   return (
     <span
@@ -36,9 +30,6 @@ function SignalBadge({ signal }: { signal: HistoryEntry['signal'] }) {
   );
 }
 
-/**
- * Badge for outcome
- */
 function OutcomeBadge({ outcome, rValue }: { outcome: HistoryEntry['outcome']; rValue?: number }) {
   let label = '';
   if (outcome === 'win' && rValue !== undefined) {
@@ -66,9 +57,6 @@ function OutcomeBadge({ outcome, rValue }: { outcome: HistoryEntry['outcome']; r
   );
 }
 
-/**
- * Note indicator dot
- */
 function NoteDot() {
   return (
     <span
@@ -96,9 +84,6 @@ export const MOCK_HISTORY: HistoryEntry[] = [
   { id: '12', date: '02 May', coin: 'BTC', signal: 'long', strategy: 'Trend continuation', timeframe: '1D', confidence: 81, outcome: 'win', rValue: 3.2, hasNotes: false },
 ];
 
-/**
- * History table with responsive layout
- */
 interface HistoryTableProps {
   entries?: HistoryEntry[];
   onRowClick?: (entry: HistoryEntry) => void;

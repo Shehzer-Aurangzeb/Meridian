@@ -1,7 +1,5 @@
 import type { Action, StrategyRoute } from './analysis';
 
-// ============ Performance Types ============
-
 export type AnalysisStatus = 'correct' | 'failed' | 'pending' | 'neutral';
 
 export interface PerformanceAnalysis {
@@ -34,8 +32,6 @@ export interface PerformanceResponse {
   data?: PerformanceData;
   error?: string;
 }
-
-// ============ History Types ============
 
 export interface CoordinatorRunRecord {
   id: string;

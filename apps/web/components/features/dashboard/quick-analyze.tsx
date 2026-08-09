@@ -8,9 +8,6 @@ import { Card } from '@/components/ui/card';
 import { SectionHead } from '@/components/ui/section-head';
 import { TimeframeSelector, type Timeframe } from '@/components/ui/timeframe-selector';
 
-/**
- * Quick analyze section for dashboard
- */
 export function QuickAnalyze() {
   const router = useRouter();
   const [coin, setCoin] = useState('');

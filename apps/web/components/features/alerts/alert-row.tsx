@@ -2,9 +2,6 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Alert data type
- */
 export interface AlertData {
   id: string;
   coin: string;
@@ -17,9 +14,6 @@ export interface AlertData {
   enabled: boolean;
 }
 
-/**
- * Toggle switch component
- */
 interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -50,9 +44,6 @@ function Toggle({ checked, onChange }: ToggleProps) {
   );
 }
 
-/**
- * Section header for alert groups
- */
 interface AlertSectionHeaderProps {
   title: string;
   count: number;
@@ -72,9 +63,6 @@ export function AlertSectionHeader({ title, count, className }: AlertSectionHead
   );
 }
 
-/**
- * Individual alert row
- */
 interface AlertRowProps {
   alert: AlertData;
   onToggle?: (id: string, enabled: boolean) => void;
@@ -133,9 +121,6 @@ export function AlertRow({ alert, onToggle, isFirst, isLast, isOnly }: AlertRowP
   );
 }
 
-/**
- * Alert list wrapper
- */
 interface AlertListProps {
   alerts: AlertData[];
   onToggle?: (id: string, enabled: boolean) => void;

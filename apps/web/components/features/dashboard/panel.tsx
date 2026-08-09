@@ -24,9 +24,6 @@ export function Panel({ children, className }: PanelProps) {
   );
 }
 
-/**
- * Panel header with title and optional action link
- */
 interface PanelHeadProps {
   title: string;
   meta?: string;

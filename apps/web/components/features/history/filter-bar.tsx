@@ -2,9 +2,6 @@
 
 import { SearchIcon } from '@/assets/icons/search-icon';
 
-/**
- * Filter options for the history table
- */
 export interface HistoryFilters {
   search: string;
   signal: 'all' | 'long' | 'short' | 'skipped';
@@ -21,9 +18,6 @@ const DEFAULT_FILTERS: HistoryFilters = {
   sort: 'newest',
 };
 
-/**
- * Section header for the filter area
- */
 interface SectionHeadProps {
   eyebrow: string;
   title: string;
@@ -46,9 +40,6 @@ function SectionHead({ eyebrow, title, meta }: SectionHeadProps) {
   );
 }
 
-/**
- * Custom select dropdown with chevron
- */
 interface FilterSelectProps {
   label: string;
   value: string;
@@ -82,9 +73,6 @@ function FilterSelect({ label, value, onChange, options }: FilterSelectProps) {
   );
 }
 
-/**
- * Filter bar with search and dropdowns
- */
 interface FilterBarProps {
   filters?: HistoryFilters;
   onFiltersChange?: (filters: HistoryFilters) => void;

@@ -5,9 +5,6 @@ import { cn } from '@/lib/utils';
 import { Panel, PanelHead } from './panel';
 import { PlusIcon } from '@/assets/icons/plus-icon';
 
-/**
- * Watchlist item type
- */
 interface WatchItem {
   symbol: string;
   name: string;
@@ -15,9 +12,6 @@ interface WatchItem {
   change: number;
 }
 
-/**
- * Watchlist row component
- */
 function WatchRow({ item }: { item: WatchItem }) {
   const isUp = item.change >= 0;
 
@@ -56,9 +50,6 @@ function WatchRow({ item }: { item: WatchItem }) {
   );
 }
 
-/**
- * Add coin button
- */
 function AddButton() {
   return (
     <button
@@ -89,9 +80,6 @@ const MOCK_WATCHLIST: WatchItem[] = [
   { symbol: 'AVAX', name: 'Avalanche', price: '$36.71', change: 1.18 },
 ];
 
-/**
- * Watchlist panel
- */
 export function Watchlist() {
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', {

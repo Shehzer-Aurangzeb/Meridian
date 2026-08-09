@@ -3,9 +3,6 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
-/**
- * Triggered alert data
- */
 export interface TriggeredAlert {
   id: string;
   coin: string;
@@ -19,9 +16,6 @@ export interface TriggeredAlert {
   actionHref: string;
 }
 
-/**
- * Section header for triggered alerts
- */
 interface TriggeredSectionHeaderProps {
   onClearAll?: () => void;
 }
@@ -47,9 +41,6 @@ export function TriggeredSectionHeader({ onClearAll }: TriggeredSectionHeaderPro
   );
 }
 
-/**
- * Individual triggered alert row
- */
 interface TriggeredAlertRowProps {
   alert: TriggeredAlert;
   isLast?: boolean;
@@ -111,9 +102,6 @@ function TriggeredAlertRow({ alert, isLast }: TriggeredAlertRowProps) {
   );
 }
 
-/**
- * Triggered alerts list
- */
 interface TriggeredAlertsListProps {
   alerts: TriggeredAlert[];
 }

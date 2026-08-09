@@ -1,14 +1,8 @@
 import { cn } from '@/lib/utils';
 import { SectionHead } from '@/components/ui/section-head';
 
-/**
- * Signal direction type
- */
 export type SignalDirection = 'long' | 'short' | 'wait';
 
-/**
- * Price level type
- */
 export interface PriceLevel {
   label: string;
   value: string;
@@ -18,9 +12,6 @@ export interface PriceLevel {
   trend?: 'up' | 'down' | 'neutral';
 }
 
-/**
- * Signal data type
- */
 export interface SignalData {
   direction: SignalDirection;
   strategy: string;
@@ -33,9 +24,6 @@ export interface SignalData {
   dateRange: string;
 }
 
-/**
- * Action badge component
- */
 function ActionBadge({ direction }: { direction: SignalDirection }) {
   const labels: Record<SignalDirection, string> = {
     long: 'Long',
@@ -58,9 +46,6 @@ function ActionBadge({ direction }: { direction: SignalDirection }) {
   );
 }
 
-/**
- * Meta item component
- */
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
@@ -74,9 +59,6 @@ function MetaItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * Confidence display component
- */
 function ConfidenceDisplay({ value }: { value: number }) {
   return (
     <div>
@@ -91,9 +73,6 @@ function ConfidenceDisplay({ value }: { value: number }) {
   );
 }
 
-/**
- * Price card component
- */
 function PriceCard({ price, isLast }: { price: PriceLevel; isLast: boolean }) {
   return (
     <div
@@ -132,17 +111,11 @@ function PriceCard({ price, isLast }: { price: PriceLevel; isLast: boolean }) {
   );
 }
 
-/**
- * SignalCard props
- */
 interface SignalCardProps {
   signal: SignalData;
   className?: string;
 }
 
-/**
- * Signal card showing the analysis verdict
- */
 export function SignalCard({ signal, className }: SignalCardProps) {
   return (
     <section className={cn('mt-14', className)}>

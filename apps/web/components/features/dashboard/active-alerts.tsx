@@ -2,9 +2,6 @@ import { cn } from '@/lib/utils';
 import { Panel, PanelHead } from './panel';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
-/**
- * Active alerts panel - Coming soon state
- */
 export function ActiveAlerts() {
   const isEnabled = isFeatureEnabled('ALERTS');
 

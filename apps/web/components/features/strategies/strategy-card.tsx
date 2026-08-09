@@ -2,26 +2,17 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Strategy condition type
- */
 export interface StrategyCondition {
   text: string;
   weight: string;
 }
 
-/**
- * Strategy stats type
- */
 export interface StrategyStats {
   hitRate: number;
   avgR: number;
   trades90d: number;
 }
 
-/**
- * Strategy data type
- */
 export interface StrategyData {
   id: string;
   number: string;
@@ -32,9 +23,6 @@ export interface StrategyData {
   stats: StrategyStats;
 }
 
-/**
- * Category tag component
- */
 function CategoryTag({ category }: { category: StrategyData['category'] }) {
   return (
     <span
@@ -51,9 +39,6 @@ function CategoryTag({ category }: { category: StrategyData['category'] }) {
   );
 }
 
-/**
- * Individual strategy card
- */
 interface StrategyCardProps {
   strategy: StrategyData;
 }
@@ -130,9 +115,6 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
   );
 }
 
-/**
- * Strategy grid wrapper
- */
 interface StrategyGridProps {
   strategies: StrategyData[];
 }

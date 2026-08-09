@@ -8,9 +8,6 @@ import { usePerformance } from '@/lib/hooks/use-performance';
 import { formatCurrency } from '@/lib/format';
 import type { PerformanceAnalysis } from '@/types';
 
-/**
- * Meta row for analysis details
- */
 interface MetaItem {
   label: string;
   value: string;
@@ -41,9 +38,6 @@ function MetaRow({ items }: { items: MetaItem[] }) {
   );
 }
 
-/**
- * Loading skeleton
- */
 function LatestAnalysisSkeleton() {
   return (
     <Panel>
@@ -69,9 +63,6 @@ function LatestAnalysisSkeleton() {
   );
 }
 
-/**
- * Empty state
- */
 function EmptyState() {
   return (
     <Panel>
@@ -83,9 +74,6 @@ function EmptyState() {
   );
 }
 
-/**
- * Format analysis for display
- */
 function formatAnalysis(analysis: PerformanceAnalysis) {
   const timeAgo = new Date(analysis.createdAt).toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -108,9 +96,6 @@ function formatAnalysis(analysis: PerformanceAnalysis) {
   };
 }
 
-/**
- * Latest analysis panel
- */
 export function LatestAnalysis() {
   const { data, isLoading, error } = usePerformance();
 

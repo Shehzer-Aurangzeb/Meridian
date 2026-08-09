@@ -2,9 +2,6 @@
 
 import { cn } from '@/lib/utils';
 
-/**
- * Timeframe options
- */
 export const TIMEFRAMES = ['1H', '4H', '1D', '1W'] as const;
 export type Timeframe = (typeof TIMEFRAMES)[number];
 
@@ -14,9 +11,6 @@ interface TimeframeSelectorProps {
   disabled?: boolean;
 }
 
-/**
- * Segmented control for timeframe selection
- */
 export function TimeframeSelector({ value, onChange, disabled }: TimeframeSelectorProps) {
   return (
     <div className="inline-flex border border-border-hover/18 dark:border-border-hover rounded-full p-[3px] bg-background gap-0">

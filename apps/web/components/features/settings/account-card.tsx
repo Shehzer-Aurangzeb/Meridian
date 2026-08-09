@@ -1,8 +1,5 @@
 'use client';
 
-/**
- * OAuth connection type
- */
 export interface OAuthConnection {
   id: string;
   provider: 'google' | 'apple';
@@ -11,17 +8,11 @@ export interface OAuthConnection {
   connected: boolean;
 }
 
-/**
- * Default connections
- */
 export const DEFAULT_CONNECTIONS: OAuthConnection[] = [
   { id: '1', provider: 'google', name: 'Google', email: 'elena.marchetti@dedicate.com', connected: true },
   { id: '2', provider: 'apple', name: 'Apple', connected: false },
 ];
 
-/**
- * Google icon
- */
 function GoogleIcon() {
   return (
     <svg viewBox="0 0 48 48" className="w-[18px] h-[18px]">
@@ -33,9 +24,6 @@ function GoogleIcon() {
   );
 }
 
-/**
- * Apple icon
- */
 function AppleIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
@@ -44,9 +32,6 @@ function AppleIcon() {
   );
 }
 
-/**
- * Sign out icon
- */
 function SignOutIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
@@ -57,9 +42,6 @@ function SignOutIcon() {
   );
 }
 
-/**
- * OAuth row component
- */
 interface OAuthRowProps {
   connection: OAuthConnection;
   onConnect?: (id: string) => void;
@@ -96,9 +78,6 @@ function OAuthRow({ connection, onConnect, isLast }: OAuthRowProps) {
   );
 }
 
-/**
- * Account settings card
- */
 interface AccountCardProps {
   connections?: OAuthConnection[];
   onConnect?: (id: string) => void;

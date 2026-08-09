@@ -1,8 +1,5 @@
 'use client';
 
-/**
- * Summary statistics data type
- */
 export interface SummaryStatsData {
   totalAnalyses: number;
   sinceDateLabel: string;
@@ -14,9 +11,6 @@ export interface SummaryStatsData {
   openCoins: string[];
 }
 
-/**
- * Individual summary cell
- */
 interface SumCellProps {
   eyebrow: string;
   value: string | number;
@@ -62,10 +56,6 @@ export const MOCK_SUMMARY_STATS: SummaryStatsData = {
   openCoins: ['BTC', 'ETH', 'MATIC'],
 };
 
-/**
- * Summary statistics strip showing key performance metrics
- * 4-column grid: Total analyses, Hit rate, Average R, Currently open
- */
 interface SummaryStatsProps {
   data?: SummaryStatsData;
 }

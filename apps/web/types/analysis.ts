@@ -1,12 +1,8 @@
-// ============ Common Types ============
-
 export type Action = 'LONG' | 'SHORT' | 'WAIT';
 export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 export type StrategyRoute = 'SQUEEZE_BREAKOUT' | 'CONFLUENCE_CHECKLIST' | 'UNKNOWN';
 export type MarketRegime = 'COMPRESSION' | 'TRENDING' | 'MEAN_REVERSION';
 export type TradeType = 'swing' | 'day' | 'scalp';
-
-// ============ Legacy Analysis Types ============
 
 export interface AnalysisData {
   id: string;
@@ -42,8 +38,6 @@ export interface AnalysisResponse {
   error?: string;
 }
 
-// ============ Coordinator Analysis Types ============
-
 export interface ClaudeAnalysisResponse {
   action: Action;
   confidence: number;
@@ -78,9 +72,6 @@ export interface SqueezeSetup {
   confidence: number;
 }
 
-/**
- * Market regime metrics from backend
- */
 export interface MarketRegimeMetrics {
   adx: number;
   pdi: number;
@@ -99,9 +90,6 @@ export interface MarketRegimeMetrics {
   };
 }
 
-/**
- * Market regime result from backend
- */
 export interface MarketRegimeResult {
   symbol: string;
   timeframe: string;
@@ -136,8 +124,6 @@ export interface CoordinateAnalysisResponse {
   data?: CoordinateAnalysisData;
   error?: string;
 }
-
-// ============ Portfolio Scan Types ============
 
 export interface MacroBias {
   timeframe: '1d';
@@ -174,8 +160,6 @@ export interface PortfolioScanResult {
   expiresAt: string;
 }
 
-// ============ SSE Stream Events ============
-
 export type StreamAnalysisEvent =
   | { status: 'FETCHING_DATA'; message: string }
   | { status: 'REGIME_CLASSIFIED'; message: string; data: { regime: MarketRegime } }
@@ -183,8 +167,6 @@ export type StreamAnalysisEvent =
   | { status: 'HEARTBEAT'; ts: number }
   | { status: 'COMPLETE'; payload: { coordinator: CoordinatorAnalysisResult; ai: ClaudeAnalysisResponse | null } }
   | { status: 'ERROR'; error: string };
-
-// ============ Health Types ============
 
 export interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy';
