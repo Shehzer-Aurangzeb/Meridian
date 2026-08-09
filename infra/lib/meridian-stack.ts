@@ -8,6 +8,7 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 /**
  * Coins the scheduled run analyses. Six runs a day across these is the cadence
@@ -130,6 +131,53 @@ export class MeridianStack extends Stack {
         }),
       ],
     });
+
+    // ── CI deploy role (optional) ───────────────────────────────────────
+    // Created only when a repo is named:
+    //   cdk deploy -c githubRepo=owner/repo
+    //
+    // GitHub Actions assumes this role using an OIDC token it signs for each
+    // job. No AWS access keys exist in the repository, so there is nothing to
+    // leak and nothing to rotate — the credentials expire with the job.
+    const githubRepo = this.node.tryGetContext('githubRepo') as string | undefined;
+    if (githubRepo) {
+      const provider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
+        url: 'https://token.actions.githubusercontent.com',
+        clientIds: ['sts.amazonaws.com'],
+      });
+
+      const deployRole = new iam.Role(this, 'GithubDeployRole', {
+        roleName: 'meridian-github-deploy',
+        assumedBy: new iam.WebIdentityPrincipal(
+          provider.openIdConnectProviderArn,
+          {
+            StringEquals: {
+              'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+              // Pinned to main. Without this condition ANY branch — including
+              // one opened by a fork's pull request — could assume the role
+              // and deploy. This single line is the difference between "CI can
+              // deploy" and "anyone who opens a PR can deploy".
+              'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:ref:refs/heads/main`,
+            },
+          },
+        ),
+      });
+
+      // Not AdministratorAccess. CDK deploys by assuming the roles that
+      // `cdk bootstrap` created, so permission to assume those is all CI
+      // needs — the bootstrap roles already carry the real privileges.
+      deployRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ['sts:AssumeRole'],
+          resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+        }),
+      );
+
+      new CfnOutput(this, 'GithubDeployRoleArn', {
+        value: deployRole.roleArn,
+        description: 'Put this in the repo secret AWS_DEPLOY_ROLE_ARN',
+      });
+    }
 
     new CfnOutput(this, 'ApiUrl', {
       value: httpApi.apiEndpoint,
