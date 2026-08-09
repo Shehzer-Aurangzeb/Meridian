@@ -17,6 +17,7 @@
     "analyze": "pnpm --filter api analyze",
     "backtest": "pnpm --filter api backtest",
     "backtest:plans": "pnpm --filter api backtest:plans",
+    "forward-test": "pnpm --filter api forward-test",
     "journal": "pnpm --filter api journal"
   },
   "engines": {
