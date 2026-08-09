@@ -93,7 +93,7 @@ const config: Config = {
       },
       spacing: {
         'sidebar': '260px',
-        'content-max': '1280px',
+        'content-max': '1440px',
       },
       borderRadius: {
         DEFAULT: '12px',

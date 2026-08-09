@@ -42,7 +42,7 @@ export default function AlertsPage() {
   }, []);
 
   return (
-    <div className="p-5 md:p-8 lg:p-10">
+    <div>
       <AlertsPageHeader onNewAlert={handleNewAlert} />
 
       <section>
