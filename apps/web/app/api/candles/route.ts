@@ -11,6 +11,12 @@ import { SESSION_COOKIE } from '@/lib/session-cookie';
  *
  * Server-side rather than from the browser so the chart keeps working where
  * Binance blocks the visitor's region, and so it stays same-origin.
+ *
+ * That cuts both ways: Binance geo-blocks the US with a 451, and Vercel's
+ * default function region is iad1 (Washington DC), so this returned 502 from
+ * the deployed app while working everywhere else. vercel.json pins the
+ * functions to fra1 — which also sits next to the API in eu-central-1, so
+ * every other BFF call got faster too.
  */
 const BINANCE = 'https://api.binance.com/api/v3/klines';
 
