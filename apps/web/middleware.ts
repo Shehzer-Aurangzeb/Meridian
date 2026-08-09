@@ -16,9 +16,14 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
 // Duplicated from lib/feature-flags — middleware runs on the Edge runtime.
 // Hiding a nav link is not gating: without these, the gated pages are still
 // reachable by typing the URL.
+//
+// The DEFAULTS must match lib/feature-flags exactly. They did not: ANALYSIS
+// and HISTORY defaulted true there and false here, so a deployment without the
+// env vars showed both links in the sidebar and then redirected anyone who
+// clicked them.
 const FEATURES = {
-  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, false),
-  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, false),
+  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, true),
+  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, true),
   ALERTS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ALERTS, false),
   STRATEGIES: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_STRATEGIES, false),
   SETTINGS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_SETTINGS, false),
