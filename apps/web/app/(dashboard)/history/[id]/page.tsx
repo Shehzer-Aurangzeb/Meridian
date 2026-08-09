@@ -6,6 +6,7 @@ import { formatCurrency, formatFullDate, formatRelative } from '@/lib/format';
 import { useAnalysis } from '@/lib/hooks/use-analyses';
 import { FreshnessBadge } from '@/components/features/analysis-detail/badges';
 import { VerdictCard } from '@/components/features/analysis-detail/verdict-card';
+import { AnalysisChart } from '@/components/features/analysis-detail/analysis-chart';
 import { PlanCard } from '@/components/features/analysis-detail/plan-card';
 import { RegimeCard } from '@/components/features/analysis-detail/regime-card';
 import { LevelMapCard } from '@/components/features/analysis-detail/level-map';
@@ -93,6 +94,10 @@ export default function AnalysisDetailPage() {
         narration={narration}
         freshness={freshness}
       />
+
+      <section className="mt-8">
+        <AnalysisChart analysis={analysis} analysedAt={createdAt} />
+      </section>
 
       <section className="mt-8">
         <div className="text-[10px] font-semibold tracking-[0.16em] uppercase text-text-tertiary mb-3">

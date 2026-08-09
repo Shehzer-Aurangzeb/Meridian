@@ -14,6 +14,9 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.analyses.all, 'detail', id] as const,
   },
 
+  candles: (symbol: string, interval: string) =>
+    ['candles', symbol, interval] as const,
+
   health: ['health'] as const,
 
 } as const;
