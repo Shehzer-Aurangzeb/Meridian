@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { NAVIGATION, type NavItem } from '@/lib/navigation';
+import { USER } from '@/lib/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
 function Brand() {
@@ -74,11 +75,11 @@ function UserProfile() {
         className="w-[34px] h-[34px] rounded-full shrink-0 grid place-items-center text-text-primary font-semibold text-[13px] font-inter"
         style={{ background: 'linear-gradient(135deg, rgb(var(--gold-ink)), rgb(var(--gold-dark)))' }}
       >
-        EM
+        {USER.initials}
       </div>
       <div className="flex flex-col min-w-0">
-        <span className="text-[13px] text-sidebar-text font-medium truncate">Elena Marchetti</span>
-        <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Atelier · Pro</span>
+        <span className="text-[13px] text-sidebar-text font-medium truncate">{USER.name}</span>
+        <span className="text-[11px] text-gold/55 tracking-[0.08em] uppercase">Personal</span>
       </div>
     </>
   );
