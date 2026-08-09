@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { USER } from '@/lib/constants';
 
 export interface ProfileData {
   firstName: string;
@@ -11,11 +12,11 @@ export interface ProfileData {
 }
 
 export const DEFAULT_PROFILE: ProfileData = {
-  firstName: 'Elena',
-  lastName: 'Marchetti',
-  email: 'elena.marchetti@dedicate.com',
+  firstName: USER.firstName,
+  lastName: USER.lastName,
+  email: USER.email,
   timezone: 'Europe/London · GMT+1',
-  initials: 'EM',
+  initials: USER.initials,
 };
 
 const TIMEZONES = [

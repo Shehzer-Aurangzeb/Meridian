@@ -1,4 +1,5 @@
 'use client';
+import { USER } from '@/lib/constants';
 
 export interface OAuthConnection {
   id: string;
@@ -9,7 +10,7 @@ export interface OAuthConnection {
 }
 
 export const DEFAULT_CONNECTIONS: OAuthConnection[] = [
-  { id: '1', provider: 'google', name: 'Google', email: 'elena.marchetti@dedicate.com', connected: true },
+  { id: '1', provider: 'google', name: 'Google', email: USER.email, connected: true },
   { id: '2', provider: 'apple', name: 'Apple', connected: false },
 ];
 

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { USER } from '@/lib/constants';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -34,8 +35,10 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({
-  userName = 'Elena',
-  subhead = 'You have one open position and three indicator alerts since yesterday\'s close. Markets opened calm; BTC is consolidating at support.',
+  userName = USER.firstName,
+  // Was a fabricated summary — open positions, alert counts, a claim about
+  // where BTC was trading. Nothing on this page can know any of that yet.
+  subhead = 'Ten coins are analysed automatically every eight hours. Open one to see its levels, the plan, and what price has done since.',
   className,
 }: PageHeaderProps) {
   const greeting = getGreeting();
