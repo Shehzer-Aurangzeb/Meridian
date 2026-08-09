@@ -60,6 +60,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The image is arm64 (Graviton) and GitHub's runners are x86, so the
+      # build needs emulation. Costs build time; buys ~20% cheaper runtime and
+      # a byte-identical artifact whether it is built here or on a laptop.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
