@@ -29,7 +29,7 @@ export default function AnalysisDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-5 md:p-8 lg:p-10 animate-pulse">
+      <div className="animate-pulse">
         <Skeleton className="h-6 w-32 mb-6" />
         <Skeleton className="h-24 mb-8" />
         <Skeleton className="h-64 mb-4" />
@@ -40,7 +40,7 @@ export default function AnalysisDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="p-5 md:p-8 lg:p-10">
+      <div>
         <BackLink />
         <div className="bg-surface border border-rust/30 rounded-xl p-8 mt-6 text-center">
           <p className="text-rust font-medium">Could not load this analysis</p>
@@ -56,7 +56,7 @@ export default function AnalysisDetailPage() {
   const drift = ((currentPrice - analysis.map.spot) / analysis.map.spot) * 100;
 
   return (
-    <div className="p-5 md:p-8 lg:p-10">
+    <div>
       <BackLink />
 
       <header className="mt-4 mb-8 flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
