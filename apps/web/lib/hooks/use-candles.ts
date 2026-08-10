@@ -32,5 +32,9 @@ export function useCandles(
     },
     enabled: Boolean(symbol),
     staleTime: 60 * 1000,
+    // The socket owns the newest bar, and closed bars never change. A refetch
+    // on window focus only re-ran setData, which snapped the forming candle
+    // back to its state at fetch time until the next socket message.
+    refetchOnWindowFocus: false,
   });
 }
