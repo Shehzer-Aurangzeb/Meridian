@@ -21,7 +21,7 @@ import { SESSION_COOKIE } from '@/lib/session-cookie';
 const BINANCE = 'https://api.binance.com/api/v3/klines';
 
 const SYMBOL = /^[A-Z0-9]{2,15}$/;
-const INTERVALS = ['15m', '1h', '4h', '12h', '1d', '1w'] as const;
+const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '12h', '1d', '1w'] as const;
 
 export interface Candle {
   /** Seconds, which is what lightweight-charts wants. */
