@@ -53,7 +53,11 @@ import { Pool } from 'pg';
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { AnalysisRecord } from '../../src/analysis-coordinator/analyze.service';
-import { PlanResult, scorePlans } from '../../src/analysis-coordinator/outcome';
+import {
+  FILL_WINDOW_HOURS,
+  PlanResult,
+  scorePlans,
+} from '../../src/analysis-coordinator/outcome';
 import { ConfluenceZone } from '../../src/analysis/interfaces/support-resistance.types';
 import { TradePlan } from '../../src/analysis/services/trade-plan.service';
 import { Candle } from '../../src/common/types/candle.types';
@@ -139,11 +143,30 @@ const overlaps = (a: ConfluenceZone, b: ConfluenceZone): boolean =>
 function isRepeat(
   plan: TradePlan,
   at: Date,
-  last: { zone: ConfluenceZone; at: Date } | undefined,
+  last: { zone: ConfluenceZone; busyUntil: number } | undefined,
 ): boolean {
   if (!last) return false;
-  const hours = (at.getTime() - last.at.getTime()) / 3_600_000;
-  return hours < COOLDOWN_H && overlaps(plan.zone, last.zone);
+  return at.getTime() < last.busyUntil && overlaps(plan.zone, last.zone);
+}
+
+/**
+ * When the zone is free to be counted again.
+ *
+ * §14h ran one position at a time per direction and started its cooldown when
+ * the trade CLOSED. Measuring from the analysis time instead let a 24h window
+ * expire while the trade it belonged to was still running under a 72h hold —
+ * so the same zone opened a second "opportunity" while the first was live.
+ *
+ * ponytail: a filled plan blocks for the full hold rather than to its real
+ * close, which scorePlans does not report. The bound is exact whenever the
+ * capped scoring bites and conservative otherwise; return the close time from
+ * outcome.ts if the difference ever shows up in the counts.
+ */
+function busyUntil(at: Date, result: PlanResult): number {
+  const from = result.filledAt
+    ? result.filledAt.getTime() + MAX_HOLD_H * 3_600_000
+    : at.getTime() + FILL_WINDOW_HOURS * 3_600_000;
+  return from + COOLDOWN_H * 3_600_000;
 }
 
 function score(
@@ -187,21 +210,40 @@ function selfCheck(): void {
     ({ zone: zone(low, high) }) as TradePlan;
   const t = (hoursIn: number): Date => new Date(Date.UTC(2026, 7, 9) + hoursIn * 3_600_000);
 
-  const prev = { zone: zone(100, 110), at: t(0) };
+  const result = (o: PlanResult['outcome'], filledAt: Date | null): PlanResult =>
+    ({ outcome: o, filledAt }) as PlanResult;
+
+  // Never filled: blocks for the 24h fill window plus the cooldown.
+  const missed = { zone: zone(100, 110), busyUntil: busyUntil(t(0), result('MISSED', null)) };
+  // Filled at hour 2 and still running: blocks until hour 2 + hold + cooldown.
+  const open = { zone: zone(100, 110), busyUntil: busyUntil(t(0), result('OPEN', t(2))) };
 
   assert(!isRepeat(plan(100, 110), t(0), undefined), 'the first plan is never a repeat');
-  assert(isRepeat(plan(100, 110), t(8), prev), 'same zone, 8h later → repeat');
-  assert(isRepeat(plan(105, 115), t(8), prev), 'overlapping zone → repeat');
-  assert(!isRepeat(plan(120, 130), t(8), prev), 'a different zone is a new opportunity');
+  assert(isRepeat(plan(100, 110), t(8), missed), 'same zone, 8h later → repeat');
+  assert(isRepeat(plan(105, 115), t(8), missed), 'overlapping zone → repeat');
+  assert(!isRepeat(plan(120, 130), t(8), missed), 'a different zone is a new opportunity');
   assert(
-    !isRepeat(plan(100, 110), t(COOLDOWN_H + 1), prev),
-    'the same zone is takeable again after the cooldown',
+    !isRepeat(plan(100, 110), t(FILL_WINDOW_HOURS + COOLDOWN_H + 1), missed),
+    'an unfilled zone is takeable again after the fill window and cooldown',
   );
   // Touching-but-not-crossing has to count as overlap, or a zone that drifts by
   // one tick between runs is counted twice.
-  assert(isRepeat(plan(110, 120), t(1), prev), 'zones that touch at one price overlap');
+  assert(isRepeat(plan(110, 120), t(1), missed), 'zones that touch at one price overlap');
 
-  console.log('self-check passed (dedup: overlap + cooldown, first plan always taken)');
+  // The bug this rule exists for: a 24h window expiring while the trade it
+  // belongs to is still open under a 72h hold.
+  assert(
+    isRepeat(plan(100, 110), t(COOLDOWN_H + 1), open),
+    'a zone whose trade is still running is NOT a fresh opportunity',
+  );
+  assert(
+    !isRepeat(plan(100, 110), t(2 + MAX_HOLD_H + COOLDOWN_H + 1), open),
+    'it frees up once the hold and the cooldown have both passed',
+  );
+
+  console.log(
+    'self-check passed (dedup: overlap + busy-until-close, first plan always taken)',
+  );
 }
 
 if (args.includes('--self-check')) {
@@ -291,7 +333,7 @@ async function main(): Promise<void> {
   let plansEmitted = 0;
   let repeats = 0;
   const taken: Scored[] = [];
-  const lastZone = new Map<string, { zone: ConfluenceZone; at: Date }>();
+  const lastZone = new Map<string, { zone: ConfluenceZone; busyUntil: number }>();
 
   for (const row of analyses) {
     const series = candles.get(row.symbol) ?? [];
@@ -322,7 +364,10 @@ async function main(): Promise<void> {
         repeats += 1;
         return;
       }
-      lastZone.set(key, { zone: plan.zone, at: row.createdAt });
+      lastZone.set(key, {
+        zone: plan.zone,
+        busyUntil: busyUntil(row.createdAt, capped[i]),
+      });
       taken.push(score(row, plan, capped[i], results[i]));
     });
   }
