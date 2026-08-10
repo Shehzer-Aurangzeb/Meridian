@@ -31,7 +31,9 @@ import type { AnalysisRecord, Direction, TradePlan } from '@/types/analyses';
  * a custom series primitive; two lines carry the same information.
  */
 
-export const INTERVALS = ['15m', '1h', '4h', '12h', '1d', '1w'] as const;
+// 1m and 5m exist so candle formation is actually watchable. On 1h the socket
+// is working perfectly and there is nothing to see — a new bar every hour.
+export const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '12h', '1d', '1w'] as const;
 export type Interval = (typeof INTERVALS)[number];
 
 /** Read a theme colour from CSS rather than duplicating the palette here. */
@@ -87,6 +89,7 @@ export function AnalysisChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const fittedRef = useRef<string | null>(null);
 
   const [hover, setHover] = useState<OHLC | null>(null);
   const [direction, setDirection] = useState<Direction | null>(
@@ -172,7 +175,15 @@ export function AnalysisChart({
     if (!series || !candles?.length) return;
 
     series.setData(candles.map((c) => ({ ...c, time: c.time as UTCTimestamp })));
-    chartRef.current?.timeScale().fitContent();
+
+    // Fit once per symbol+interval, never on a background refetch. React Query
+    // refetches on window focus, and fitting there yanked the view back to the
+    // full range every time you tabbed away and returned — mid-zoom.
+    const key = `${analysis.symbol}:${interval}`;
+    if (fittedRef.current !== key) {
+      chartRef.current?.timeScale().fitContent();
+      fittedRef.current = key;
+    }
 
     // Where the analysis was taken. Without it the levels read as arbitrary
     // rather than as something computed from the candles to its left.
@@ -189,7 +200,7 @@ export function AnalysisChart({
         text: 'analysed',
       },
     ]);
-  }, [candles, analysedAt, resolvedTheme, interval]);
+  }, [candles, analysedAt, resolvedTheme, interval, analysis.symbol]);
 
   // ── the forming candle ───────────────────────────────────────────────
   // `update` only accepts a time at or after the last bar, so a socket message
