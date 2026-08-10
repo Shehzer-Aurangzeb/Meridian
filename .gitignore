@@ -34,3 +34,6 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+
+# Working notes and reference material — kept locally, not published.
+docs/

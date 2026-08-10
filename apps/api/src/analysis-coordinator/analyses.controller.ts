@@ -15,8 +15,8 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
-import { PlanResult, scorePlans } from './outcome';
-import { buildVerdict, Verdict } from './verdict';
+import { costR, PlanOutcome, PlanResult, scorePlans } from './outcome';
+import { buildVerdict, leadPlan, Verdict } from './verdict';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { Candle, TimeInterval } from '../common/types/candle.types';
 
@@ -26,6 +26,41 @@ export interface SavedNarration {
   citedPrices: number[];
   model: string;
   narratedAt: string;
+}
+
+/**
+ * What became of one analysis, for the history cards.
+ *
+ * Everything here is already computed elsewhere — this is the detail route's
+ * work done for a whole page at once, not a second opinion. Same `leadPlan`,
+ * same `scorePlans`, same `analysisFreshness`, so a card can never disagree
+ * with the page it opens.
+ */
+export interface AnalysisStatus {
+  direction: 'long' | 'short' | null;
+  outcome: PlanOutcome | null;
+  /** Gross R, marked to market while OPEN. Null until a fill. */
+  r: number | null;
+  /** After the round-trip cost — the number the scoreboard sums. */
+  netR: number | null;
+  freshness: Freshness;
+  filledAt: Date | null;
+  /** How many targets the replay reached, in order. Drives the ticks. */
+  targetsHit: number;
+  currentPrice: number;
+  /**
+   * The lead plan's geometry, projected rather than embedded. The full plan is
+   * ~2.5KB and fifty of them is a response nobody reads; these eight numbers
+   * are what a card draws.
+   */
+  plan: {
+    entries: number[];
+    averageEntry: number;
+    stop: number;
+    targets: number[];
+    riskPercent: number;
+    blendedR: number;
+  } | null;
 }
 
 /** `aiPayload` is null until someone asks Claude to read the analysis. */
@@ -83,7 +118,9 @@ export class AnalysesController {
   async list(
     @Query('symbol') symbol?: string,
     @Query('limit') limit?: string,
-  ): Promise<{ count: number; analyses: unknown[] }> {
+    @Query('status') status?: string,
+    @Query('days') days?: string,
+  ): Promise<{ count: number; analyses: unknown[]; truncated: boolean }> {
     const where: Prisma.CoordinatorRunWhereInput = {};
     if (symbol) {
       const coin = symbol.trim().toUpperCase();
@@ -93,13 +130,24 @@ export class AnalysesController {
       where.symbol = coin;
     }
 
+    // A window is honest in a way a row cap is not: `?days=30` returns thirty
+    // days or says it could not, where a bare limit of 200 silently drops the
+    // oldest analyses and makes any total computed from the response wrong.
+    const windowDays = Number(days);
+    if (Number.isFinite(windowDays) && windowDays > 0) {
+      where.createdAt = { gte: new Date(Date.now() - windowDays * 86_400_000) };
+    }
+
     // Anything not a positive number falls back to the default. Clamping
     // instead would turn `?limit=-5` into a single row, which reads as "there
     // is one analysis" rather than "that limit was nonsense".
     const parsed = Number(limit);
-    const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 200) : 50;
-    // Payload deliberately excluded — a list of 50 full level maps is a large
-    // response nobody reads. The detail route serves it.
+    const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 50;
+    // Payload deliberately excluded from the RESPONSE — a list of 50 full
+    // level maps is a large body nobody reads. `?status=true` still reads it
+    // server-side to score each row; at ~3.5KB a payload that is 180KB for
+    // every analysis ever run, so the read is not the expensive part.
+    const wantStatus = status === 'true' || status === '1';
     const analyses = await this.prisma.coordinatorRun.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -113,10 +161,122 @@ export class AnalysesController {
         durationMs: true,
         errorMessage: true,
         createdAt: true,
+        coordinatorPayload: wantStatus,
       },
     });
 
-    return { count: analyses.length, analyses };
+    // The caller asked for a window and got exactly `take` rows back, so there
+    // may be more it cannot see. Say so rather than let a scoreboard built on
+    // this response quietly describe a subset.
+    const truncated = analyses.length === take;
+
+    if (!wantStatus) return { count: analyses.length, analyses, truncated };
+
+    const statuses = await this.statusBySymbol(analyses);
+    return {
+      count: analyses.length,
+      truncated,
+      analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
+        ...row,
+        status: statuses.get(row.id) ?? null,
+      })),
+    };
+  }
+
+  /**
+   * Score every row on the page.
+   *
+   * The expensive inputs are per SYMBOL, not per analysis: the live price, the
+   * candles to replay against, and whichever analysis is newest for that coin.
+   * Fifty-three rows across ten coins is ten price calls and ten candle calls,
+   * shared — which is why a status column is affordable at all and opening
+   * fifty-three detail pages is not.
+   */
+  private async statusBySymbol(
+    rows: Array<{ id: string; symbol: string; createdAt: Date; coordinatorPayload: unknown }>,
+  ): Promise<Map<string, AnalysisStatus>> {
+    const symbols = [...new Set(rows.map((r) => r.symbol))];
+    const now = Date.now();
+
+    const perSymbol = new Map(
+      await Promise.all(
+        symbols.map(async (coin) => {
+          // A failure here must not take the page down: a coin Binance cannot
+          // serve loses its status, not its row.
+          const [price, candles, newest] = await Promise.all([
+            this.binance.getCurrentPrice(coin).catch(() => NaN),
+            this.binance
+              .getCandlesPaged(coin, OUTCOME_TIMEFRAME, OUTCOME_CANDLES)
+              .catch(() => [] as Candle[]),
+            this.prisma.coordinatorRun.findFirst({
+              where: { symbol: coin },
+              orderBy: { createdAt: 'desc' },
+              select: { coordinatorPayload: true },
+            }),
+          ]);
+          return [coin, { price, candles, newest }] as const;
+        }),
+      ),
+    );
+
+    const out = new Map<string, AnalysisStatus>();
+    for (const row of rows) {
+      const analysis = row.coordinatorPayload as AnalysisRecord | null;
+      const shared = perSymbol.get(row.symbol);
+      if (!analysis?.plans || !analysis?.map || !shared) continue;
+
+      const newest = shared.newest?.coordinatorPayload as AnalysisRecord | undefined;
+      const freshness = analysisFreshness(
+        analysis,
+        shared.price,
+        newest?.map ? { map: newest.map } : null,
+      );
+
+      const lead = leadPlan(analysis.plans);
+      if (!lead) {
+        out.set(row.id, {
+          direction: null,
+          outcome: null,
+          r: null,
+          netR: null,
+          freshness,
+          filledAt: null,
+          targetsHit: 0,
+          currentPrice: shared.price,
+          plan: null,
+        });
+        continue;
+      }
+
+      // Score only the lead plan — the card shows one line, and scoring both
+      // then discarding one is work for a number nobody reads.
+      const [scored] = scorePlans(
+        [lead],
+        shared.candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
+        row.createdAt,
+        now,
+      );
+
+      out.set(row.id, {
+        direction: scored.direction,
+        outcome: scored.outcome,
+        r: scored.r,
+        netR: scored.r === null ? null : scored.r - costR(lead.riskPercent),
+        freshness,
+        filledAt: scored.filledAt,
+        targetsHit: scored.targetsHit,
+        currentPrice: shared.price,
+        plan: {
+          entries: lead.entries.map((e) => e.price),
+          averageEntry: lead.averageEntry,
+          stop: lead.stop,
+          targets: lead.targets.map((t) => t.price),
+          riskPercent: lead.riskPercent,
+          blendedR: lead.blendedR,
+        },
+      });
+    }
+    return out;
   }
 
   @Get(':id')

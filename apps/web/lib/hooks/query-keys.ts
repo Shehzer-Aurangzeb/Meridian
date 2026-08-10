@@ -9,8 +9,18 @@ export const queryKeys = {
   // refreshes the lists and any open detail view.
   analyses: {
     all: ['analyses'] as const,
+    // Every field that changes the response has to be in the key, or the
+    // dashboard's unscored fetch and History's scored one share a cache entry
+    // and whichever lands first wins.
     list: (filter: AnalysesFilter) =>
-      [...queryKeys.analyses.all, 'list', filter.symbol ?? null, filter.limit ?? null] as const,
+      [
+        ...queryKeys.analyses.all,
+        'list',
+        filter.symbol ?? null,
+        filter.limit ?? null,
+        filter.days ?? null,
+        filter.status ?? false,
+      ] as const,
     detail: (id: string) => [...queryKeys.analyses.all, 'detail', id] as const,
   },
 

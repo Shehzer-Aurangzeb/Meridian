@@ -19,8 +19,15 @@ const payload = {
       stop: 90,
       zone: { low: 98, high: 102, center: 100, type: 'support', sources: ['1h', '4h'] },
       distanceToZonePercent: -0.5,
+      entries: [
+        { price: 102, weightPercent: 20 },
+        { price: 100, weightPercent: 40 },
+        { price: 98, weightPercent: 40 },
+      ],
+      averageEntry: 99.6,
       riskPercent: 1,
-      targets: [{ price: 110, rMultiple: 2 }],
+      riskPerUnit: 9.6,
+      targets: [{ price: 110, rMultiple: 2, weightPercent: 100, source: '4h' }],
       blendedR: 2,
     },
   ],
@@ -68,10 +75,82 @@ describe('AnalysesController', () => {
     expect(analyzer.analyze).toHaveBeenCalledWith('BTC');
   });
 
+  it('bounds the list by a date window and admits when it hit the ceiling', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list(undefined, undefined, undefined, '30');
+    const { gte } = prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt;
+    const days = (Date.now() - (gte as Date).getTime()) / 86_400_000;
+    expect(days).toBeCloseTo(30, 1);
+
+    // Exactly `take` rows back means there may be more the caller cannot see —
+    // a scoreboard built on a silently truncated list describes a subset.
+    prisma.coordinatorRun.findMany.mockResolvedValue(new Array(50).fill({ id: 'x' }));
+    expect((await controller.list()).truncated).toBe(true);
+    prisma.coordinatorRun.findMany.mockResolvedValue([{ id: 'x' }]);
+    expect((await controller.list()).truncated).toBe(false);
+  });
+
+  it('leaves the list a plain database read unless status is asked for', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list();
+    // The payload is the expensive column and Binance is the expensive call.
+    // Neither belongs in the dashboard's row-counting fetch.
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select.coordinatorPayload).toBe(
+      false,
+    );
+    expect(binance.getCurrentPrice).not.toHaveBeenCalled();
+  });
+
+  it('scores the list from ONE price and candle fetch per coin, not per row', async () => {
+    const rows = [
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'b', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'c', symbol: 'ETH', createdAt: new Date(0), coordinatorPayload: payload },
+    ];
+    prisma.coordinatorRun.findMany.mockResolvedValue(rows);
+    prisma.coordinatorRun.findFirst.mockResolvedValue({ coordinatorPayload: payload });
+    binance.getCurrentPrice.mockResolvedValue(100);
+    binance.getCandlesPaged.mockResolvedValue([]);
+
+    const result = await controller.list(undefined, undefined, 'true');
+
+    // Three rows, two coins — the whole point of batching.
+    expect(binance.getCurrentPrice).toHaveBeenCalledTimes(2);
+    expect(binance.getCandlesPaged).toHaveBeenCalledTimes(2);
+
+    const first = result.analyses[0] as { status: { netR: number | null } };
+    // Dated 1970 with no candles: the 24h fill window is long gone, so this is
+    // MISSED rather than still PENDING.
+    expect(first.status).toMatchObject({
+      direction: 'long',
+      outcome: 'MISSED',
+      targetsHit: 0,
+      // The ladder, stop and targets a card draws — projected, not the whole plan.
+      plan: { entries: [102, 100, 98], stop: 90, targets: [110] },
+    });
+    // Never filled, so there is no R to charge a cost against.
+    expect(first.status.netR).toBeNull();
+    // The payload is read to score, never returned.
+    expect(result.analyses[0]).not.toHaveProperty('coordinatorPayload');
+  });
+
+  it('drops the status of a coin Binance cannot serve, not its row', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+    ]);
+    prisma.coordinatorRun.findFirst.mockResolvedValue(null);
+    binance.getCurrentPrice.mockRejectedValue(new Error('binance down'));
+    binance.getCandlesPaged.mockRejectedValue(new Error('binance down'));
+
+    const result = await controller.list(undefined, undefined, 'true');
+    expect(result.count).toBe(1);
+    expect((result.analyses[0] as { status: unknown }).status).not.toBeUndefined();
+  });
+
   it('caps and floors the list limit rather than trusting the query', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list(undefined, '9999');
-    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(200);
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(1000);
     // A nonsense limit falls back to the default, it does not clamp to 1 row.
     await controller.list(undefined, '-5');
     expect(prisma.coordinatorRun.findMany.mock.calls[1][0].take).toBe(50);

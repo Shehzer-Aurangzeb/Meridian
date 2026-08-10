@@ -62,7 +62,7 @@ const ROUTE_WORDS: Record<string, string> = {
  * close, else whichever is nearest. Not "the best" — the tool does not pick a
  * side, and both plans stay on the page.
  */
-function leadPlan(plans: TradePlan[]): TradePlan | null {
+export function leadPlan(plans: TradePlan[]): TradePlan | null {
   if (plans.length === 0) return null;
   const byDistance = [...plans].sort(
     (a, b) => Math.abs(a.distanceToZonePercent) - Math.abs(b.distanceToZonePercent),
