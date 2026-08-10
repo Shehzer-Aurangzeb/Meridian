@@ -45,8 +45,22 @@ export interface AnalysisStatus {
   netR: number | null;
   freshness: Freshness;
   filledAt: Date | null;
-  entry: number | null;
+  /** How many targets the replay reached, in order. Drives the ticks. */
+  targetsHit: number;
   currentPrice: number;
+  /**
+   * The lead plan's geometry, projected rather than embedded. The full plan is
+   * ~2.5KB and fifty of them is a response nobody reads; these eight numbers
+   * are what a card draws.
+   */
+  plan: {
+    entries: number[];
+    averageEntry: number;
+    stop: number;
+    targets: number[];
+    riskPercent: number;
+    blendedR: number;
+  } | null;
 }
 
 /** `aiPayload` is null until someone asks Claude to read the analysis. */
@@ -212,8 +226,9 @@ export class AnalysesController {
           netR: null,
           freshness,
           filledAt: null,
-          entry: null,
+          targetsHit: 0,
           currentPrice: shared.price,
+          plan: null,
         });
         continue;
       }
@@ -234,8 +249,16 @@ export class AnalysesController {
         netR: scored.r === null ? null : scored.r - costR(lead.riskPercent),
         freshness,
         filledAt: scored.filledAt,
-        entry: lead.averageEntry,
+        targetsHit: scored.targetsHit,
         currentPrice: shared.price,
+        plan: {
+          entries: lead.entries.map((e) => e.price),
+          averageEntry: lead.averageEntry,
+          stop: lead.stop,
+          targets: lead.targets.map((t) => t.price),
+          riskPercent: lead.riskPercent,
+          blendedR: lead.blendedR,
+        },
       });
     }
     return out;

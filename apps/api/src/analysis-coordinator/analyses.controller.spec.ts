@@ -19,8 +19,15 @@ const payload = {
       stop: 90,
       zone: { low: 98, high: 102, center: 100, type: 'support', sources: ['1h', '4h'] },
       distanceToZonePercent: -0.5,
+      entries: [
+        { price: 102, weightPercent: 20 },
+        { price: 100, weightPercent: 40 },
+        { price: 98, weightPercent: 40 },
+      ],
+      averageEntry: 99.6,
       riskPercent: 1,
-      targets: [{ price: 110, rMultiple: 2 }],
+      riskPerUnit: 9.6,
+      targets: [{ price: 110, rMultiple: 2, weightPercent: 100, source: '4h' }],
       blendedR: 2,
     },
   ],
@@ -99,7 +106,13 @@ describe('AnalysesController', () => {
     const first = result.analyses[0] as { status: { netR: number | null } };
     // Dated 1970 with no candles: the 24h fill window is long gone, so this is
     // MISSED rather than still PENDING.
-    expect(first.status).toMatchObject({ direction: 'long', outcome: 'MISSED' });
+    expect(first.status).toMatchObject({
+      direction: 'long',
+      outcome: 'MISSED',
+      targetsHit: 0,
+      // The ladder, stop and targets a card draws — projected, not the whole plan.
+      plan: { entries: [102, 100, 98], stop: 90, targets: [110] },
+    });
     // Never filled, so there is no R to charge a cost against.
     expect(first.status.netR).toBeNull();
     // The payload is read to score, never returned.
