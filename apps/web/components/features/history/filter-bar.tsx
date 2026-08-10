@@ -3,23 +3,30 @@
 import { SearchIcon } from '@/assets/icons/search-icon';
 
 /**
- * Filters map to fields the list response actually carries. Signal and outcome
- * used to be here; neither is knowable without each analysis's payload.
+ * Coin, window, sort. Regime and strategy filters were removed — they answer
+ * "how was this made", and the page is about how it turned out. Outcome is
+ * filtered by clicking a scoreboard bucket, not from here.
  */
 export interface HistoryFilters {
   search: string;
-  regime: 'all' | 'COMPRESSION' | 'TRENDING' | 'MEAN_REVERSION';
-  route: 'all' | 'SQUEEZE_BREAKOUT' | 'CONFLUENCE_CHECKLIST';
+  coin: string;
   dateRange: '24h' | '7d' | '30d' | 'all';
-  sort: 'newest' | 'oldest';
+  sort: 'newest' | 'oldest' | 'best' | 'worst';
 }
 
 export const DEFAULT_FILTERS: HistoryFilters = {
   search: '',
-  regime: 'all',
-  route: 'all',
+  coin: 'all',
   dateRange: '30d',
   sort: 'newest',
+};
+
+/** The server takes a window in days; `all` is the row ceiling instead. */
+export const RANGE_DAYS: Record<HistoryFilters['dateRange'], number | undefined> = {
+  '24h': 1,
+  '7d': 7,
+  '30d': 30,
+  all: undefined,
 };
 
 interface SectionHeadProps {
@@ -79,7 +86,8 @@ function FilterSelect({ label, value, onChange, options }: FilterSelectProps) {
 
 interface FilterBarProps {
   filters: HistoryFilters;
-  onFiltersChange?: (filters: HistoryFilters) => void;
+  onFiltersChange: (filters: HistoryFilters) => void;
+  coins: string[];
   totalCount: number;
   showingCount: number;
 }
@@ -87,6 +95,7 @@ interface FilterBarProps {
 export function FilterBar({
   filters,
   onFiltersChange,
+  coins,
   totalCount,
   showingCount,
 }: FilterBarProps) {
@@ -94,7 +103,7 @@ export function FilterBar({
     key: K,
     value: HistoryFilters[K]
   ) => {
-    onFiltersChange?.({ ...filters, [key]: value });
+    onFiltersChange({ ...filters, [key]: value });
   };
 
   return (
@@ -106,7 +115,7 @@ export function FilterBar({
       />
 
       <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
-        {/* Search on its own row: sharing one grid with four selects squeezed
+        {/* Search on its own row: sharing one grid with the selects squeezed
             every control at tablet widths. */}
         <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-border/10 dark:border-border">
           <SearchIcon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
@@ -121,30 +130,17 @@ export function FilterBar({
 
         <div className="flex flex-wrap gap-2.5">
           <FilterSelect
-            label="Regime"
-            value={filters.regime}
-            onChange={(v) => updateFilter('regime', v as HistoryFilters['regime'])}
+            label="Coin"
+            value={filters.coin}
+            onChange={(v) => updateFilter('coin', v)}
             options={[
-              { value: 'all', label: 'All regimes' },
-              { value: 'COMPRESSION', label: 'Compression' },
-              { value: 'TRENDING', label: 'Trending' },
-              { value: 'MEAN_REVERSION', label: 'Mean reversion' },
+              { value: 'all', label: 'All coins' },
+              ...coins.map((c) => ({ value: c, label: c })),
             ]}
           />
 
           <FilterSelect
-            label="Strategy"
-            value={filters.route}
-            onChange={(v) => updateFilter('route', v as HistoryFilters['route'])}
-            options={[
-              { value: 'all', label: 'All strategies' },
-              { value: 'SQUEEZE_BREAKOUT', label: 'Squeeze breakout' },
-              { value: 'CONFLUENCE_CHECKLIST', label: 'Confluence checklist' },
-            ]}
-          />
-
-          <FilterSelect
-            label="Date"
+            label="Window"
             value={filters.dateRange}
             onChange={(v) => updateFilter('dateRange', v as HistoryFilters['dateRange'])}
             options={[
@@ -162,6 +158,8 @@ export function FilterBar({
             options={[
               { value: 'newest', label: 'Newest first' },
               { value: 'oldest', label: 'Oldest first' },
+              { value: 'best', label: 'Best R first' },
+              { value: 'worst', label: 'Worst R first' },
             ]}
           />
         </div>
