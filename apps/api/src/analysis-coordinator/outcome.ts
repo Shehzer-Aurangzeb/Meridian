@@ -51,6 +51,23 @@ export interface PlanResult {
  */
 export const FILL_WINDOW_HOURS = 24;
 
+/**
+ * Round-trip cost as a percentage of notional: 0.05% fee + 0.02% slippage,
+ * each side. The §14h default, kept here so the API and the backtest harness
+ * cannot drift apart — a scoreboard priced differently from STATE_OF_PLAY.md
+ * would quietly disagree with every number in it.
+ */
+export const DEFAULT_ROUND_TRIP_PCT = 2 * (0.05 + 0.02);
+
+/**
+ * Cost in R. A plan with a 0.5% stop pays four times what a 2% stop pays,
+ * because R is denominated in the stop distance. Fees are proportional to
+ * size, so a laddered exit pays the same total as a single one.
+ */
+export function costR(riskPercent: number, roundTripPct = DEFAULT_ROUND_TRIP_PCT): number {
+  return riskPercent === 0 ? 0 : roundTripPct / riskPercent;
+}
+
 export function scorePlans(
   plans: TradePlan[],
   candlesSince: Candle[],

@@ -68,6 +68,57 @@ describe('AnalysesController', () => {
     expect(analyzer.analyze).toHaveBeenCalledWith('BTC');
   });
 
+  it('leaves the list a plain database read unless status is asked for', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list();
+    // The payload is the expensive column and Binance is the expensive call.
+    // Neither belongs in the dashboard's row-counting fetch.
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select.coordinatorPayload).toBe(
+      false,
+    );
+    expect(binance.getCurrentPrice).not.toHaveBeenCalled();
+  });
+
+  it('scores the list from ONE price and candle fetch per coin, not per row', async () => {
+    const rows = [
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'b', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'c', symbol: 'ETH', createdAt: new Date(0), coordinatorPayload: payload },
+    ];
+    prisma.coordinatorRun.findMany.mockResolvedValue(rows);
+    prisma.coordinatorRun.findFirst.mockResolvedValue({ coordinatorPayload: payload });
+    binance.getCurrentPrice.mockResolvedValue(100);
+    binance.getCandlesPaged.mockResolvedValue([]);
+
+    const result = await controller.list(undefined, undefined, 'true');
+
+    // Three rows, two coins — the whole point of batching.
+    expect(binance.getCurrentPrice).toHaveBeenCalledTimes(2);
+    expect(binance.getCandlesPaged).toHaveBeenCalledTimes(2);
+
+    const first = result.analyses[0] as { status: { netR: number | null } };
+    // Dated 1970 with no candles: the 24h fill window is long gone, so this is
+    // MISSED rather than still PENDING.
+    expect(first.status).toMatchObject({ direction: 'long', outcome: 'MISSED' });
+    // Never filled, so there is no R to charge a cost against.
+    expect(first.status.netR).toBeNull();
+    // The payload is read to score, never returned.
+    expect(result.analyses[0]).not.toHaveProperty('coordinatorPayload');
+  });
+
+  it('drops the status of a coin Binance cannot serve, not its row', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+    ]);
+    prisma.coordinatorRun.findFirst.mockResolvedValue(null);
+    binance.getCurrentPrice.mockRejectedValue(new Error('binance down'));
+    binance.getCandlesPaged.mockRejectedValue(new Error('binance down'));
+
+    const result = await controller.list(undefined, undefined, 'true');
+    expect(result.count).toBe(1);
+    expect((result.analyses[0] as { status: unknown }).status).not.toBeUndefined();
+  });
+
   it('caps and floors the list limit rather than trusting the query', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list(undefined, '9999');

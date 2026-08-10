@@ -54,6 +54,7 @@ import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { AnalysisRecord } from '../../src/analysis-coordinator/analyze.service';
 import {
+  costR,
   FILL_WINDOW_HOURS,
   PlanResult,
   scorePlans,
@@ -177,9 +178,9 @@ function score(
   /** The same plan left running to now. The gap between the two IS the finding. */
   uncapped: PlanResult,
 ): Scored {
-  const costR = plan.riskPercent === 0 ? 0 : ROUND_TRIP_PCT / plan.riskPercent;
+  const cost = costR(plan.riskPercent, ROUND_TRIP_PCT);
   return {
-    netRUncapped: uncapped.r === null ? null : uncapped.r - costR,
+    netRUncapped: uncapped.r === null ? null : uncapped.r - cost,
     id: row.id,
     coin: row.symbol,
     time: row.createdAt,
@@ -192,8 +193,8 @@ function score(
     plannedR: plan.blendedR,
     outcome: result.outcome,
     r: result.r,
-    costR,
-    netR: result.r === null ? null : result.r - costR,
+    costR: cost,
+    netR: result.r === null ? null : result.r - cost,
   };
 }
 
