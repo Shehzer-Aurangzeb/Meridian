@@ -119,7 +119,8 @@ export class AnalysesController {
     @Query('symbol') symbol?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
-  ): Promise<{ count: number; analyses: unknown[] }> {
+    @Query('days') days?: string,
+  ): Promise<{ count: number; analyses: unknown[]; truncated: boolean }> {
     const where: Prisma.CoordinatorRunWhereInput = {};
     if (symbol) {
       const coin = symbol.trim().toUpperCase();
@@ -129,11 +130,19 @@ export class AnalysesController {
       where.symbol = coin;
     }
 
+    // A window is honest in a way a row cap is not: `?days=30` returns thirty
+    // days or says it could not, where a bare limit of 200 silently drops the
+    // oldest analyses and makes any total computed from the response wrong.
+    const windowDays = Number(days);
+    if (Number.isFinite(windowDays) && windowDays > 0) {
+      where.createdAt = { gte: new Date(Date.now() - windowDays * 86_400_000) };
+    }
+
     // Anything not a positive number falls back to the default. Clamping
     // instead would turn `?limit=-5` into a single row, which reads as "there
     // is one analysis" rather than "that limit was nonsense".
     const parsed = Number(limit);
-    const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 200) : 50;
+    const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 50;
     // Payload deliberately excluded from the RESPONSE — a list of 50 full
     // level maps is a large body nobody reads. `?status=true` still reads it
     // server-side to score each row; at ~3.5KB a payload that is 180KB for
@@ -156,11 +165,17 @@ export class AnalysesController {
       },
     });
 
-    if (!wantStatus) return { count: analyses.length, analyses };
+    // The caller asked for a window and got exactly `take` rows back, so there
+    // may be more it cannot see. Say so rather than let a scoreboard built on
+    // this response quietly describe a subset.
+    const truncated = analyses.length === take;
+
+    if (!wantStatus) return { count: analyses.length, analyses, truncated };
 
     const statuses = await this.statusBySymbol(analyses);
     return {
       count: analyses.length,
+      truncated,
       analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,

@@ -12,14 +12,24 @@ import { queryKeys } from './query-keys';
 
 export interface AnalysesFilter {
   symbol?: string;
-  /** Backend default 50, max 200. */
+  /** Backend default 50, max 1000. */
   limit?: number;
+  /** Only analyses from the last N days — a window, not a silent row cap. */
+  days?: number;
+  /**
+   * Score every row: outcome, R, freshness, and the plan geometry a card
+   * draws. Costs the backend one price and one candle fetch PER COIN, so leave
+   * it off wherever the rows are only being counted.
+   */
+  status?: boolean;
 }
 
 export function useAnalyses(filter: AnalysesFilter = {}) {
   const params = new URLSearchParams();
   if (filter.symbol) params.set('symbol', filter.symbol.toUpperCase());
   if (filter.limit) params.set('limit', String(filter.limit));
+  if (filter.days) params.set('days', String(filter.days));
+  if (filter.status) params.set('status', 'true');
   const query = params.toString();
 
   return useQuery({

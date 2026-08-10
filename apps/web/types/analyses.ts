@@ -189,10 +189,41 @@ export interface AnalysisListItem {
   durationMs: number;
   errorMessage: string | null;
   createdAt: string;
+  /** Only when the list was fetched with `status: true`. */
+  status?: AnalysisStatus | null;
+}
+
+/**
+ * What became of one analysis — the lead plan's outcome and geometry, computed
+ * on read by the same code the detail page uses. Present only when the list was
+ * fetched with `status=true`.
+ */
+export interface AnalysisStatus {
+  direction: Direction | null;
+  outcome: PlanOutcome | null;
+  /** Gross R, marked to market while OPEN. Null until a fill. */
+  r: number | null;
+  /** After the round-trip cost — the number the scoreboard sums. */
+  netR: number | null;
+  freshness: Freshness;
+  filledAt: string | null;
+  /** Targets reached in order; drives the ticks on the ladder. */
+  targetsHit: number;
+  currentPrice: number;
+  plan: {
+    entries: number[];
+    averageEntry: number;
+    stop: number;
+    targets: number[];
+    riskPercent: number;
+    blendedR: number;
+  } | null;
 }
 
 export interface AnalysisListResponse {
   count: number;
+  /** The window returned exactly `limit` rows, so older ones are not in it. */
+  truncated: boolean;
   analyses: AnalysisListItem[];
 }
 

@@ -8,14 +8,23 @@ export const dynamic = 'force-dynamic';
 /** Matches the backend's guard, so a bad symbol costs no round trip. */
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
-/** GET /api/analyses?symbol=BTC&limit=50 — no payloads; the detail route has those. */
+/**
+ * GET /api/analyses?symbol=BTC&limit=50&days=30&status=true
+ *
+ * No payloads; the detail route has those. `status=true` costs the backend a
+ * price and candle fetch per coin, so it is opt-in — the dashboard counts rows
+ * and must not pay for it.
+ */
 export async function GET(request: NextRequest) {
   const params = new URLSearchParams();
-  const symbol = request.nextUrl.searchParams.get('symbol');
-  const limit = request.nextUrl.searchParams.get('limit');
+  const query_ = request.nextUrl.searchParams;
+  const symbol = query_.get('symbol');
+  const limit = query_.get('limit');
 
   if (symbol) params.set('symbol', symbol.toUpperCase());
   if (limit) params.set('limit', limit);
+  if (query_.get('days')) params.set('days', query_.get('days') as string);
+  if (query_.get('status') === 'true') params.set('status', 'true');
 
   const query = params.toString();
   return proxy(() =>

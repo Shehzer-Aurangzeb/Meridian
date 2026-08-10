@@ -75,6 +75,21 @@ describe('AnalysesController', () => {
     expect(analyzer.analyze).toHaveBeenCalledWith('BTC');
   });
 
+  it('bounds the list by a date window and admits when it hit the ceiling', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list(undefined, undefined, undefined, '30');
+    const { gte } = prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt;
+    const days = (Date.now() - (gte as Date).getTime()) / 86_400_000;
+    expect(days).toBeCloseTo(30, 1);
+
+    // Exactly `take` rows back means there may be more the caller cannot see —
+    // a scoreboard built on a silently truncated list describes a subset.
+    prisma.coordinatorRun.findMany.mockResolvedValue(new Array(50).fill({ id: 'x' }));
+    expect((await controller.list()).truncated).toBe(true);
+    prisma.coordinatorRun.findMany.mockResolvedValue([{ id: 'x' }]);
+    expect((await controller.list()).truncated).toBe(false);
+  });
+
   it('leaves the list a plain database read unless status is asked for', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list();
@@ -135,7 +150,7 @@ describe('AnalysesController', () => {
   it('caps and floors the list limit rather than trusting the query', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list(undefined, '9999');
-    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(200);
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(1000);
     // A nonsense limit falls back to the default, it does not clamp to 1 row.
     await controller.list(undefined, '-5');
     expect(prisma.coordinatorRun.findMany.mock.calls[1][0].take).toBe(50);
