@@ -81,6 +81,11 @@ const str = (name: string, fallback: string): string => {
 
 const SINCE = str('since', '');
 const COOLDOWN_H = num('cooldown', 24);
+// §14h held for 72 bars (1h bars, so 3 days) and closed the rest at market.
+// Matched here or the two are not comparable — and §14h's whole edge over
+// random flipped sign on this number alone (rule 17), so it is also printed
+// uncapped, and the gap between the two is the finding.
+const MAX_HOLD_H = num('max-hold', 72);
 const FEE_PCT = num('fee', 0.05);
 const SLIP_PCT = num('slip', 0.02);
 const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
@@ -89,7 +94,7 @@ const SEED = num('seed', 12345);
 const CSV = str('csv', '');
 
 const CONFIG =
-  `since=${SINCE || 'all'} cooldown=${COOLDOWN_H}h ` +
+  `since=${SINCE || 'all'} cooldown=${COOLDOWN_H}h max-hold=${MAX_HOLD_H}h ` +
   `fee=${FEE_PCT}% slip=${SLIP_PCT}% (round trip ${ROUND_TRIP_PCT}%) ` +
   `draws=${DRAWS} seed=${SEED}`;
 
@@ -116,6 +121,8 @@ interface Scored {
   r: number | null;
   costR: number;
   netR: number | null;
+  /** Same trade with no hold limit. §14h's edge flipped sign on this knob. */
+  netRUncapped: number | null;
 }
 
 const overlaps = (a: ConfluenceZone, b: ConfluenceZone): boolean =>
@@ -142,10 +149,14 @@ function isRepeat(
 function score(
   row: Row,
   plan: TradePlan,
+  /** Closed at the hold limit, matching §14h. */
   result: PlanResult,
+  /** The same plan left running to now. The gap between the two IS the finding. */
+  uncapped: PlanResult,
 ): Scored {
   const costR = plan.riskPercent === 0 ? 0 : ROUND_TRIP_PCT / plan.riskPercent;
   return {
+    netRUncapped: uncapped.r === null ? null : uncapped.r - costR,
     id: row.id,
     coin: row.symbol,
     time: row.createdAt,
@@ -287,6 +298,23 @@ async function main(): Promise<void> {
     const since = series.filter((c) => c.time.getTime() > row.createdAt.getTime());
     const results = scorePlans(row.analysis.plans, since, row.createdAt, now);
 
+    // Second pass for anything still running past the hold limit: re-score it
+    // against candles cut at fill + MAX_HOLD, which is what §14h did. Two
+    // passes rather than one because the fill time is not knowable until the
+    // first pass has found it.
+    const capped = results.map((result, i) => {
+      if (result.outcome !== 'OPEN' || !result.filledAt) return result;
+      const closeAt = result.filledAt.getTime() + MAX_HOLD_H * 3_600_000;
+      if (closeAt >= now) return result;
+      const [rescored] = scorePlans(
+        [row.analysis.plans[i]],
+        since.filter((c) => c.time.getTime() <= closeAt),
+        row.createdAt,
+        closeAt,
+      );
+      return rescored;
+    });
+
     row.analysis.plans.forEach((plan, i) => {
       plansEmitted += 1;
       const key = `${row.symbol}:${plan.direction}`;
@@ -295,7 +323,7 @@ async function main(): Promise<void> {
         return;
       }
       lastZone.set(key, { zone: plan.zone, at: row.createdAt });
-      taken.push(score(row, plan, results[i]));
+      taken.push(score(row, plan, capped[i], results[i]));
     });
   }
 
@@ -373,6 +401,14 @@ async function main(): Promise<void> {
     `\nnet R/trade  ${mean(done.map((s) => s.netR as number)).toFixed(3)} including open ` +
       `· ${closed.length === 0 ? '—' : mean(closed.map((s) => s.netR as number)).toFixed(3)} closed only ` +
       `(${((open.length / done.length) * 100).toFixed(0)}% of fills are open)`,
+  );
+
+  // The knob §14h's conclusion moved with. If these two disagree, the holding
+  // period is doing the work, not the levels.
+  const uncapped = done.filter((s) => s.netRUncapped !== null);
+  console.log(
+    `hold        ${mean(done.map((s) => s.netR as number)).toFixed(3)} at ${MAX_HOLD_H}h ` +
+      `· ${uncapped.length === 0 ? '—' : mean(uncapped.map((s) => s.netRUncapped as number)).toFixed(3)} with no limit`,
   );
 
   // ── control: same plans, another analysis's timing ───────────────────
