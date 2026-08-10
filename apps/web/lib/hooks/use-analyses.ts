@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchApi } from '@/lib/api/client';
+import { fetchApi, RequestError } from '@/lib/api/client';
 import type {
   AnalysisDetail,
   AnalysisListResponse,
@@ -71,6 +71,15 @@ export function useNarrate(id: string) {
   return useMutation({
     mutationFn: () =>
       fetchApi<SavedNarration>(`/api/analyses/${id}/narrate`, { method: 'POST' }),
+    // The call measures ~21s against a 30s API Gateway ceiling. If a cold
+    // start eats the margin the gateway hangs up — but Lambda keeps running,
+    // finishes, and writes the narration to the row. So the retry is not
+    // hopeful: by the time it lands the endpoint returns the cached text.
+    // Only for gateway-level failures; a 503 means Claude declined or the key
+    // is missing, and retrying that just wastes another 30 seconds.
+    retry: (failureCount, error) =>
+      failureCount < 1 && error instanceof RequestError && error.status >= 502,
+    retryDelay: 15_000,
     onSuccess: (narration) => {
       // Write it straight into the open detail view rather than refetching —
       // that would re-run the outcome replay for a field we already hold.
