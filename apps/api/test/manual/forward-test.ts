@@ -53,7 +53,11 @@ import { Pool } from 'pg';
 import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { AnalysisRecord } from '../../src/analysis-coordinator/analyze.service';
-import { PlanResult, scorePlans } from '../../src/analysis-coordinator/outcome';
+import {
+  FILL_WINDOW_HOURS,
+  PlanResult,
+  scorePlans,
+} from '../../src/analysis-coordinator/outcome';
 import { ConfluenceZone } from '../../src/analysis/interfaces/support-resistance.types';
 import { TradePlan } from '../../src/analysis/services/trade-plan.service';
 import { Candle } from '../../src/common/types/candle.types';
@@ -81,6 +85,11 @@ const str = (name: string, fallback: string): string => {
 
 const SINCE = str('since', '');
 const COOLDOWN_H = num('cooldown', 24);
+// §14h held for 72 bars (1h bars, so 3 days) and closed the rest at market.
+// Matched here or the two are not comparable — and §14h's whole edge over
+// random flipped sign on this number alone (rule 17), so it is also printed
+// uncapped, and the gap between the two is the finding.
+const MAX_HOLD_H = num('max-hold', 72);
 const FEE_PCT = num('fee', 0.05);
 const SLIP_PCT = num('slip', 0.02);
 const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
@@ -89,7 +98,7 @@ const SEED = num('seed', 12345);
 const CSV = str('csv', '');
 
 const CONFIG =
-  `since=${SINCE || 'all'} cooldown=${COOLDOWN_H}h ` +
+  `since=${SINCE || 'all'} cooldown=${COOLDOWN_H}h max-hold=${MAX_HOLD_H}h ` +
   `fee=${FEE_PCT}% slip=${SLIP_PCT}% (round trip ${ROUND_TRIP_PCT}%) ` +
   `draws=${DRAWS} seed=${SEED}`;
 
@@ -116,6 +125,8 @@ interface Scored {
   r: number | null;
   costR: number;
   netR: number | null;
+  /** Same trade with no hold limit. §14h's edge flipped sign on this knob. */
+  netRUncapped: number | null;
 }
 
 const overlaps = (a: ConfluenceZone, b: ConfluenceZone): boolean =>
@@ -132,20 +143,43 @@ const overlaps = (a: ConfluenceZone, b: ConfluenceZone): boolean =>
 function isRepeat(
   plan: TradePlan,
   at: Date,
-  last: { zone: ConfluenceZone; at: Date } | undefined,
+  last: { zone: ConfluenceZone; busyUntil: number } | undefined,
 ): boolean {
   if (!last) return false;
-  const hours = (at.getTime() - last.at.getTime()) / 3_600_000;
-  return hours < COOLDOWN_H && overlaps(plan.zone, last.zone);
+  return at.getTime() < last.busyUntil && overlaps(plan.zone, last.zone);
+}
+
+/**
+ * When the zone is free to be counted again.
+ *
+ * §14h ran one position at a time per direction and started its cooldown when
+ * the trade CLOSED. Measuring from the analysis time instead let a 24h window
+ * expire while the trade it belonged to was still running under a 72h hold —
+ * so the same zone opened a second "opportunity" while the first was live.
+ *
+ * ponytail: a filled plan blocks for the full hold rather than to its real
+ * close, which scorePlans does not report. The bound is exact whenever the
+ * capped scoring bites and conservative otherwise; return the close time from
+ * outcome.ts if the difference ever shows up in the counts.
+ */
+function busyUntil(at: Date, result: PlanResult): number {
+  const from = result.filledAt
+    ? result.filledAt.getTime() + MAX_HOLD_H * 3_600_000
+    : at.getTime() + FILL_WINDOW_HOURS * 3_600_000;
+  return from + COOLDOWN_H * 3_600_000;
 }
 
 function score(
   row: Row,
   plan: TradePlan,
+  /** Closed at the hold limit, matching §14h. */
   result: PlanResult,
+  /** The same plan left running to now. The gap between the two IS the finding. */
+  uncapped: PlanResult,
 ): Scored {
   const costR = plan.riskPercent === 0 ? 0 : ROUND_TRIP_PCT / plan.riskPercent;
   return {
+    netRUncapped: uncapped.r === null ? null : uncapped.r - costR,
     id: row.id,
     coin: row.symbol,
     time: row.createdAt,
@@ -176,21 +210,40 @@ function selfCheck(): void {
     ({ zone: zone(low, high) }) as TradePlan;
   const t = (hoursIn: number): Date => new Date(Date.UTC(2026, 7, 9) + hoursIn * 3_600_000);
 
-  const prev = { zone: zone(100, 110), at: t(0) };
+  const result = (o: PlanResult['outcome'], filledAt: Date | null): PlanResult =>
+    ({ outcome: o, filledAt }) as PlanResult;
+
+  // Never filled: blocks for the 24h fill window plus the cooldown.
+  const missed = { zone: zone(100, 110), busyUntil: busyUntil(t(0), result('MISSED', null)) };
+  // Filled at hour 2 and still running: blocks until hour 2 + hold + cooldown.
+  const open = { zone: zone(100, 110), busyUntil: busyUntil(t(0), result('OPEN', t(2))) };
 
   assert(!isRepeat(plan(100, 110), t(0), undefined), 'the first plan is never a repeat');
-  assert(isRepeat(plan(100, 110), t(8), prev), 'same zone, 8h later → repeat');
-  assert(isRepeat(plan(105, 115), t(8), prev), 'overlapping zone → repeat');
-  assert(!isRepeat(plan(120, 130), t(8), prev), 'a different zone is a new opportunity');
+  assert(isRepeat(plan(100, 110), t(8), missed), 'same zone, 8h later → repeat');
+  assert(isRepeat(plan(105, 115), t(8), missed), 'overlapping zone → repeat');
+  assert(!isRepeat(plan(120, 130), t(8), missed), 'a different zone is a new opportunity');
   assert(
-    !isRepeat(plan(100, 110), t(COOLDOWN_H + 1), prev),
-    'the same zone is takeable again after the cooldown',
+    !isRepeat(plan(100, 110), t(FILL_WINDOW_HOURS + COOLDOWN_H + 1), missed),
+    'an unfilled zone is takeable again after the fill window and cooldown',
   );
   // Touching-but-not-crossing has to count as overlap, or a zone that drifts by
   // one tick between runs is counted twice.
-  assert(isRepeat(plan(110, 120), t(1), prev), 'zones that touch at one price overlap');
+  assert(isRepeat(plan(110, 120), t(1), missed), 'zones that touch at one price overlap');
 
-  console.log('self-check passed (dedup: overlap + cooldown, first plan always taken)');
+  // The bug this rule exists for: a 24h window expiring while the trade it
+  // belongs to is still open under a 72h hold.
+  assert(
+    isRepeat(plan(100, 110), t(COOLDOWN_H + 1), open),
+    'a zone whose trade is still running is NOT a fresh opportunity',
+  );
+  assert(
+    !isRepeat(plan(100, 110), t(2 + MAX_HOLD_H + COOLDOWN_H + 1), open),
+    'it frees up once the hold and the cooldown have both passed',
+  );
+
+  console.log(
+    'self-check passed (dedup: overlap + busy-until-close, first plan always taken)',
+  );
 }
 
 if (args.includes('--self-check')) {
@@ -280,12 +333,29 @@ async function main(): Promise<void> {
   let plansEmitted = 0;
   let repeats = 0;
   const taken: Scored[] = [];
-  const lastZone = new Map<string, { zone: ConfluenceZone; at: Date }>();
+  const lastZone = new Map<string, { zone: ConfluenceZone; busyUntil: number }>();
 
   for (const row of analyses) {
     const series = candles.get(row.symbol) ?? [];
     const since = series.filter((c) => c.time.getTime() > row.createdAt.getTime());
     const results = scorePlans(row.analysis.plans, since, row.createdAt, now);
+
+    // Second pass for anything still running past the hold limit: re-score it
+    // against candles cut at fill + MAX_HOLD, which is what §14h did. Two
+    // passes rather than one because the fill time is not knowable until the
+    // first pass has found it.
+    const capped = results.map((result, i) => {
+      if (result.outcome !== 'OPEN' || !result.filledAt) return result;
+      const closeAt = result.filledAt.getTime() + MAX_HOLD_H * 3_600_000;
+      if (closeAt >= now) return result;
+      const [rescored] = scorePlans(
+        [row.analysis.plans[i]],
+        since.filter((c) => c.time.getTime() <= closeAt),
+        row.createdAt,
+        closeAt,
+      );
+      return rescored;
+    });
 
     row.analysis.plans.forEach((plan, i) => {
       plansEmitted += 1;
@@ -294,8 +364,11 @@ async function main(): Promise<void> {
         repeats += 1;
         return;
       }
-      lastZone.set(key, { zone: plan.zone, at: row.createdAt });
-      taken.push(score(row, plan, results[i]));
+      lastZone.set(key, {
+        zone: plan.zone,
+        busyUntil: busyUntil(row.createdAt, capped[i]),
+      });
+      taken.push(score(row, plan, capped[i], results[i]));
     });
   }
 
@@ -373,6 +446,14 @@ async function main(): Promise<void> {
     `\nnet R/trade  ${mean(done.map((s) => s.netR as number)).toFixed(3)} including open ` +
       `· ${closed.length === 0 ? '—' : mean(closed.map((s) => s.netR as number)).toFixed(3)} closed only ` +
       `(${((open.length / done.length) * 100).toFixed(0)}% of fills are open)`,
+  );
+
+  // The knob §14h's conclusion moved with. If these two disagree, the holding
+  // period is doing the work, not the levels.
+  const uncapped = done.filter((s) => s.netRUncapped !== null);
+  console.log(
+    `hold        ${mean(done.map((s) => s.netR as number)).toFixed(3)} at ${MAX_HOLD_H}h ` +
+      `· ${uncapped.length === 0 ? '—' : mean(uncapped.map((s) => s.netRUncapped as number)).toFixed(3)} with no limit`,
   );
 
   // ── control: same plans, another analysis's timing ───────────────────

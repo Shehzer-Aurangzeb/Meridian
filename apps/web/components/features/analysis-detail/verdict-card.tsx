@@ -20,6 +20,66 @@ const TONE: Record<Freshness, string> = {
   SUPERSEDED: 'border-border/10 dark:border-border',
 };
 
+/**
+ * The narration arrives as Markdown and was being printed raw, so headings
+ * showed up as `## What this comes to` and emphasis as `**Long.**`.
+ *
+ * ponytail: no Markdown library. The prompt asks for prose under plain
+ * headings — no tables, no lists — so the whole grammar is `##`, `**bold**`,
+ * `*italic*`, and blank-line paragraphs. Reach for react-markdown the day the
+ * prompt starts asking for something this cannot draw.
+ */
+const INLINE = /(\*\*[^*]+\*\*|\*[^*\n]+\*|\$\s?[\d,]+(?:\.\d+)?)/g;
+
+function inline(text: string): React.ReactNode[] {
+  return text.split(INLINE).map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-semibold text-text-primary">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.length > 2 && part.startsWith('*') && part.endsWith('*')) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    // Every price is $-prefixed by prompt rule — the same shape assertProvenance
+    // checks. Monospace makes a number-dense paragraph scannable.
+    if (part.startsWith('$')) {
+      return (
+        <span key={i} className="font-mono text-[0.92em] text-text-primary">
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
+function NarrationProse({ text }: { text: string }) {
+  return (
+    // ~70 characters is the readable line length; the card is far wider than
+    // that on a desktop, and unconstrained prose at 1440px is a wall.
+    <div className="max-w-[70ch] flex flex-col gap-3">
+      {text.split(/\n{2,}/).map((block, i) => {
+        const heading = /^#{1,4}\s+(.+)$/.exec(block.trim());
+        return heading ? (
+          <h3
+            key={i}
+            className="text-[10px] font-semibold tracking-[0.16em] uppercase text-gold-ink mt-4 first:mt-0"
+          >
+            {heading[1]}
+          </h3>
+        ) : (
+          <p key={i} className="text-[15px] text-text-secondary leading-relaxed">
+            {inline(block.trim())}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 interface VerdictCardProps {
   id: string;
   verdict: Verdict | null;
@@ -104,14 +164,7 @@ export function VerdictCard({ id, verdict, narration, freshness }: VerdictCardPr
                 {read.citedPrices.length === 1 ? '' : 's'} cited, all traced
               </span>
             </div>
-            {read.text.split(/\n{2,}/).map((paragraph) => (
-              <p
-                key={paragraph}
-                className="text-[15px] text-text-secondary leading-relaxed mb-3 last:mb-0 whitespace-pre-line"
-              >
-                {paragraph}
-              </p>
-            ))}
+            <NarrationProse text={read.text} />
           </div>
         )}
       </div>

@@ -89,19 +89,39 @@ export class AnalystNarrationService {
     const allowed = this.allowedPrices(input);
     const prompt = this.buildPrompt(input);
 
+    // ─── Everything here is in service of one hard number ───────────────
+    // API Gateway's integration timeout is 30s and cannot be raised (Lambda's
+    // own limit is 120s, so it is not the constraint). At defaults this call
+    // measured 45s and the gateway hung up before the narration returned.
+    //
+    //   effort medium   less thinking; this reads computed numbers, it does
+    //                   not solve anything
+    //   max_tokens      caps thinking PLUS text together — 8000 is ~4x the
+    //                   measured spend, so it bounds the tail without
+    //                   truncating a 450-650 word read
+    //
+    // NOT fast mode: `speed: 'fast'` would be the ideal lever here (same
+    // model, up to 2.5x output tokens/sec) but this org is provisioned at
+    // *zero* fast-mode tokens per minute, so every request 429s. Revisit if
+    // that quota is ever granted.
+    //
+    // Measured on one LTC analysis, Claude call only:
+    //   default (high)  ~45s   1906 out   — times out
+    //   medium          ~21s   1453 out   — shipped
+    //   low             ~18s   1211 out   — 3s cheaper, visibly terser
+    // `low` is the lever if this creeps back over. Do NOT disable thinking:
+    // on this model that makes it emit tool calls as plain text and leak
+    // <thinking> tags, and it is the more expensive lever anyway.
     const response = await this.anthropic().messages.create({
       model: this.model,
-      // Thinking is ON by default on this model, and max_tokens caps thinking
-      // PLUS response text together — a tight budget truncates mid-sentence.
-      max_tokens: 16000,
+      output_config: { effort: 'medium' },
+      max_tokens: 8000,
       // No `temperature`: it is rejected outright (400) on this model family.
       // Wording stability comes from the prompt, not a sampling knob.
       //
-      // ponytail: no server-side `fallbacks` — @anthropic-ai/sdk 0.95.2 has no
-      // support for it, so the field would not be sent correctly. The refusal
-      // below is handled explicitly instead. Add `fallbacks: 'default'` (beta
-      // `server-side-fallback-2026-07-01`) after upgrading the SDK if a
-      // declined narration should silently retry on another model.
+      // ponytail: no server-side `fallbacks` — @anthropic-ai/sdk 0.95.2 types
+      // it, but a declined narration is already reported as the optional extra
+      // it is. Add `fallbacks: 'default'` if that ever needs to retry silently.
       messages: [{ role: 'user', content: prompt }],
     });
 
