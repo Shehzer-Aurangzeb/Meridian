@@ -69,3 +69,9 @@ apps/
 packages/
 └── shared/  # Shared TypeScript types
 ```
+
+## A note on `docs/`
+
+Design notes, research logs and reference material live in `docs/`, which is
+not published. Code comments referring to `docs/STATE_OF_PLAY.md` and similar
+point at those local working notes — the code stands on its own without them.
