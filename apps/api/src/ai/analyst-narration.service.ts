@@ -10,7 +10,11 @@ export interface NarrationInput {
   map: LevelMap;
   plans: TradePlan[];
   regime: MarketRegimeResult;
-  checklist: EntryChecklistResult | null;
+  /**
+   * One checklist per plan direction. Singular before: the prompt then
+   * announced "read for long" over an analysis carrying a short plan too.
+   */
+  checklists: Partial<Record<'long' | 'short', EntryChecklistResult>> | null;
   regimeTimeframe: string;
 }
 
@@ -288,7 +292,7 @@ This is checked mechanically. There is no partial credit.`;
   }
 
   private data(input: NarrationInput): string {
-    const { map, plans, regime, checklist, regimeTimeframe } = input;
+    const { map, plans, regime, checklists, regimeTimeframe } = input;
     const f = (n: number) => `$${n.toFixed(n < 10 ? 4 : 2)}`;
     const pct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 
@@ -344,8 +348,9 @@ This is checked mechanically. There is no partial credit.`;
     }
     lines.push('');
 
-    if (checklist) {
-      lines.push(`## The five conditions (${regimeTimeframe}, read for ${checklist.tradeType})`);
+    for (const [direction, checklist] of Object.entries(checklists ?? {})) {
+      if (!checklist) continue;
+      lines.push(`## The five conditions (${regimeTimeframe}, read for the ${direction})`);
       lines.push(`${checklist.conditionsMet} of 5 met.`);
       for (const c of checklist.conditions) {
         lines.push(`- ${c.name}: ${c.passed ? 'MET' : 'not met'} — ${c.value ?? ''} · ${c.reason}`);

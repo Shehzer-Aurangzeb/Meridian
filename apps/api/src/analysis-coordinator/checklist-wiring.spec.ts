@@ -167,4 +167,29 @@ describe('AnalysisCoordinatorService — checklist input wiring', () => {
     );
     expect(result.bollingerBand.passed).toBe(true);
   });
+
+  it('bug C, part 2: the CALLER has to pass the direction, and did not', () => {
+    // The capability above shipped; the caller never used it. `analyze()`
+    // called routeFromRegime with no direction, so ONE checklist — scored for
+    // a side derived from trend — was attached to BOTH the long and the short
+    // plan the level leg emits.
+    //
+    // The derived side is not merely arbitrary, it is close to unsatisfiable:
+    // HH/HL derives `long`, which wants RSI <= 40 and price at the LOWER band,
+    // while an uptrend sits high on both. Over 84 days of saved analyses the
+    // RSI and Bollinger conditions passed 0 times in 31.
+    const regime = marketRegime.classifyFromContext(context);
+
+    const long = coordinator.routeFromRegime(context, '1h', regime, 'long');
+    const short = coordinator.routeFromRegime(context, '1h', regime, 'short');
+
+    expect(long.checklistResult!.tradeType).toBe('long');
+    expect(short.checklistResult!.tradeType).toBe('short');
+
+    // The fixture closes below the lower band: that is a long's band extreme
+    // and emphatically not a short's. One shared verdict cannot be right for
+    // both, which is the entire bug.
+    expect(long.checklistResult!.bollingerBand.passed).toBe(true);
+    expect(short.checklistResult!.bollingerBand.passed).toBe(false);
+  });
 });

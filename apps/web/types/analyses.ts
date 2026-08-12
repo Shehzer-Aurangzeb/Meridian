@@ -162,8 +162,12 @@ export interface AnalysisRecord {
   };
   regime: RegimeResult;
   route: Route;
-  /** Only on the CONFLUENCE_CHECKLIST route. */
-  checklist: ChecklistResult | null;
+  /**
+   * Only on the CONFLUENCE_CHECKLIST route, one entry per plan direction.
+   * Was a single result scored for a trend-derived side and shown against
+   * both plans.
+   */
+  checklists: Partial<Record<'long' | 'short', ChecklistResult>> | null;
   /** Only on the SQUEEZE_BREAKOUT route. */
   squeeze: SqueezeSetup | null;
   map: LevelMap;

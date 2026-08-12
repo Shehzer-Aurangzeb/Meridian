@@ -19,7 +19,7 @@ function Metric({ label, value, sub }: { label: string; value: string; sub?: str
 }
 
 export function RegimeCard({ analysis }: { analysis: AnalysisRecord }) {
-  const { regime, checklist, squeeze, timeframes } = analysis;
+  const { regime, checklists, squeeze, timeframes } = analysis;
   const m = regime.metrics;
 
   return (
@@ -63,22 +63,39 @@ export function RegimeCard({ analysis }: { analysis: AnalysisRecord }) {
               {formatEnumLabel(analysis.route)}
             </h2>
           </div>
-          {checklist && (
-            <span
-              className={cn(
-                'font-display text-2xl font-semibold shrink-0',
-                checklist.passed ? 'text-sage dark:text-green' : 'text-text-tertiary'
+          {checklists && (
+            <div className="flex gap-4 shrink-0">
+              {(['long', 'short'] as const).map((side) =>
+                checklists[side] ? (
+                  <span key={side} className="text-right">
+                    <span className="block text-[11px] uppercase tracking-wide text-text-tertiary">
+                      {side}
+                    </span>
+                    <span
+                      className={cn(
+                        'font-display text-2xl font-semibold',
+                        checklists[side]!.passed
+                          ? 'text-sage dark:text-green'
+                          : 'text-text-tertiary'
+                      )}
+                    >
+                      {checklists[side]!.conditionsMet}
+                      <span className="text-base text-text-secondary">/5</span>
+                    </span>
+                  </span>
+                ) : null
               )}
-            >
-              {checklist.conditionsMet}
-              <span className="text-base text-text-secondary">/5</span>
-            </span>
+            </div>
           )}
         </header>
 
-        {checklist && (
-          <ul className="px-6 py-2">
-            {checklist.conditions.map((condition) => (
+        {(['long', 'short'] as const).map((side) =>
+          checklists?.[side] ? (
+          <ul key={side} className="px-6 py-2">
+            <li className="pt-2 pb-1 text-[11px] uppercase tracking-wide text-text-tertiary">
+              {side} conditions
+            </li>
+            {checklists[side]!.conditions.map((condition) => (
               <li
                 key={condition.name}
                 className="flex items-start gap-3 py-2.5 border-b border-border/10 dark:border-border last:border-0"
@@ -102,6 +119,7 @@ export function RegimeCard({ analysis }: { analysis: AnalysisRecord }) {
               </li>
             ))}
           </ul>
+          ) : null
         )}
 
         {squeeze && (
