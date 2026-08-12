@@ -49,6 +49,15 @@ export interface LadderInput {
   stop: number;
   riskPerUnit: number;
   targets: Array<{ price: number; weightPercent: number }>;
+  /**
+   * How many targets must fill before the stop moves to breakeven.
+   *
+   * 1 is the playbook and the default, so every existing caller is unchanged.
+   * 0 disables it and lets the remaining size run on the original stop. Only
+   * the harness sets this — it exists to measure whether the rule pays for
+   * itself, not to be tuned per analysis.
+   */
+  breakevenAfterTarget?: number;
 }
 
 /**
@@ -102,8 +111,11 @@ export function scoreLadder(post: Candle[], input: LadderInput): LadderResult {
       realizedR += (t.weightPercent / 100) * rAt(t.price);
       remaining -= t.weightPercent;
       targetsHit += 1;
-      // Breakeven after the first target, per the playbook.
-      if (targetsHit === 1) stop = input.averageEntry;
+      // Breakeven after the first target, per the playbook. 0 turns it off.
+      const breakevenAfter = input.breakevenAfterTarget ?? 1;
+      if (breakevenAfter > 0 && targetsHit === breakevenAfter) {
+        stop = input.averageEntry;
+      }
     }
 
     if (remaining <= 0) break;
