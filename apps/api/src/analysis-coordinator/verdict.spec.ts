@@ -60,7 +60,7 @@ const record = (over: Partial<Parameters<typeof buildVerdict>[0]> = {}) => ({
     },
   },
   route: 'CONFLUENCE_CHECKLIST' as const,
-  checklist: { conditionsMet: 3 } as never,
+  checklists: { long: { conditionsMet: 3 }, short: { conditionsMet: 1 } } as never,
   plans: [plan()],
   map: { spot: 64300 } as never,
   ...over,

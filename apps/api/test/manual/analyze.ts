@@ -196,10 +196,10 @@ async function main() {
     }
   }
 
-  if (analysis.checklist) {
-    const c = analysis.checklist;
+  for (const [direction, c] of Object.entries(analysis.checklists ?? {})) {
+    if (!c) continue;
     console.log(
-      `\nchecklist   ${c.conditionsMet}/5 conditions met (needs 3) · ${c.tradeType}`,
+      `\nchecklist   ${c.conditionsMet}/5 conditions met (needs 3) · ${direction}`,
     );
     console.table(
       c.conditions.map((cond) => ({
@@ -235,14 +235,23 @@ async function main() {
     bandWidth: regime.metrics.bandWidth,
     bandWidthPercentile: regime.metrics.bandWidthPercentile,
     route: analysis.route,
-    direction: analysis.checklist?.tradeType ?? null,
-    conditionsMet: analysis.checklist?.conditionsMet ?? null,
-    conditions:
-      analysis.checklist?.conditions.map((c) => ({
-        name: c.name,
-        passed: c.passed,
-        value: c.value ?? null,
-      })) ?? null,
+    // The JSONL row keeps one checklist per direction now; a single
+    // `conditionsMet` could only ever describe one of the two plans.
+    checklists: analysis.checklists
+      ? Object.fromEntries(
+          Object.entries(analysis.checklists).map(([direction, c]) => [
+            direction,
+            {
+              conditionsMet: c.conditionsMet,
+              conditions: c.conditions.map((cond) => ({
+                name: cond.name,
+                passed: cond.passed,
+                value: cond.value ?? null,
+              })),
+            },
+          ]),
+        )
+      : null,
     squeezeSetup: analysis.squeeze
       ? {
           upper: analysis.squeeze.upperTriggerPrice,
@@ -289,7 +298,7 @@ async function main() {
     map,
     plans,
     regime,
-    checklist: analysis.checklist,
+    checklists: analysis.checklists,
     regimeTimeframe: ANALYSIS_TIMEFRAME,
   };
 

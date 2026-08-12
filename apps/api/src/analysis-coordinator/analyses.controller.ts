@@ -393,7 +393,7 @@ export class AnalysesController {
         map: analysis.map,
         plans: analysis.plans,
         regime: analysis.regime,
-        checklist: analysis.checklist,
+        checklists: analysis.checklists,
         regimeTimeframe: analysis.timeframes.regime,
       });
     } catch (err) {

@@ -38,7 +38,24 @@ export interface AnalysisRecord {
   };
   regime: CoordinatorAnalysisResult['regimeResult'];
   route: CoordinatorAnalysisResult['strategyRoute'];
-  checklist: CoordinatorAnalysisResult['checklistResult'];
+  /**
+   * One checklist PER PLAN DIRECTION, on the CONFLUENCE_CHECKLIST route.
+   *
+   * Was a single result, which was wrong because the level leg emits a long
+   * AND a short from the same map while the checklist scores one side. With
+   * no direction passed, the coordinator derived one from trend and that
+   * single verdict was attached to both legs, so the opposite leg carried a
+   * checklist scored for the trade it was not.
+   *
+   * The derived side is also systematically unsatisfiable: HH/HL derives
+   * `long`, which needs RSI <= 40 and price at the LOWER band, but an uptrend
+   * sits high on both. Across 84 days of saved analyses the RSI and Bollinger
+   * conditions passed 0 times out of 31; scored per leg they pass 14%/24% and
+   * 10%/14%. See checklist-wiring.spec.ts bug C.
+   */
+  checklists: Partial<
+    Record<'long' | 'short', NonNullable<CoordinatorAnalysisResult['checklistResult']>>
+  > | null;
   squeeze: CoordinatorAnalysisResult['squeezeSetup'];
   map: LevelMap;
   plans: TradePlan[];
@@ -96,6 +113,8 @@ export class AnalyzeService {
       candles,
     );
     const regime = this.marketRegimeService.classifyFromContext(context);
+
+    // Route and squeeze setup read only the regime, so one call settles them.
     const routed = this.coordinatorService.routeFromRegime(
       context,
       ANALYSIS_TIMEFRAME,
@@ -108,6 +127,26 @@ export class AnalyzeService {
     // be is the one untested idea left (STATE_OF_PLAY.md §14h).
     const map = await this.levelMapService.build(coin);
     const plans = this.tradePlanService.buildPlans(map.zones, map.spot, map.atr);
+
+    // The checklist DOES depend on direction — it is a confirmation filter,
+    // and a filter has to be told which side it is confirming. Evaluated once
+    // per direction the level leg actually produced, which is the whole fix:
+    // `routeFromRegime` has always accepted `direction`, this caller just
+    // never passed it.
+    const checklists =
+      routed.strategyRoute === 'CONFLUENCE_CHECKLIST'
+        ? (Object.fromEntries(
+            [...new Set(plans.map((p) => p.direction))].map((direction) => [
+              direction,
+              this.coordinatorService.routeFromRegime(
+                context,
+                ANALYSIS_TIMEFRAME,
+                regime,
+                direction,
+              ).checklistResult,
+            ]),
+          ) as AnalysisRecord['checklists'])
+        : null;
 
     this.logger.debug(
       `${coin}: ${regime.regime} · ${map.zones.length} zone(s) · ${plans.length} plan(s)`,
@@ -123,7 +162,7 @@ export class AnalyzeService {
       },
       regime,
       route: routed.strategyRoute,
-      checklist: routed.checklistResult,
+      checklists,
       squeeze: routed.squeezeSetup,
       map,
       plans,

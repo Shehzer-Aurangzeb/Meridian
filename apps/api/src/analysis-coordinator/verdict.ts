@@ -88,7 +88,7 @@ const STATUS: Record<PlanResult['outcome'], (r: PlanResult) => string> = {
 };
 
 export function buildVerdict(
-  record: Pick<AnalysisRecord, 'symbol' | 'regime' | 'route' | 'checklist' | 'plans' | 'map'>,
+  record: Pick<AnalysisRecord, 'symbol' | 'regime' | 'route' | 'checklists' | 'plans' | 'map'>,
   freshness: Freshness,
   outcomes: PlanResult[],
   currentPrice: number,
@@ -138,8 +138,12 @@ export function buildVerdict(
       `against ${lead.targets.length} target${lead.targets.length === 1 ? '' : 's'} that blend to ${num(lead.blendedR, 2)}R.`,
   );
 
-  const checklistClause = record.checklist
-    ? ` ${record.checklist.conditionsMet} of 5 entry conditions are met.`
+  // The lead plan's OWN checklist. Reading a single shared one printed the
+  // opposite side's score next to this plan whenever the trend disagreed with
+  // the zone.
+  const leadChecklist = record.checklists?.[lead.direction];
+  const checklistClause = leadChecklist
+    ? ` ${leadChecklist.conditionsMet} of 5 entry conditions are met for the ${lead.direction}.`
     : '';
   body.push(
     `The ${regime.timeframe} read is ${REGIME_WORDS[regime.regime] ?? regime.regime.toLowerCase()} ` +

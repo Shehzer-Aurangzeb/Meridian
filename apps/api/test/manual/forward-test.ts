@@ -242,18 +242,62 @@ function selfCheck(): void {
     'it frees up once the hold and the cooldown have both passed',
   );
 
+  // t-stat: the failure that matters is a sign flip or a silent NaN, either of
+  // which would turn "significantly negative" into "looks fine".
+  assert(tStat([1, 1, 1]) === null, 'zero variance has no t-stat, not Infinity');
+  assert(tStat([1, 2]) === null, 'under 3 observations there is no t-stat');
+  assert((tStat([-1, -1, -1, 1]) as number) < 0, 'a negative mean gives a negative t');
+  // [0,1,1,2]: mean 1, sum of squared deviations 2, so sd = sqrt(2/3) with the
+  // n-1 divisor and t = 1 / sqrt(2/3) * sqrt(4) = sqrt(6). Dividing by n
+  // instead would give t = sqrt(8) — this is the assert that catches it.
+  assert(
+    Math.abs((tStat([0, 1, 1, 2]) as number) - Math.sqrt(6)) < 1e-9,
+    'sd uses the n-1 divisor',
+  );
+
   console.log(
     'self-check passed (dedup: overlap + busy-until-close, first plan always taken)',
   );
 }
 
+const mean = (xs: number[]): number =>
+  xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+
+/**
+ * Per-trade t-stat, mean / (sd / sqrt(n)).
+ *
+ * OPTIMISTIC BY CONSTRUCTION. It assumes trades are independent and they are
+ * not — ten coins inside one regime move together (rule 7), so the effective
+ * sample is far smaller than n and the true |t| is smaller than this one.
+ *
+ * That makes it useful in exactly one direction: |t| below 2 means the result
+ * is not significant even BEFORE the clustering haircut, which is a real
+ * finding. |t| above 2 is never proof of anything on its own.
+ *
+ * ponytail: no p-value. Converting t to p would imply a distribution this
+ * sample does not have; bootstrap.ts is the tool for that once there are
+ * enough month-clusters to resample.
+ */
+const tStat = (xs: number[]): number | null => {
+  if (xs.length < 3) return null;
+  const m = mean(xs);
+  const sd = Math.sqrt(
+    xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1),
+  );
+  return sd === 0 ? null : (m / sd) * Math.sqrt(xs.length);
+};
+
+const fmtT = (xs: number[]): string => {
+  const t = tStat(xs);
+  return t === null ? 't —' : `t ${t >= 0 ? '+' : ''}${t.toFixed(2)}`;
+};
+
+// Below `tStat`, not above: these are `const`, so running the check any earlier
+// dies in the temporal dead zone rather than testing anything.
 if (args.includes('--self-check')) {
   selfCheck();
   process.exit(0);
 }
-
-const mean = (xs: number[]): number =>
-  xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
 
 /** Only filled plans have an R. PENDING and MISSED are selectivity, not returns. */
 const filled = (rows: Scored[]): Scored[] => rows.filter((s) => s.netR !== null);
@@ -442,11 +486,31 @@ async function main(): Promise<void> {
 
   // Open positions are marked to market, which is a guess about the future
   // dressed as a result. §14h's sign flipped on exactly this.
+  // Marking to market is a guess about the future dressed as a result, and
+  // §14h's sign flipped on exactly this. So print all three framings side by
+  // side: the spread between them IS the uncertainty the headline hides.
   const closed = done.filter((s) => s.outcome !== 'OPEN');
+  const row = (basis: string, xs: number[]) => ({
+    basis,
+    n: xs.length,
+    'net R/trade': xs.length === 0 ? '—' : mean(xs).toFixed(3),
+    'total R': xs.length === 0 ? '—' : (mean(xs) * xs.length).toFixed(1),
+    t: xs.length === 0 ? '—' : fmtT(xs),
+  });
+
+  console.log('\nnet R/trade, by what we assume about the open positions');
+  console.table([
+    row('open marked to market', done.map((s) => s.netR as number)),
+    row(
+      'open scored at 0R',
+      done.map((s) => (s.outcome === 'OPEN' ? 0 : (s.netR as number))),
+    ),
+    row('closed only', closed.map((s) => s.netR as number)),
+  ]);
   console.log(
-    `\nnet R/trade  ${mean(done.map((s) => s.netR as number)).toFixed(3)} including open ` +
-      `· ${closed.length === 0 ? '—' : mean(closed.map((s) => s.netR as number)).toFixed(3)} closed only ` +
-      `(${((open.length / done.length) * 100).toFixed(0)}% of fills are open)`,
+    `${((open.length / done.length) * 100).toFixed(0)}% of fills are still open. ` +
+      `t assumes independent trades and they are not — treat it as an upper ` +
+      `bound on significance, not a p-value.`,
   );
 
   // The knob §14h's conclusion moved with. If these two disagree, the holding
