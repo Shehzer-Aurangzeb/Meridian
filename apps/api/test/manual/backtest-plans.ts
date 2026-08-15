@@ -73,6 +73,7 @@ import { ANALYSIS_TIMEFRAME, CANDLE_LIMITS } from '../../src/common/constants/ti
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
 import { findFirstFill } from '../../src/common/replay/replay';
 import { completedAsOf, scoreLadder, TIMEFRAME_MS } from '../../src/common/replay/plan-replay';
+import { ARMS, MAX_ARM_BARS, scoreArm } from './exits';
 import { makeRng } from './rng';
 
 // Per-bar map builds log three lines each at debug level. 1000 bars of that
@@ -121,6 +122,12 @@ const STATES = str('states', 'ACTIONABLE')
 const RANDOM = args.includes('--random');
 const SEED = num('seed', 12345);
 const CSV = str('csv', '');
+// Score every exit arm against the same filled trade. Adds columns, changes
+// nothing about entries or about the default run.
+const EXIT_ARMS = args.includes('--exit-arms');
+// Per-BAR log of level proximity and the next hour's move. Read-only extra
+// output for the touch-volatility study; does not affect any trade.
+const TOUCH_LOG = str('touch-log', '');
 
 const CONFIG =
   `coins=${COINS.join('/')} bars=${BARS} step=${STEP} states=${STATES.join('+')} ` +
@@ -182,6 +189,28 @@ interface Trade {
   cBollinger: boolean | null;
   cStructure: boolean | null;
   cSupportResistance: boolean | null;
+  /**
+   * The NUMBERS the conditions above were derived from, at the decision bar.
+   *
+   * Recorded because a boolean cannot distinguish "this indicator carries no
+   * information" from "this threshold is in the wrong place" — and the
+   * winner/loser split found four of the five conditions pointing backwards
+   * without being able to say which of those two it was.
+   *
+   * Read from the same `context` the checklist reads, so these are the exact
+   * inputs to the verdicts beside them. Nothing new is computed. Unlike the
+   * booleans, they are populated on EVERY trade, including the squeeze route
+   * that runs no checklist.
+   */
+  rsiValue: number | null;
+  adxValue: number | null;
+  pdiValue: number | null;
+  mdiValue: number | null;
+  percentBValue: number | null;
+  /** QQE's discrete state (green/red/neutral)… */
+  qqeState: string | null;
+  /** …and the smoothed-RSI number under it, which the state alone discards. */
+  qqeValue: number | null;
   /** Named `time` and `r` (gross) so bootstrap.ts reads this CSV unmodified. */
   time: Date;
   state: ZoneState;
@@ -213,6 +242,17 @@ interface BarContext {
   route: string;
   structure: Trade['structure'];
   checklist: Partial<Record<'long' | 'short', EntryChecklistResult>>;
+  /** Raw indicator readings at this bar — see the Trade fields of the same name. */
+  raw: Pick<
+    Trade,
+    | 'rsiValue'
+    | 'adxValue'
+    | 'pdiValue'
+    | 'mdiValue'
+    | 'percentBValue'
+    | 'qqeState'
+    | 'qqeValue'
+  >;
 }
 
 function tryTrade(
@@ -235,6 +275,23 @@ function tryTrade(
 
   const fillIdx = index + 1 + window.indexOf(fill);
   const post = h1.slice(fillIdx + 1, fillIdx + 1 + MAX_BARS);
+
+  // Every exit arm scored against THIS SAME filled trade. Running them as
+  // separate backtests would give each its own barsHeld, hence its own
+  // cooldown, hence a different set of later entries — and the comparison
+  // would quietly be about entries again. The entry set stays arm A's.
+  const arms: Record<string, number | string> = {};
+  if (EXIT_ARMS) {
+    const long = h1.slice(fillIdx + 1, fillIdx + 1 + MAX_ARM_BARS);
+    for (const spec of ARMS) {
+      const s = scoreArm(long, plan, spec, ROUND_TRIP_PCT);
+      arms[`${spec.name}_r`] = s.r;
+      arms[`${spec.name}_costR`] = s.costR;
+      arms[`${spec.name}_netR`] = s.netR;
+      arms[`${spec.name}_status`] = s.status;
+      arms[`${spec.name}_barsHeld`] = s.barsHeld;
+    }
+  }
   const scored = scoreLadder(post, {
     direction: plan.direction,
     averageEntry: plan.averageEntry,
@@ -259,6 +316,7 @@ function tryTrade(
     cBollinger: cl?.bollingerBand.passed ?? null,
     cStructure: cl?.marketStructure.passed ?? null,
     cSupportResistance: cl?.supportResistance.passed ?? null,
+    ...ctx.raw,
     time: h1[index].time,
     state: plan.state,
     sources: plan.zone.sources.length,
@@ -273,6 +331,7 @@ function tryTrade(
     targetsHit: scored.targetsHit,
     barsToFill: fillIdx - index,
     barsHeld: scored.barsHeld,
+    ...arms,
   };
 }
 
@@ -284,6 +343,7 @@ async function runCoin(coin: string): Promise<{
   window: [Date, Date];
   structureChecks: number;
   structureMismatches: number;
+  touches: Array<Record<string, string | number>>;
 }> {
   const binance = new BinanceService(cache, new CacheTelemetryService());
   const indicators = new IndicatorsService();
@@ -341,6 +401,7 @@ async function runCoin(coin: string): Promise<{
   const firstDecision = Math.max(CANDLE_LIMITS['1h'], lastDecision - BARS + 1);
 
   const trades: Trade[] = [];
+  const touches: Array<Record<string, string | number>> = [];
   const allSignals: Record<'long' | 'short', Signal[]> = { long: [], short: [] };
   const cooldownUntil: Record<'long' | 'short', number> = { long: -1, short: -1 };
   let bars = 0;
@@ -392,6 +453,26 @@ async function runCoin(coin: string): Promise<{
     const plans = planner.buildPlans(map.zones, map.spot, map.atr);
     bars += 1;
 
+    if (TOUCH_LOG) {
+      // A touch is the bar's own range INTERSECTING a zone band, not a
+      // proximity guess: the zones carry real low/high edges, so use them.
+      const bar = h1[i];
+      const touched = map.zones.some((z) => bar.low <= z.high && bar.high >= z.low);
+      const nearest = map.zones.length
+        ? Math.min(...map.zones.map((z) => Math.abs(z.distancePercent)))
+        : NaN;
+      touches.push({
+        coin,
+        time: bar.time.toISOString(),
+        touched: touched ? 1 : 0,
+        nearestPct: nearest,
+        // Prior and next hour, both close-to-close, both in percent.
+        priorMovePct: Math.abs((bar.close - h1[i - 1].close) / h1[i - 1].close) * 100,
+        nextMovePct: Math.abs((h1[i + 1].close - bar.close) / bar.close) * 100,
+        atrPct: map.spot === 0 ? NaN : (map.atr / map.spot) * 100,
+      });
+    }
+
     // ── coordinator leg, exactly as `analyze()` runs it ─────────────────
     const analysisCandles = completedAsOf(
       analysisSeries,
@@ -436,11 +517,27 @@ async function runCoin(coin: string): Promise<{
     }
     const structure = coordStructure ?? localStructure;
 
+    // %B is the same formula as baserate.ts's `percentB`, inlined rather than
+    // imported: one division does not justify pulling in that module. Null on
+    // degenerate bands — a fabricated 0.5 would invent a mode.
+    const bb = context.bollingerBands;
+    const span = bb.upper - bb.lower;
+    const lastClose = context.closes[context.closes.length - 1];
+
     const barContext: BarContext = {
       regime: regimeResult.regime,
       route: routed.strategyRoute,
       structure,
       checklist,
+      raw: {
+        rsiValue: context.rsi,
+        adxValue: context.adx.adx,
+        pdiValue: context.adx.pdi,
+        mdiValue: context.adx.mdi,
+        percentBValue: span === 0 ? null : (lastClose - bb.lower) / span,
+        qqeState: context.qqe.color,
+        qqeValue: context.qqe.value,
+      },
     };
 
     for (const plan of plans) {
@@ -487,6 +584,7 @@ async function runCoin(coin: string): Promise<{
     window: [h1[firstDecision].time, h1[lastDecision].time],
     structureChecks,
     structureMismatches,
+    touches,
   };
 }
 
@@ -516,11 +614,13 @@ async function main(): Promise<void> {
 
   const all: Trade[] = [];
 
+  const allTouches: Array<Record<string, string | number>> = [];
   for (const coin of COINS) {
     const startedAt = Date.now();
-    const { trades, bars, eligible, noFill, window, structureChecks, structureMismatches } =
+    const { trades, bars, eligible, noFill, window, structureChecks, structureMismatches, touches } =
       await runCoin(coin);
     all.push(...trades);
+    allTouches.push(...touches);
     const plan = trades.filter((t) => t.tier === 'PLAN');
     console.log(
       `${coin.padEnd(4)} ${bars} bars ` +
@@ -567,6 +667,16 @@ async function main(): Promise<void> {
     console.log(
       `\nedge over random: ${(mean(plan.map((t) => t.netR)) - mean(control.map((t) => t.netR))).toFixed(3)}R/trade`,
     );
+  }
+
+  if (TOUCH_LOG && allTouches.length) {
+    const tk = Object.keys(allTouches[0]);
+    fs.writeFileSync(
+      TOUCH_LOG,
+      `# ${CONFIG}\n${tk.join(',')}\n` +
+        allTouches.map((t) => tk.map((k) => t[k]).join(',')).join('\n'),
+    );
+    console.log(`\nwrote ${allTouches.length} bar rows to ${TOUCH_LOG} (config on line 1)`);
   }
 
   if (CSV) {
