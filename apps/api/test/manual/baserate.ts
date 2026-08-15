@@ -722,7 +722,7 @@ function selfCheck(): void {
   );
 }
 
-if (args.includes('--self-check')) {
+if (require.main === module && args.includes('--self-check')) {
   selfCheck();
   process.exit(0);
 }
@@ -951,7 +951,7 @@ function p1(): void {
   );
 }
 
-if (args.includes('--p1')) {
+if (require.main === module && args.includes('--p1')) {
   p1();
   process.exit(0);
 }
@@ -1052,7 +1052,7 @@ function p2(): void {
   if (newestContributor >= cut) process.exit(1);
 }
 
-if (args.includes('--p2')) {
+if (require.main === module && args.includes('--p2')) {
   p2();
   process.exit(0);
 }
@@ -1267,7 +1267,7 @@ function p3(): void {
   );
 }
 
-if (args.includes('--p3')) {
+if (require.main === module && args.includes('--p3')) {
   p3();
   process.exit(0);
 }
@@ -1371,7 +1371,11 @@ async function main(): Promise<void> {
   console.log(`\nwrote ${all.length} rows to ${OUT} (config on line 1)`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Guarded like every dispatch above: importing this file for `baseRatesFast`,
+// `permTest` or `blockSpread` must not kick off a three-year P0 fetch.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
