@@ -4,6 +4,8 @@ import {
   STOP_ATR_MULTIPLE,
   TradePlanService,
   ZONE_BANDS,
+  TARGET_WEIGHTS,
+  renormaliseTargetWeights,
 } from './trade-plan.service';
 
 const zone = (
@@ -26,16 +28,21 @@ describe('TradePlanService', () => {
   const atr = 300;
 
   /**
-   * Select by DIRECTION, never by index: buildPlans sorts by distance, so
-   * plans[0] is whichever side happens to be closer.
+   * The plan's GEOMETRY, built from the zone this direction would trade.
+   *
+   * Goes through `buildPlan` rather than `buildPlans` because the two answer
+   * different questions: this one is "given this zone, what is the plan", and
+   * `buildPlans` is "which plans are worth printing" — it withholds a plan
+   * with no target, which would leave the geometry fixtures below with nothing
+   * to assert on. That rule has its own test.
    */
-  const planFor = (
-    direction: 'long' | 'short',
-    zones: ConfluenceZone[],
-  ) => {
-    const found = service.buildPlans(zones, spot, atr).find((p) => p.direction === direction);
-    if (!found) throw new Error(`no ${direction} plan for this fixture`);
-    return found;
+  const planFor = (direction: 'long' | 'short', zones: ConfluenceZone[]) => {
+    const zone =
+      direction === 'long'
+        ? zones.filter((z) => z.high < spot).sort((a, b) => b.high - a.high)[0]
+        : zones.filter((z) => z.low > spot).sort((a, b) => a.low - b.low)[0];
+    if (!zone) throw new Error(`no ${direction} zone in this fixture`);
+    return service.buildPlan(zone, direction, spot, atr, zones);
   };
 
   describe('distance states', () => {
@@ -201,6 +208,23 @@ describe('TradePlanService', () => {
       expect(long.targets).toEqual([]);
       expect(long.blendedR).toBe(0);
     });
+
+    it('does not PRINT a plan it has no exit for', () => {
+      // One zone below spot and nothing above it: the long can only reach its
+      // stop or the end of the hold window. 57 of the 626 backtested trades
+      // were this shape and resolved at −1.08R, every resolved one a stop-out.
+      expect(service.buildPlans([zone(29_000, 29_100)], spot, atr)).toEqual([]);
+
+      // Give it somewhere to go and it is printed again — the rule is about
+      // the missing exit, not about single-zone maps.
+      const withTarget = service.buildPlans(
+        [zone(29_000, 29_100), zone(31_000, 31_100)],
+        spot,
+        atr,
+      );
+      expect(withTarget.map((p) => p.direction).sort()).toEqual(['long', 'short']);
+      expect(withTarget.every((p) => p.targets.length > 0)).toBe(true);
+    });
   });
 
   it('names the invalidation price in every come-back instruction', () => {
@@ -214,5 +238,93 @@ describe('TradePlanService', () => {
       expect(plan.comeBackWhen).toContain(plan.stop.toFixed(2));
       expect(plan.comeBackWhen).toMatch(/close (below|above)/);
     }
+  });
+});
+
+describe('renormaliseTargetWeights', () => {
+  it('leaves a full three-target ladder BIT-IDENTICAL', () => {
+    // Load-bearing. A 3-target plan already summed to 100, so C1 never touched
+    // it and neither may the fix. Exact equality, not toBeCloseTo — if this
+    // ever needs a tolerance, the renormalisation is doing arithmetic it
+    // should not be doing.
+    expect(renormaliseTargetWeights(3)).toEqual([33, 33, 34]);
+    expect(renormaliseTargetWeights(3)).toEqual([...TARGET_WEIGHTS]);
+  });
+
+  it('sends the whole position to a lone target', () => {
+    expect(renormaliseTargetWeights(1)).toEqual([100]);
+  });
+
+  it('splits two targets evenly', () => {
+    expect(renormaliseTargetWeights(2)).toEqual([50, 50]);
+  });
+
+  it('has nothing to divide when there are no targets', () => {
+    expect(renormaliseTargetWeights(0)).toEqual([]);
+  });
+
+  it('always sums to exactly 100 when there is at least one target', () => {
+    for (const n of [1, 2, 3]) {
+      const sum = renormaliseTargetWeights(n).reduce((a, b) => a + b, 0);
+      expect(sum).toBe(100);
+    }
+  });
+});
+
+describe('buildPlans — exit weights account for the whole position', () => {
+  /** Zones at 96–100 (entry), then 104–105, 109–110, 114–115 ahead of a long. */
+  const zone = (low: number, high: number): ConfluenceZone => ({
+    low,
+    high,
+    center: (low + high) / 2,
+    type: 'support',
+    sources: ['12h support', '0.5 Fib (12h)'],
+    spanPercent: ((high - low) / ((low + high) / 2)) * 100,
+    distancePercent: 0,
+  });
+
+  const planFor = (aheadCount: number) => {
+    const zones = [zone(96, 100), zone(104, 105), zone(109, 110), zone(114, 115)];
+    const svc = new TradePlanService();
+    const [longPlan] = svc.buildPlans(zones.slice(0, aheadCount + 1), 102, 3.4);
+    return longPlan;
+  };
+
+  it('one target takes the entire position', () => {
+    const p = planFor(1);
+    expect(p.targets).toHaveLength(1);
+    expect(p.targets[0].weightPercent).toBe(100);
+  });
+
+  it('two targets split it evenly', () => {
+    const p = planFor(2);
+    expect(p.targets.map((t) => t.weightPercent)).toEqual([50, 50]);
+  });
+
+  it('three targets keep the playbook split', () => {
+    const p = planFor(3);
+    expect(p.targets.map((t) => t.weightPercent)).toEqual([33, 33, 34]);
+  });
+
+  it('weights sum to 100 for every target count', () => {
+    for (const n of [1, 2, 3]) {
+      const sum = planFor(n).targets.reduce((a, t) => a + t.weightPercent, 0);
+      expect(sum).toBe(100);
+    }
+  });
+
+  it('plannedR is a real weighted mean, not a third of one', () => {
+    const p = planFor(1);
+    // One target now carries the whole ladder, so blendedR IS its rMultiple.
+    // Before the fix this reported rMultiple × 0.33.
+    expect(p.blendedR).toBeCloseTo(p.targets[0].rMultiple, 10);
+  });
+
+  it('mirrors for a short', () => {
+    const zones = [zone(104, 108), zone(96, 100)];
+    const svc = new TradePlanService();
+    const shortPlan = svc.buildPlans(zones, 102, 3.4).find((x) => x.direction === 'short');
+    expect(shortPlan?.targets).toHaveLength(1);
+    expect(shortPlan?.targets[0].weightPercent).toBe(100);
   });
 });
