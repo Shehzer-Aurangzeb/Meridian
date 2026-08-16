@@ -484,3 +484,64 @@ describe('scoreArm — a leg the trailed stop has passed', () => {
     expect(s.grossR).toBeCloseTo(-1, 10);
   });
 });
+
+describe('scoreArm — the re-analysis arms', () => {
+  const spec = ARMS.find((a) => a.name === 'E_zonegone') as ArmSpec;
+  const control = ARMS.find((a) => a.name === 'BASE_check') as ArmSpec;
+  // Fills one leg, then drifts. Nothing resolves it, so the exit rule is the
+  // only thing that can differ between the two arms.
+  const forward = [bar(103, 99, 99), bar(103, 99, 99), bar(104, 100, 101), bar(103, 99, 99)];
+
+  it('is the base arm when no signal is supplied', () => {
+    // A report run against an older CSV, or any caller that does not know how
+    // to build the signal, must not silently get a different exit rule.
+    expect(scoreArm(forward, plan, spec, base)).toEqual(scoreArm(forward, plan, control, base));
+  });
+
+  it('differs from its control ONLY in the exit', () => {
+    const withSignal = scoreArm(forward, plan, spec, base, { 'zone-gone': (i) => i === 2 });
+    const without = scoreArm(forward, plan, control, base);
+
+    // Same entry, same size, same risk — one rule apart.
+    expect(withSignal.fillIndex).toBe(without.fillIndex);
+    expect(withSignal.entryPrice).toBe(without.entryPrice);
+    expect(withSignal.filledFraction).toBe(without.filledFraction);
+    expect(withSignal.costR).toBeCloseTo(without.costR, 10);
+
+    expect(withSignal.status).toBe('SIGNAL_EXIT');
+    expect(without.status).toBe('TIMEOUT');
+    expect(withSignal.barsHeld).toBeLessThan(without.barsHeld);
+  });
+
+  it('ignores a signal handed to an arm that did not ask for one', () => {
+    // Only `exitOnSignal` arms listen. Otherwise adding the signal to the
+    // shared call site would quietly change every other arm in the sweep.
+    expect(scoreArm(forward, plan, control, base, { 'zone-gone': () => true })).toEqual(
+      scoreArm(forward, plan, control, base),
+    );
+  });
+});
+
+describe('scoreArm — a signal only reaches the arm that named it', () => {
+  const zoneGone = ARMS.find((a) => a.name === 'E_zonegone') as ArmSpec;
+  const noPlan = ARMS.find((a) => a.name === 'E_noplan') as ArmSpec;
+  const forward = [bar(103, 99, 99), bar(103, 99, 99), bar(104, 100, 101), bar(103, 99, 99)];
+
+  it('reads its own signal and ignores the other', () => {
+    // Both arms are otherwise identical, so if the keys were ignored these two
+    // would move together and the sweep would be comparing one rule to itself.
+    const only = { 'no-plan': (i: number) => i === 2 } as const;
+
+    expect(scoreArm(forward, plan, noPlan, base, only).status).toBe('SIGNAL_EXIT');
+    expect(scoreArm(forward, plan, zoneGone, base, only).status).toBe('TIMEOUT');
+  });
+
+  it('every arm that names a signal has one supplied by the harness', () => {
+    // The harness builds `resignalsFor`; a spec naming a key nobody provides
+    // would silently degrade to the base arm and be reported as a result.
+    const supplied = ['zone-gone', 'no-plan'];
+    for (const arm of ARMS) {
+      if (arm.exitOnSignal) expect(supplied).toContain(arm.exitOnSignal);
+    }
+  });
+});

@@ -48,6 +48,23 @@ export interface ScoringConfig {
    * first lift its own stop out of the way and then fail to hit it.
    */
   trailDistance?: number;
+  /**
+   * Close the position at this bar's close because the analysis no longer
+   * supports it.
+   *
+   * The one exit rule the tool could actually act on and has never measured.
+   * Every other early exit here is a function of PRICE — a tighter stop, a
+   * trail — and all of them measured worse: cutting on distance turns winners
+   * into losers faster than it saves losers. This is a different question:
+   * the coin is re-analysed on a schedule, and the reason for the trade can
+   * stop being true while price has done nothing much.
+   *
+   * Called with the index into `forward`, after the stop and target checks so
+   * a bar that resolved cannot also signal. The caller decides what "no longer
+   * supports it" means and how often to look — the scorer only knows when it
+   * was told to leave.
+   */
+  exitSignal?: (barIndex: number) => boolean;
 }
 
 /** The parts of a `TradePlan` that scoring actually reads. */
@@ -73,7 +90,7 @@ export interface ScorablePlan {
   targets: Array<{ price: number; weightPercent: number }>;
 }
 
-export type TradeStatus = LadderResult['status'] | 'NO_FILL';
+export type TradeStatus = LadderResult['status'] | 'NO_FILL' | 'SIGNAL_EXIT';
 
 export interface TradeScore {
   filled: boolean;
@@ -244,6 +261,7 @@ export function scoreTrade(
   let remaining = 100;
   let targetsHit = 0;
   let stopped = false;
+  let signalled = false;
   let barsHeld = 0;
   let lastBar: Candle | null = null;
   /** Best price seen since the fill. Only used when a trail is configured. */
@@ -329,6 +347,19 @@ export function scoreTrade(
     }
 
     if (remaining <= 0) break;
+
+    // The analysis stopped supporting the trade. Exit the rest at this bar's
+    // close — the decision is made ON the close that produced the new
+    // analysis, so the close is the only price it could have been acted at.
+    // Last in the bar, so a bar that stopped out or hit a target has already
+    // resolved on its own terms.
+    if (config.exitSignal?.(i)) {
+      realizedR += (remaining / 100) * size * rAt(c.close, entry);
+      remaining = 0;
+      signalled = true;
+      legsLive = false;
+      break;
+    }
   }
 
   // Whatever is still open at the end is marked to market, never assumed to
@@ -348,13 +379,19 @@ export function scoreTrade(
     entryPrice: entryOf(),
     legsFilled: legFilled.filter(Boolean).length,
     filledFraction,
+    // SIGNAL_EXIT is a RESOLVED outcome, unlike TIMEOUT: the position was
+    // closed on purpose at a price, not marked to market because the clock ran
+    // out. It is checked before ALL_TARGETS because a signal exit also drives
+    // `remaining` to zero.
     status: stopped
       ? targetsHit > 0
         ? 'PARTIAL'
         : 'STOPPED'
-      : remaining <= 0
-        ? 'ALL_TARGETS'
-        : 'TIMEOUT',
+      : signalled
+        ? 'SIGNAL_EXIT'
+        : remaining <= 0
+          ? 'ALL_TARGETS'
+          : 'TIMEOUT',
     targetsHit,
     grossR: realizedR,
     costR,

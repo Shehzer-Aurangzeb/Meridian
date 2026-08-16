@@ -60,6 +60,17 @@ export interface ArmSpec {
    * different units to each other.
    */
   trailMult?: number;
+  /**
+   * Close when the re-analysis stops supporting the trade, naming WHICH
+   * reading of "no longer supports" to use.
+   *
+   * The signals themselves come from the caller — `backtest-plans.ts` knows
+   * what the map looked like at every bar; this file only knows which one an
+   * arm listens to. An arm whose signal is not supplied behaves exactly like
+   * the base arm, which is what makes it safe to leave in the list when
+   * reporting against an older CSV.
+   */
+  exitOnSignal?: 'zone-gone' | 'no-plan';
 }
 
 export const ARMS: ArmSpec[] = [
@@ -71,6 +82,31 @@ export const ARMS: ArmSpec[] = [
   { name: 'B2_wide2x', maxBars: 960, targetScale: 2, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'B3_wide3x', maxBars: 960, targetScale: 3, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'D_tight', maxBars: 120, targetScale: 1, stopScale: 0.5, breakevenAfterTarget: 1, trail: false },
+  // Everything else here exits on PRICE. This one exits on the ANALYSIS: same
+  // entries, same stop, same targets as BASE_check — the only difference is
+  // that it closes when a later re-analysis no longer supports the trade.
+  // BASE_check is therefore its exact control; the pair differ in one rule.
+  // The zone the plan was built on is no longer marked anywhere in the map.
+  {
+    name: 'E_zonegone',
+    targetScale: 1,
+    stopScale: 1,
+    breakevenAfterTarget: 1,
+    trail: false,
+    exitOnSignal: 'zone-gone',
+  },
+  // Stricter: the tool would not print this trade at all now. Fires far more
+  // often, and for a reason worth knowing about — price moving INTO the zone
+  // stops it being the nearest one on that side, so a trade going WELL can
+  // trip this. Measured rather than assumed away.
+  {
+    name: 'E_noplan',
+    targetScale: 1,
+    stopScale: 1,
+    breakevenAfterTarget: 1,
+    trail: false,
+    exitOnSignal: 'no-plan',
+  },
   // The trail-distance surface. C_trail_10 is the original arm C.
   ...[0.5, 0.75, 1, 1.5, 2].map((m) => ({
     name: `C_trail_${String(m).replace('.', '').padEnd(2, '0')}`,
@@ -112,6 +148,13 @@ export function scoreArm(
   plan: ScorablePlan,
   spec: ArmSpec,
   base: ScoringConfig,
+  /**
+   * "Has the analysis stopped supporting this trade by bar n of `forward`?",
+   * one function per reading of the question. Supplied per trade by the
+   * caller, and only the one an arm names is consulted. Omitted, an
+   * `exitOnSignal` arm is the base arm.
+   */
+  signals?: Partial<Record<NonNullable<ArmSpec['exitOnSignal']>, (barIndex: number) => boolean>>,
 ): TradeScore {
   const long = plan.direction === 'long';
   const neutralStop = spec.stopScale === 1;
@@ -157,6 +200,7 @@ export function scoreArm(
     // R stays normalised by the arm's initial risk, never by the trail, so a
     // wider trail cannot silently shrink every reported R.
     trailDistance: spec.trail ? risk * (spec.trailMult ?? 1) : undefined,
+    exitSignal: spec.exitOnSignal ? signals?.[spec.exitOnSignal] : undefined,
   });
 }
 

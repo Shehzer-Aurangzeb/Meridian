@@ -493,3 +493,54 @@ describe('aggregate', () => {
     expect(aggregate(rows).totalR).toBeCloseTo(1.4, 10);
   });
 });
+
+describe('scoreTrade — the re-analysis exit', () => {
+  // Fills 20% at 100 on bar 0, then drifts sideways well clear of the stop and
+  // the target. Left alone this is a TIMEOUT marked at the last close.
+  const drift = [bar(101, 99, 100), bar(101, 99, 100), bar(102, 100, 101), bar(101, 99, 99)];
+
+  it('is inert when no signal is configured', () => {
+    const r = scoreTrade(drift, long, { ...config, maxBars: 4 });
+    expect(r.status).toBe('TIMEOUT');
+  });
+
+  it('closes at the signalling bar CLOSE, and the outcome is resolved', () => {
+    const r = scoreTrade(drift, long, {
+      ...config,
+      maxBars: 4,
+      exitSignal: (i) => i === 2,
+    });
+
+    expect(r.status).toBe('SIGNAL_EXIT');
+    expect(r.barsHeld).toBe(3);
+    // 20% of size, entered at 100, out at bar 2's close of 101 -> +1/5 R on a
+    // fifth of the position.
+    expect(r.grossR).toBeCloseTo(0.2 * ((101 - 100) / 5), 10);
+    // Resolved, not marked to market: the harness must not count it as open.
+    expect(r.status === 'TIMEOUT').toBe(false);
+  });
+
+  it('never overrides a bar that resolved on its own terms', () => {
+    // Bar 1 reaches the stop at 92.6. A signal on the same bar must not turn a
+    // loss into a smaller exit at the close.
+    const stopped = [bar(101, 99, 100), bar(100, 92, 95), bar(101, 99, 100)];
+    const r = scoreTrade(stopped, long, {
+      ...config,
+      maxBars: 4,
+      exitSignal: (i) => i === 1,
+    });
+
+    expect(r.status).toBe('STOPPED');
+    // A full −1R, not a fifth of one: the stop sits below every leg, so the bar
+    // that reached it traded through all three on the way. That is the reason
+    // every stopped trade in the backtest is 100% filled.
+    expect(r.grossR).toBeCloseTo(-1, 10);
+    expect(r.filledFraction).toBe(1);
+  });
+
+  it('cannot resurrect a position it already closed at a target', () => {
+    const won = [bar(101, 99, 100), bar(108, 99, 108), bar(101, 99, 100)];
+    const r = scoreTrade(won, long, { ...config, maxBars: 4, exitSignal: (i) => i === 1 });
+    expect(r.status).toBe('ALL_TARGETS');
+  });
+});

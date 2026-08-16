@@ -214,6 +214,14 @@ export function scorePlans(
     //
     // Before the hold window existed, every one of these was OPEN forever.
     // NO_FILL is unreachable here: the `!scored.filled` branch above returned.
+    // SIGNAL_EXIT is a research-only status: it requires an `exitSignal`, and
+    // this call configures none. If it ever appears, someone has wired an exit
+    // rule into the live path without giving it a badge — say so rather than
+    // pick a badge that would be wrong.
+    if (scored.status === 'SIGNAL_EXIT') {
+      throw new Error('SIGNAL_EXIT from the live scorer: an exitSignal was configured');
+    }
+
     const heldOut = elapsedHours >= (scored.barsToFill as number) + MAX_HOLD_HOURS;
     const outcome: PlanOutcome =
       scored.status === 'TIMEOUT' || scored.status === 'NO_FILL'

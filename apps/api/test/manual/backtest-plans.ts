@@ -70,6 +70,7 @@ import { IndicatorsService } from '../../src/indicators/indicators.service';
 import { SupportResistanceService } from '../../src/analysis/services/support-resistance.service';
 import {
   ATR_TIMEFRAME,
+  LevelMap,
   LevelMapService,
   LEVEL_TIMEFRAMES,
 } from '../../src/analysis/services/level-map.service';
@@ -123,6 +124,14 @@ const BARS = num('bars', 600); // 1h decision bars to walk
 const STEP = num('step', 1); // walk every Nth bar
 const FILL_BARS = num('fill-bars', 24); // give up if the zone is not reached
 const MAX_BARS = num('max-bars', 72); // give up on an open position
+/**
+ * How often an open position is re-analysed by the E_ arms.
+ *
+ * 8, because production runs the coordinator three times a day. Checking every
+ * bar would measure a rule the deployed tool cannot run, and would make the arm
+ * look better or worse for a reason that has nothing to do with the idea.
+ */
+const RESIGNAL_BARS = num('resignal-bars', 8);
 const COOLDOWN = num('cooldown', 24); // bars after a close before re-entering
 const FEE_PCT = num('fee', 0.05); // per side, %
 const SLIP_PCT = num('slip', 0.02); // per side, %
@@ -299,6 +308,8 @@ function tryTrade(
   index: number,
   plan: TradePlan,
   ctx: BarContext,
+  /** The re-analysis exit signals for this trade, one per reading. */
+  resignals: Parameters<typeof scoreArm>[4],
 ): Trade | null {
   // This leg's OWN checklist, never the other side's.
   const cl = ctx.checklist[plan.direction];
@@ -325,7 +336,7 @@ function tryTrade(
   if (EXIT_ARMS) {
     const armForward = h1.slice(index + 1, index + 1 + FILL_BARS + ARM_HOLD_BARS);
     for (const spec of ARMS) {
-      const s = scoreArm(armForward, plan, spec, SCORING);
+      const s = scoreArm(armForward, plan, spec, SCORING, resignals);
       arms[`${spec.name}_r`] = s.grossR;
       arms[`${spec.name}_costR`] = s.costR;
       arms[`${spec.name}_netR`] = s.netR;
@@ -467,9 +478,23 @@ async function runCoin(coin: string): Promise<{
   let eligible = 0;
   let noFill = 0;
 
-  for (let i = firstDecision; i <= lastDecision; i += STEP) {
-    const asOf = h1[i].time.getTime() + TIMEFRAME_MS['1h'];
+  /**
+   * The level map as it stood at the close of bar `i`, or null if it could not
+   * be built there.
+   *
+   * Memoised and callable for ANY bar, not just decision bars, because the
+   * re-signal arm asks what the map looked like DURING a hold — bars the walk
+   * has not reached, and for late trades bars past `lastDecision` entirely.
+   * Computing it on demand and caching it means each bar is built once whether
+   * it is asked for by the walk, by a hold, or by both.
+   */
+  const mapCache = new Map<number, LevelMap | null>();
+  const mapAt = (i: number): LevelMap | null => {
+    if (mapCache.has(i)) return mapCache.get(i) as LevelMap | null;
+    // Never the still-forming candle: `h1.length - 1` has not closed.
+    if (i < 0 || i > h1.length - 2) return null;
 
+    const asOf = h1[i].time.getTime() + TIMEFRAME_MS['1h'];
     const truncated = series.map((s) => ({
       timeframe: s.timeframe,
       candles: completedAsOf(
@@ -479,13 +504,18 @@ async function runCoin(coin: string): Promise<{
         CANDLE_LIMITS[s.timeframe],
       ),
     }));
-    if (truncated.some((t) => t.candles.length < 50)) continue;
+
+    if (truncated.some((t) => t.candles.length < 50)) {
+      mapCache.set(i, null);
+      return null;
+    }
 
     // Runtime look-ahead guard, on real data rather than fixtures: no series
     // may contain a candle that had not closed, and the 1h series must end
-    // exactly on the decision bar. Run on EVERY bar — it used to check the
-    // first one and then set a flag, which proves the truncation was right
-    // once and says nothing about the other 1,907.
+    // exactly on the bar being asked about. Run on EVERY bar — it used to check
+    // the first one and then set a flag, which proves the truncation was right
+    // once and says nothing about the other 1,907. It now also covers the bars
+    // only the re-signal arm looks at.
     for (const t of truncated) {
       const last = t.candles[t.candles.length - 1];
       const closesAt = last.time.getTime() + TIMEFRAME_MS[t.timeframe];
@@ -503,7 +533,65 @@ async function runCoin(coin: string): Promise<{
 
     const atrCandles =
       truncated.find((t) => t.timeframe === ATR_TIMEFRAME)?.candles ?? [];
-    const map = levelMap.buildFrom(coin, truncated, atrCandles);
+    const built = levelMap.buildFrom(coin, truncated, atrCandles);
+    mapCache.set(i, built);
+    return built;
+  };
+
+  /**
+   * Does the map at this bar still contain the zone the trade was taken at?
+   *
+   * The zone IS the reason for the trade — the entries, the stop and the first
+   * target are all derived from it. If no zone in the fresh map overlaps it,
+   * the structure the plan was built on is no longer being marked, and that is
+   * the plainest reading of "the analysis no longer supports this".
+   *
+   * Deliberately not a checklist re-score: the checklist gates ENTRY, and a
+   * setup that has moved into the trade is not expected to still read as an
+   * entry. That is a separate arm, and a different claim.
+   */
+  const stillSupported = (zones: LevelMap['zones'], plan: TradePlan): boolean =>
+    zones.some((z) => z.low <= plan.zone.high && z.high >= plan.zone.low);
+
+  /**
+   * The re-analysis exit, as `scoreTrade` consumes it: given a bar of the hold,
+   * has support gone?
+   *
+   * Checked every `RESIGNAL_BARS` bars from the decision, because production
+   * analyses each coin three times a day — an hourly check would measure a
+   * rule the deployed tool could not run. A bar with no map (too little
+   * history, or past the end of the series) reports NO signal: not knowing is
+   * not the same as knowing the reason has gone.
+   */
+  const resignalsFor = (index: number, plan: TradePlan) => {
+    const at = (barIndex: number): LevelMap | null => {
+      // `forward` starts at index + 1, so bar n of the hold is bar index+1+n.
+      const bar = index + 1 + barIndex;
+      return (bar - index) % RESIGNAL_BARS !== 0 ? null : mapAt(bar);
+    };
+    return {
+      'zone-gone': (barIndex: number): boolean => {
+        const fresh = at(barIndex);
+        return fresh === null ? false : !stillSupported(fresh.zones, plan);
+      },
+      // The tool would not print this trade now: no plan on this side at all.
+      // Note what this also catches — price working INTO the zone stops that
+      // zone being the nearest on its side, so this can fire on a trade that
+      // is winning. That is a property of the rule, not a bug in it, and it is
+      // why both readings are measured instead of one being argued for.
+      'no-plan': (barIndex: number): boolean => {
+        const fresh = at(barIndex);
+        if (fresh === null) return false;
+        const fresher = planner.buildPlans(fresh.zones, fresh.spot, fresh.atr);
+        return !fresher.some((p) => p.direction === plan.direction);
+      },
+    };
+  };
+
+  for (let i = firstDecision; i <= lastDecision; i += STEP) {
+    const asOf = h1[i].time.getTime() + TIMEFRAME_MS['1h'];
+    const map = mapAt(i);
+    if (!map) continue;
     const plans = planner.buildPlans(map.zones, map.spot, map.atr);
     bars += 1;
 
@@ -558,9 +646,17 @@ async function runCoin(coin: string): Promise<{
     // and falls back to the local copy only on the squeeze route. Mismatches
     // are counted rather than assumed away — a silent divergence between the
     // copy and the real rule is exactly what would invalidate the arms.
+    // The structure copy reads the LEVEL MAP's window on this timeframe, which
+    // is a different length from the coordinator's `analysisCandles` above —
+    // that difference is part of what the mismatch counter is measuring.
     const localStructure = inferStructure(
       indicators,
-      truncated.find((t) => t.timeframe === ANALYSIS_TIMEFRAME)?.candles ?? [],
+      completedAsOf(
+        series.find((s) => s.timeframe === ANALYSIS_TIMEFRAME)?.candles ?? [],
+        TIMEFRAME_MS[ANALYSIS_TIMEFRAME],
+        asOf,
+        CANDLE_LIMITS[ANALYSIS_TIMEFRAME],
+      ),
     );
     const coordStructure = checklist.long?.marketStructure.value as
       | Trade['structure']
@@ -601,7 +697,7 @@ async function runCoin(coin: string): Promise<{
       eligible += 1;
       if (i <= cooldownUntil[plan.direction]) continue;
 
-      const trade = tryTrade(coin, 'PLAN', h1, i, plan, barContext);
+      const trade = tryTrade(coin, 'PLAN', h1, i, plan, barContext, resignalsFor(i, plan));
       if (!trade) {
         noFill += 1;
         continue;
@@ -624,7 +720,15 @@ async function runCoin(coin: string): Promise<{
       // is a distribution to compare against, not a portfolio to run.
       for (let n = 0; n < taken && pool.length > 0; n += 1) {
         const pick = pool[Math.floor(rng() * pool.length)];
-        const trade = tryTrade(coin, 'RANDOM', h1, pick.index, pick.plan, pick.context);
+        const trade = tryTrade(
+          coin,
+          'RANDOM',
+          h1,
+          pick.index,
+          pick.plan,
+          pick.context,
+          resignalsFor(pick.index, pick.plan),
+        );
         if (trade) trades.push(trade);
       }
     }
