@@ -21,12 +21,19 @@ export function useCandles(
   symbol: string | undefined,
   interval = '1h',
   limit = 500,
+  /**
+   * Anchor the window here (ms) instead of ending it at now. Without it the
+   * series is always "the most recent N", which for an analysis older than N
+   * bars does not contain the analysis at all.
+   */
+  startTime?: number,
 ) {
   return useQuery({
-    queryKey: queryKeys.candles(symbol ?? '', interval),
+    queryKey: queryKeys.candles(symbol ?? '', interval, startTime),
     queryFn: async () => {
       const data = await fetchApi<CandlesResponse>(
-        `/api/candles?symbol=${encodeURIComponent(symbol ?? '')}&interval=${interval}&limit=${limit}`,
+        `/api/candles?symbol=${encodeURIComponent(symbol ?? '')}&interval=${interval}&limit=${limit}` +
+          (startTime === undefined ? '' : `&startTime=${startTime}`),
       );
       return data.candles;
     },

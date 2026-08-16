@@ -24,8 +24,11 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.analyses.all, 'detail', id] as const,
   },
 
-  candles: (symbol: string, interval: string) =>
-    ['candles', symbol, interval] as const,
+  // `startTime` belongs in the key: two analyses of the same coin at the same
+  // interval want different windows, and without it the second one is served
+  // the first one's candles.
+  candles: (symbol: string, interval: string, startTime?: number) =>
+    ['candles', symbol, interval, startTime ?? null] as const,
 
   health: ['health'] as const,
 
