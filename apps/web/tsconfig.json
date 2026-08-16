@@ -22,5 +22,9 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // *.check.ts are node self-checks run with --experimental-strip-types, which
+  // requires the explicit `.ts` in relative imports that tsc rejects without
+  // allowImportingTsExtensions. They are not part of the app build; node type
+  // checks them by running them.
+  "exclude": ["node_modules", "**/*.check.ts"]
 }

@@ -110,6 +110,20 @@ export function ResultsScoreboard({
         a day counts three times, so these are higher than{' '}
         <span className="font-mono">pnpm forward-test</span>, which deduplicates.
         {truncated && ' Showing the newest rows only — older ones are outside this window.'}
+        {/* Said out loud, never silently: a total that covers fewer rows than
+            the list under it is the same lie as hiding those rows. */}
+        {summary.excluded > 0 && (
+          <>
+            {' '}
+            <span className="text-text-secondary">
+              {summary.excluded} older{' '}
+              {summary.excluded === 1 ? 'analysis is' : 'analyses are'} listed below but
+              not counted here — an earlier version of the planner built{' '}
+              {summary.excluded === 1 ? 'it' : 'them'}, and averaging the two
+              describes neither.
+            </span>
+          </>
+        )}
       </p>
     </section>
   );

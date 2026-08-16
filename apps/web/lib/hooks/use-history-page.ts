@@ -82,7 +82,7 @@ export function useHistoryPage() {
 
   // The scoreboard describes the FETCHED window, not the current filter — the
   // funnel is only honest if it counts the analyses that never started too.
-  const summary = useMemo(() => summariseResults(rows), [rows]);
+  const summary = useMemo(() => summariseResults(rows, data?.epoch), [rows, data?.epoch]);
 
   const entries = useMemo(() => matched.slice(0, visible), [matched, visible]);
   const hasMore = visible < matched.length;
@@ -104,6 +104,7 @@ export function useHistoryPage() {
 
   return {
     summary,
+    epoch: data?.epoch,
     truncated: data?.truncated ?? false,
     entries,
     coins,

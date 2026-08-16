@@ -233,6 +233,15 @@ export interface AnalysisListResponse {
   /** The window returned exactly `limit` rows, so older ones are not in it. */
   truncated: boolean;
   analyses: AnalysisListItem[];
+  /** ISO. The window actually applied, whether or not it was asked for. */
+  from: string;
+  /**
+   * ISO. Rows older than this were produced by a planner with known bugs.
+   * They are still listed and still open — they are kept out of the SCOREBOARD,
+   * because mixing two planners in one expectancy is the harm, and hiding the
+   * rows was never what fixed it.
+   */
+  epoch: string;
 }
 
 /** The analysis in sentences. Computed, not generated — see verdict.ts. */

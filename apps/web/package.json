@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "check": "node --experimental-strip-types --no-warnings lib/history-buckets.check.ts",
     "generate-types": "openapi-typescript http://localhost:3001/docs-json -o ./lib/api/generated/schema.ts",
     "generate-types:file": "openapi-typescript ./openapi.json -o ./lib/api/generated/schema.ts"
   },

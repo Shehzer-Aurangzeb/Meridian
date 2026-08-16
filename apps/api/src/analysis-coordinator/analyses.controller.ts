@@ -96,10 +96,21 @@ const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
  * two different strategies into one scoreboard and neither number means
  * anything.
  *
- * The rows stay in the database and stay reachable by id. They are excluded
- * from the list, the scoreboard, and every total computed from it.
+ * What it is NOT is a filter you cannot turn off. It sets the DEFAULT window
+ * and it is reported on every response; `?days=` overrides it freely and gets
+ * exactly the span it asked for. The first version of this clamped `days` to
+ * the epoch, which meant no request could show the older rows and no caller
+ * could tell whether they had been hidden or deleted. A boundary you cannot
+ * see past is not a boundary, it is a silent deletion.
  *
- * Set this to the deploy date. To include the whole history again, set it to 0.
+ * The consumer's job is to keep those rows OUT OF THE AGGREGATE while still
+ * showing them: mixing two planners in one expectancy is the actual harm, and
+ * hiding the rows was never what fixed it.
+ *
+ * A timestamp is a proxy for "which code produced this row", and a weak one —
+ * deploys are not instant and rollbacks exist. The honest version is an
+ * `algoVersion` column written with each analysis. That needs a migration; if
+ * this app ever has a second user, do it.
  */
 export const RESULTS_EPOCH = new Date('2026-08-16T00:00:00Z');
 
@@ -163,12 +174,13 @@ export class AnalysesController {
     count: number;
     analyses: unknown[];
     truncated: boolean;
-    /**
-     * The window actually applied. `?days=365` before the epoch returns the
-     * epoch, and saying so is the point — a caller that asked for a year and
-     * silently got a fortnight would compute a total for the wrong period.
-     */
+    /** The window actually applied, so nothing about it has to be inferred. */
     from: string;
+    /**
+     * The planner boundary. Rows older than this were built by code with known
+     * bugs: show them, do not count them, and say how many were left out.
+     */
+    epoch: string;
   }> {
     const where: Prisma.CoordinatorRunWhereInput = {};
     if (symbol) {
@@ -182,12 +194,14 @@ export class AnalysesController {
     // A window is honest in a way a row cap is not: `?days=30` returns thirty
     // days or says it could not, where a bare limit of 200 silently drops the
     // oldest analyses and makes any total computed from the response wrong.
-    // Never earlier than the epoch: a `?days=365` must not drag pre-fix
-    // analyses back into a total that claims to describe the current planner.
+    // The epoch is the DEFAULT window, not a ceiling on what can be asked for.
+    // `?days=365` returns a year, pre-epoch rows included, and the response
+    // says where the boundary sits so the caller can keep them out of its
+    // totals rather than out of its list.
     const windowDays = Number(days);
     const from =
       Number.isFinite(windowDays) && windowDays > 0
-        ? Math.max(Date.now() - windowDays * 86_400_000, RESULTS_EPOCH.getTime())
+        ? Date.now() - windowDays * 86_400_000
         : RESULTS_EPOCH.getTime();
     where.createdAt = { gte: new Date(from) };
 
@@ -223,14 +237,14 @@ export class AnalysesController {
     // this response quietly describe a subset.
     const truncated = analyses.length === take;
 
-    const fromIso = new Date(from).toISOString();
-    if (!wantStatus) return { count: analyses.length, analyses, truncated, from: fromIso };
+    const window = { from: new Date(from).toISOString(), epoch: RESULTS_EPOCH.toISOString() };
+    if (!wantStatus) return { count: analyses.length, analyses, truncated, ...window };
 
     const statuses = await this.statusBySymbol(analyses);
     return {
       count: analyses.length,
       truncated,
-      from: fromIso,
+      ...window,
       analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,

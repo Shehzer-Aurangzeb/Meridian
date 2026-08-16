@@ -61,6 +61,11 @@ export function bucketOf(status: AnalysisStatus | null | undefined): Bucket {
   }
 }
 
+/** Was this analysis produced before the planner boundary? */
+export function isPreEpoch(row: AnalysisListItem, epoch: string | undefined): boolean {
+  return epoch !== undefined && Date.parse(row.createdAt) < Date.parse(epoch);
+}
+
 export interface ResultsSummary {
   counts: Record<Bucket, number>;
   /** Sum of net R over everything that filled. */
@@ -68,6 +73,12 @@ export interface ResultsSummary {
   total: number;
   filled: number;
   closed: number;
+  /**
+   * Rows left out of every number above because an older planner built them.
+   * Reported rather than quietly dropped: a total that silently covers fewer
+   * rows than the list below it is the same lie as hiding the rows outright.
+   */
+  excluded: number;
 }
 
 /**
@@ -75,8 +86,15 @@ export interface ResultsSummary {
  * rate; "2 won, 1 lost, 44 never started" is a different statement about the
  * tool, and it is the true one. Callers must show `total` and `filled`
  * alongside the buckets.
+ *
+ * `epoch` keeps pre-boundary analyses OUT OF THE AGGREGATE while they stay in
+ * the list. Their plans came from code with known bugs, so averaging them with
+ * current ones describes neither.
  */
-export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
+export function summariseResults(
+  rows: AnalysisListItem[],
+  epoch?: string,
+): ResultsSummary {
   const counts: Record<Bucket, number> = {
     openUp: 0,
     openDown: 0,
@@ -90,8 +108,13 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
   let netR = 0;
   let filled = 0;
   let closed = 0;
+  let excluded = 0;
 
   for (const row of rows) {
+    if (isPreEpoch(row, epoch)) {
+      excluded += 1;
+      continue;
+    }
     const bucket = bucketOf(row.status);
     counts[bucket] += 1;
     if (row.status?.netR != null) {
@@ -104,7 +127,8 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
     }
   }
 
-  return { counts, netR, total: rows.length, filled, closed };
+  // `total` is what the numbers describe, not how many rows were handed in.
+  return { counts, netR, total: rows.length - excluded, filled, closed, excluded };
 }
 
 /** The buckets a status filter offers, in the order they read best. */

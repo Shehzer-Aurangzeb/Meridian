@@ -83,10 +83,10 @@ describe('AnalysesController', () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     const asked = await controller.list(undefined, undefined, undefined, '30');
     const { gte } = prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt;
-    // Thirty days, or the epoch if thirty days reaches back past it — and the
-    // response says which, so a caller cannot total the wrong period.
-    const wanted = Date.now() - 30 * 86_400_000;
-    expect((gte as Date).getTime()).toBe(Math.max(wanted, RESULTS_EPOCH.getTime()));
+    // Thirty days means thirty days. The epoch does not shorten it.
+    expect(Math.abs((gte as Date).getTime() - (Date.now() - 30 * 86_400_000))).toBeLessThan(
+      1000,
+    );
     expect(asked.from).toBe((gte as Date).toISOString());
 
     // Exactly `take` rows back means there may be more the caller cannot see —
@@ -157,28 +157,28 @@ describe('AnalysesController', () => {
     expect((result.analyses[0] as { status: unknown }).status).not.toBeUndefined();
   });
 
-  it('never lists an analysis older than the results epoch', async () => {
+  it('defaults to the epoch but never traps the caller behind it', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
 
-    await controller.list();
+    // No window asked for: start at the planner boundary.
+    const plain = await controller.list();
     expect(prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt.gte).toEqual(
       RESULTS_EPOCH,
     );
+    expect(plain.from).toBe(RESULTS_EPOCH.toISOString());
 
-    // A window wide enough to reach back past the epoch is clamped to it —
-    // pre-fix plans must not re-enter a total that describes the current one.
-    await controller.list(undefined, undefined, undefined, '3650');
-    expect(prisma.coordinatorRun.findMany.mock.calls[1][0].where.createdAt.gte).toEqual(
-      RESULTS_EPOCH,
-    );
+    // Ten years asked for: ten years given. The first version clamped this to
+    // the epoch, which left NO request able to show the older rows — a caller
+    // could not tell whether they were hidden or deleted.
+    const wide = await controller.list(undefined, undefined, undefined, '3650');
+    const gte = prisma.coordinatorRun.findMany.mock.calls[1][0].where.createdAt.gte;
+    expect(gte.getTime()).toBeLessThan(RESULTS_EPOCH.getTime());
+    expect(wide.from).toBe(gte.toISOString());
 
-    // A narrower window still wins — the epoch is a floor, not an override.
-    // Written against `max` rather than a literal so it keeps testing the rule
-    // after the epoch moves into the past.
-    await controller.list(undefined, undefined, undefined, '1');
-    const narrow = prisma.coordinatorRun.findMany.mock.calls[2][0].where.createdAt.gte;
-    const expected = Math.max(Date.now() - 86_400_000, RESULTS_EPOCH.getTime());
-    expect(Math.abs(narrow.getTime() - expected)).toBeLessThan(1000);
+    // And every response says where the boundary is, so the consumer can leave
+    // pre-epoch rows out of its totals rather than out of its list.
+    expect(wide.epoch).toBe(RESULTS_EPOCH.toISOString());
+    expect(plain.epoch).toBe(RESULTS_EPOCH.toISOString());
   });
 
   it('fetches the replay windows in bounded batches, not one burst', async () => {

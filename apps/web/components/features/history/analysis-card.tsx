@@ -128,10 +128,16 @@ interface AnalysisCardProps {
   entry: AnalysisListItem;
   /** From the socket; falls back to the price the API scored against. */
   livePrice?: number;
+  /**
+   * Built by an earlier planner, so it is shown but not counted in the
+   * scoreboard. Labelled rather than hidden — a card whose numbers are real
+   * but excluded needs to say which, or it reads as an arithmetic error.
+   */
+  preEpoch?: boolean;
   onOpen: () => void;
 }
 
-export function AnalysisCard({ entry, livePrice, onOpen }: AnalysisCardProps) {
+export function AnalysisCard({ entry, livePrice, preEpoch, onOpen }: AnalysisCardProps) {
   const [expanded, setExpanded] = useState(false);
   const status = entry.status;
 
@@ -179,8 +185,18 @@ export function AnalysisCard({ entry, livePrice, onOpen }: AnalysisCardProps) {
         className="w-full text-left px-4 pt-3.5 pb-3 hover:bg-surface-hover/40 transition-colors"
       >
         <div className="flex items-baseline justify-between gap-3">
-          <span className="font-display text-lg font-semibold tracking-[0.04em] uppercase text-text-primary">
-            {entry.symbol}
+          <span className="flex items-baseline gap-2 min-w-0">
+            <span className="font-display text-lg font-semibold tracking-[0.04em] uppercase text-text-primary">
+              {entry.symbol}
+            </span>
+            {preEpoch && (
+              <span
+                title="Built by an earlier version of the planner — shown, but not counted in the scoreboard above"
+                className="text-[9px] font-semibold tracking-[0.12em] uppercase px-1.5 py-0.5 rounded bg-primary/[0.08] text-text-tertiary shrink-0"
+              >
+                not counted
+              </span>
+            )}
           </span>
           <span className="font-mono text-[11px] text-text-tertiary tabular-nums">
             {formatRelative(entry.createdAt)}
