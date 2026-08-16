@@ -23,14 +23,27 @@
  * ─── Modelling choices, all conservative, all load-bearing ───────────────
  *  1. No look-ahead: `completedAsOf` requires open + duration <= the decision
  *     bar's close. A forming 12h candle already contains the future. Asserted
- *     in plan-replay.spec.ts and again at runtime on the first bar.
- *  2. Fill requires price to TOUCH the plan's average entry within --fill-bars.
- *     ponytail: one fill at the weighted-average price rather than three
- *     tranche fills — the reported R is computed off that same average, so
- *     this is the self-consistent simplification. Per-tranche accounting is
- *     the upgrade if partial fills start mattering.
+ *     in plan-replay.spec.ts and again at runtime on EVERY decision bar.
+ *  1b. No right-edge truncation: the walk stops --fill-bars + --max-bars before
+ *     the end of the series, so every trade in the output had a full window to
+ *     resolve. Without it, trades near the recent edge were cut short, marked
+ *     to market early, and then counted at full weight beside trades that ran
+ *     their course.
+ *  2. Fill is LEG BY LEG. The plan is a 20/40/40 ladder, and each leg fills
+ *     when price touches its own price. The trade opens when the FIRST leg
+ *     fills (within --fill-bars); remaining legs rest until the stop, the
+ *     first target, or the hold end cancels them. R and cost scale by the
+ *     size actually acquired, against the PLANNED risk denominator, so R
+ *     means the same thing on a 20%-filled trade as on a full one.
+ *
+ *     This replaced a single fill of 100% of size at the blended average —
+ *     which required price 60% of the way into the zone before it counted as
+ *     a trade, then booked the whole position at a price only part of it
+ *     could have got. Worth ~0.077R per trade, in our favour.
  *  3. Stop before target inside a bar; breakeven after TP1; open weight marked
- *     to market at the window end (see scoreLadder).
+ *     to market at the window end (see scoreTrade). Resolution starts ON the
+ *     opening bar: a bar that reaches the entry and then the stop is a loss,
+ *     not a survival.
  *  4. Cost = round-trip % / risk % — charged in R per closed trade, so a plan
  *     with a 0.5% stop pays four times what a 2% stop pays. Fees are
  *     proportional to size, so a laddered exit pays the same total as one.
@@ -71,8 +84,8 @@ import {
 import { EntryChecklistResult } from '../../src/analysis/interfaces/checklist.types';
 import { ANALYSIS_TIMEFRAME, CANDLE_LIMITS } from '../../src/common/constants/timeframes';
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
-import { findFirstFill } from '../../src/common/replay/replay';
-import { completedAsOf, scoreLadder, TIMEFRAME_MS } from '../../src/common/replay/plan-replay';
+import { completedAsOf, TIMEFRAME_MS } from '../../src/common/replay/plan-replay';
+import { aggregate, ScoringConfig, scoreTrade } from '../../src/common/replay/trade-scoring';
 import { ARMS, MAX_ARM_BARS, scoreArm } from './exits';
 import { makeRng } from './rng';
 
@@ -128,6 +141,25 @@ const EXIT_ARMS = args.includes('--exit-arms');
 // Per-BAR log of level proximity and the next hour's move. Read-only extra
 // output for the touch-volatility study; does not affect any trade.
 const TOUCH_LOG = str('touch-log', '');
+
+/**
+ * The longest hold in play. Without --exit-arms that is just --max-bars; with
+ * them it is whichever arm holds longest, because the right-edge reserve has to
+ * cover every scorer that reads forward from a decision bar.
+ *
+ * Enabling --exit-arms therefore SHORTENS the walk, and the base trade set with
+ * it. Stated rather than hidden: a base number quoted from an --exit-arms run
+ * is not the same measurement as one from a plain run.
+ */
+const ARM_HOLD_BARS = EXIT_ARMS ? Math.max(MAX_BARS, MAX_ARM_BARS) : MAX_BARS;
+
+/** The scoring decisions, in one object, shared with holdout and the golden set. */
+const SCORING: ScoringConfig = {
+  fillBars: FILL_BARS,
+  maxBars: MAX_BARS,
+  breakevenAfterTarget: BREAKEVEN,
+  roundTripPct: ROUND_TRIP_PCT,
+};
 
 const CONFIG =
   `coins=${COINS.join('/')} bars=${BARS} step=${STEP} states=${STATES.join('+')} ` +
@@ -216,6 +248,11 @@ interface Trade {
   state: ZoneState;
   sources: number;
   entry: number;
+  /** How many exit targets the zone map offered this plan (0-3). */
+  targets: number;
+  /** How many entry legs filled (1-3), and what fraction of planned size that is. */
+  legsFilled: number;
+  filledFraction: number;
   stop: number;
   riskPercent: number;
   plannedR: number;
@@ -263,45 +300,39 @@ function tryTrade(
   plan: TradePlan,
   ctx: BarContext,
 ): Trade | null {
-  const action = plan.direction === 'long' ? 'LONG' : 'SHORT';
   // This leg's OWN checklist, never the other side's.
   const cl = ctx.checklist[plan.direction];
 
   // Fill scan starts at index+1: the bar whose close built the plan cannot
-  // also be the bar that fills it.
-  const window = h1.slice(index + 1, index + 1 + FILL_BARS);
-  const fill = findFirstFill(window, action, plan.averageEntry);
-  if (!fill) return null;
+  // also be the bar that fills it. Everything from there — the fill window,
+  // the resolution window, the ladder and the cost — belongs to `scoreTrade`,
+  // which the holdout report and the golden set call too.
+  const forward = h1.slice(index + 1, index + 1 + FILL_BARS + MAX_BARS);
+  const scored = scoreTrade(forward, plan, SCORING);
+  if (!scored.filled) return null;
 
-  const fillIdx = index + 1 + window.indexOf(fill);
-  const post = h1.slice(fillIdx + 1, fillIdx + 1 + MAX_BARS);
-
-  // Every exit arm scored against THIS SAME filled trade. Running them as
+  // Every exit arm scored against THIS SAME decision bar. Running them as
   // separate backtests would give each its own barsHeld, hence its own
   // cooldown, hence a different set of later entries — and the comparison
-  // would quietly be about entries again. The entry set stays arm A's.
+  // would quietly be about entries again. The entry set stays the base arm's.
+  //
+  // The arms get the SAME slice the base trade got, only longer: `scoreArm`
+  // calls `scoreTrade`, so it re-derives the fill leg by leg exactly as above
+  // and lands on the same `fillIndex`. It used to be handed `h1` from
+  // `fillIdx + 1` with a full-size entry at `averageEntry` assumed — its own
+  // model, three checkpoints stale.
   const arms: Record<string, number | string> = {};
   if (EXIT_ARMS) {
-    const long = h1.slice(fillIdx + 1, fillIdx + 1 + MAX_ARM_BARS);
+    const armForward = h1.slice(index + 1, index + 1 + FILL_BARS + ARM_HOLD_BARS);
     for (const spec of ARMS) {
-      const s = scoreArm(long, plan, spec, ROUND_TRIP_PCT);
-      arms[`${spec.name}_r`] = s.r;
+      const s = scoreArm(armForward, plan, spec, SCORING);
+      arms[`${spec.name}_r`] = s.grossR;
       arms[`${spec.name}_costR`] = s.costR;
       arms[`${spec.name}_netR`] = s.netR;
       arms[`${spec.name}_status`] = s.status;
       arms[`${spec.name}_barsHeld`] = s.barsHeld;
     }
   }
-  const scored = scoreLadder(post, {
-    direction: plan.direction,
-    averageEntry: plan.averageEntry,
-    stop: plan.stop,
-    riskPerUnit: plan.riskPerUnit,
-    targets: plan.targets,
-    breakevenAfterTarget: BREAKEVEN,
-  });
-
-  const costR = plan.riskPercent === 0 ? 0 : ROUND_TRIP_PCT / plan.riskPercent;
 
   return {
     coin,
@@ -320,16 +351,19 @@ function tryTrade(
     time: h1[index].time,
     state: plan.state,
     sources: plan.zone.sources.length,
-    entry: plan.averageEntry,
+    entry: scored.entryPrice as number,
+    targets: plan.targets.length,
+    legsFilled: scored.legsFilled,
+    filledFraction: scored.filledFraction,
     stop: plan.stop,
     riskPercent: plan.riskPercent,
     plannedR: plan.blendedR,
-    r: scored.realizedR,
-    costR,
-    netR: scored.realizedR - costR,
+    r: scored.grossR,
+    costR: scored.costR,
+    netR: scored.netR,
     status: scored.status,
     targetsHit: scored.targetsHit,
-    barsToFill: fillIdx - index,
+    barsToFill: scored.barsToFill as number,
     barsHeld: scored.barsHeld,
     ...arms,
   };
@@ -395,10 +429,32 @@ async function runCoin(coin: string): Promise<{
   );
 
   const h1 = series.find((s) => s.timeframe === '1h')?.candles ?? [];
-  // The newest candle is still forming; it can be forward data but never a
-  // decision bar.
-  const lastDecision = h1.length - 2;
+  // ── the right edge ──────────────────────────────────────────────────────
+  // A decision bar needs FILL_BARS to reach the entry plus MAX_BARS to resolve.
+  // Any bar closer to the end of the series than that got a SHORT window: it
+  // was marked to market early and then counted at full weight in every
+  // summary, alongside trades that had their whole window. That is a real bias
+  // — truncated trades bunch as unresolved at the recent edge — so the walk
+  // stops early rather than the scorer papering over it.
+  //
+  // Reserving the window also excludes the still-forming final candle from
+  // every forward slice: the last bar any trade can see is h1.length - 2.
+  //
+  // The reserve covers the LONGEST hold anything asks for, not just the base
+  // trade's. With --exit-arms the 960-bar arms ran 864 bars past a 96-bar
+  // reserve and straight into the forming candle — a lookahead leak in the code
+  // that measures the trailing stop, which is the only positive result this
+  // project has produced.
+  const RESERVE = FILL_BARS + ARM_HOLD_BARS;
+  const lastDecision = h1.length - 2 - RESERVE;
   const firstDecision = Math.max(CANDLE_LIMITS['1h'], lastDecision - BARS + 1);
+  if (lastDecision < firstDecision) {
+    throw new Error(
+      `${coin}: ${h1.length} 1h candles is too few — ${CANDLE_LIMITS['1h']} are ` +
+        `needed for the level map and ${RESERVE} more must be reserved so the ` +
+        `last decision bar can resolve. Raise --bars.`,
+    );
+  }
 
   const trades: Trade[] = [];
   const touches: Array<Record<string, string | number>> = [];
@@ -410,7 +466,6 @@ async function runCoin(coin: string): Promise<{
   let structureMismatches = 0;
   let eligible = 0;
   let noFill = 0;
-  let asserted = false;
 
   for (let i = firstDecision; i <= lastDecision; i += STEP) {
     const asOf = h1[i].time.getTime() + TIMEFRAME_MS['1h'];
@@ -426,25 +481,24 @@ async function runCoin(coin: string): Promise<{
     }));
     if (truncated.some((t) => t.candles.length < 50)) continue;
 
-    if (!asserted) {
-      // Runtime look-ahead guard, on real data rather than fixtures: no series
-      // may contain a candle that had not closed, and the 1h series must end
-      // exactly on the decision bar.
-      for (const t of truncated) {
-        const last = t.candles[t.candles.length - 1];
-        const closesAt = last.time.getTime() + TIMEFRAME_MS[t.timeframe];
-        if (closesAt > asOf) {
-          throw new Error(
-            `look-ahead: ${t.timeframe} candle closing ${new Date(closesAt).toISOString()} ` +
-              `visible at ${new Date(asOf).toISOString()}`,
-          );
-        }
+    // Runtime look-ahead guard, on real data rather than fixtures: no series
+    // may contain a candle that had not closed, and the 1h series must end
+    // exactly on the decision bar. Run on EVERY bar — it used to check the
+    // first one and then set a flag, which proves the truncation was right
+    // once and says nothing about the other 1,907.
+    for (const t of truncated) {
+      const last = t.candles[t.candles.length - 1];
+      const closesAt = last.time.getTime() + TIMEFRAME_MS[t.timeframe];
+      if (closesAt > asOf) {
+        throw new Error(
+          `look-ahead: ${t.timeframe} candle closing ${new Date(closesAt).toISOString()} ` +
+            `visible at ${new Date(asOf).toISOString()}`,
+        );
       }
-      const lastH1 = truncated.find((t) => t.timeframe === '1h')?.candles.slice(-1)[0];
-      if (lastH1?.time.getTime() !== h1[i].time.getTime()) {
-        throw new Error('look-ahead: 1h series does not end on the decision bar');
-      }
-      asserted = true;
+    }
+    const lastH1 = truncated.find((t) => t.timeframe === '1h')?.candles.slice(-1)[0];
+    if (lastH1?.time.getTime() !== h1[i].time.getTime()) {
+      throw new Error('look-ahead: 1h series does not end on the decision bar');
     }
 
     const atrCandles =
@@ -591,15 +645,30 @@ async function runCoin(coin: string): Promise<{
 const mean = (xs: number[]) =>
   xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
 
+/**
+ * One row of the headline table.
+ *
+ * Every statistic comes from the shared `aggregate`; nothing is averaged here.
+ * This file used to compute its own and `holdout.ts` computed a different one,
+ * which is how the same 626 rows produced −0.0178R and −0.1455R.
+ *
+ * `open` / `exp resolved` / `gap` are permanent columns, not diagnostics: the
+ * headline marks unresolved positions to market, and a reader who cannot see
+ * how many there are cannot tell a result from an accounting choice.
+ */
 function summarise(label: string, trades: Trade[]): Record<string, string | number> {
-  const net = trades.map((t) => t.netR);
-  const wins = net.filter((r) => r > 0).length;
+  const a = aggregate(trades);
+  const n3 = (x: number): string => (Number.isNaN(x) ? '—' : x.toFixed(3));
   return {
     group: label,
-    n: trades.length,
-    'win%': trades.length === 0 ? '—' : `${((wins / trades.length) * 100).toFixed(0)}%`,
-    'net R/trade': mean(net).toFixed(3),
-    'total R': net.reduce((a, b) => a + b, 0).toFixed(1),
+    n: a.n,
+    'win%': Number.isNaN(a.winRate) ? '—' : `${(a.winRate * 100).toFixed(0)}%`,
+    'net R/trade': n3(a.expectancy),
+    'total R': a.totalR.toFixed(1),
+    open: a.unresolved,
+    'open meanR': n3(a.unresolvedMeanR),
+    'exp resolved': n3(a.expectancyResolved),
+    gap: n3(a.markingGap),
     'gross R/trade': mean(trades.map((t) => t.r)).toFixed(3),
     'cost R/trade': mean(trades.map((t) => t.costR)).toFixed(3),
     'planned R': mean(trades.map((t) => t.plannedR)).toFixed(2),
@@ -630,6 +699,18 @@ async function main(): Promise<void> {
         (structureMismatches > 0
           ? ` · STRUCTURE MISMATCH ${structureMismatches}/${structureChecks}`
           : ''),
+    );
+  }
+
+  // A target can never be taken on the fill bar — see the target block in
+  // scoreTrade. `barsHeld === 1` IS the fill bar, so this pair is impossible.
+  // Asserted over the whole output rather than only in a unit test: the rule is
+  // worth 0.042R, which is four times the expectancy it is measured against.
+  const impossible = all.filter((t) => t.targetsHit > 0 && t.barsHeld === 1);
+  if (impossible.length > 0) {
+    throw new Error(
+      `fill-bar target: ${impossible.length} trade(s) took a target on the bar ` +
+        `they filled on, e.g. ${impossible[0].coin} ${impossible[0].time.toISOString()}`,
     );
   }
 
