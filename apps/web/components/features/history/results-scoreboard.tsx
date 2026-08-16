@@ -4,12 +4,11 @@ import { cn } from '@/lib/utils';
 import { BUCKET_LABEL, type Bucket, type ResultsSummary } from '@/lib/history-buckets';
 
 /**
- * How the analyses turned out, in counts.
+ * How the analyses turned out, as counts and never percentages.
  *
- * Counts, never percentages. Three closed trades make any win rate noise, and
- * the funnel line above the buckets is the reason: "2 won, 1 lost" reads as
- * 67%, while "2 won, 1 lost, 44 never started" is the honest sentence and a
- * different claim about the tool.
+ * "2 won, 1 lost" reads as a 67% success rate. "2 won, 1 lost, 44 never
+ * started" is the same data and a completely different claim — so the totals
+ * above the boxes are as important as the boxes.
  */
 
 const TONE: Partial<Record<Bucket, string>> = {
@@ -110,6 +109,20 @@ export function ResultsScoreboard({
         a day counts three times, so these are higher than{' '}
         <span className="font-mono">pnpm forward-test</span>, which deduplicates.
         {truncated && ' Showing the newest rows only — older ones are outside this window.'}
+        {/* Said out loud, never silently: a total that covers fewer rows than
+            the list under it is the same lie as hiding those rows. */}
+        {summary.excluded > 0 && (
+          <>
+            {' '}
+            <span className="text-text-secondary">
+              {summary.excluded} older{' '}
+              {summary.excluded === 1 ? 'analysis is' : 'analyses are'} listed below but
+              not counted here — an earlier version of the planner built{' '}
+              {summary.excluded === 1 ? 'it' : 'them'}, and averaging the two
+              describes neither.
+            </span>
+          </>
+        )}
       </p>
     </section>
   );

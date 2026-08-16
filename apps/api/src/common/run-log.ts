@@ -2,15 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Append-only JSONL record of what the analyst said, and when.
+ * A running log of what the analysis said and when, one entry per line.
  *
- * Deliberately a file rather than Postgres: `pnpm analyze` must run without
- * Docker. The DB path (`CoordinatorRun`) still exists for the served API —
- * this is the CLI's record.
- *
- * One JSON object per line, so it can be grepped, `jq`'d, or read back with
- * a split on newlines. Never overwritten, so a run's verdict stays exactly
- * as it was issued — that is the whole point of keeping it.
+ * A plain file rather than the database, so the command-line tool works
+ * without one. Only ever added to, never rewritten — keeping what was said at
+ * the time is the entire point.
  */
 const DEFAULT_PATH = process.env.MERIDIAN_LOG ?? 'logs/runs.jsonl';
 

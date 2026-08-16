@@ -14,35 +14,17 @@ import { CoordinatorPersistenceService } from './analysis-coordinator/coordinato
 import { loadSecrets } from './load-secrets';
 
 /**
- * AWS Lambda entry point.
+ * Where AWS starts the app. There is no server and no port: AWS runs this
+ * function, and whatever it returns is the response.
  *
- * ─── What a Lambda handler actually is ───────────────────────────────────
- * A plain exported function. AWS calls it with two arguments:
+ * Two different things trigger it — a web request, and the timer that runs
+ * the scheduled analyses — and they arrive in different shapes, so the first
+ * job is working out which one this is.
  *
- *   event    what happened. For an HTTP request: method, path, headers, body.
- *            For a scheduled run: whatever the schedule was configured to send.
- *   context  facts about this invocation — request id, milliseconds remaining.
- *
- * Whatever the function returns becomes the response. There is no server and
- * no port. AWS starts a container, calls the function, returns the value.
- *
- * ─── One function, two kinds of event ────────────────────────────────────
- * This function is wired to two triggers: an HTTP API (you, or the frontend)
- * and a schedule (the cron that runs the analyses). They send DIFFERENT event
- * shapes, so the first thing the handler does is work out which one it got.
- *
- * That is the part of Lambda worth internalising: an event is just JSON, and
- * "HTTP request" is only one of many things it can describe.
- *
- * ─── Why the app is cached outside the handler ───────────────────────────
- * AWS keeps the container alive after an invocation and reuses it for the
- * next request, typically for minutes. Code out here at module scope runs
- * ONCE per container; code inside the handler runs on EVERY request.
- *
- * Booting Nest takes ~1-2 seconds — it constructs every service and resolves
- * the whole dependency graph. Caching it means only the FIRST request into a
- * fresh container pays that (the "cold start"); every one after answers in
- * milliseconds.
+ * The app itself is built OUTSIDE the function on purpose. AWS reuses the
+ * same container for several minutes, and anything out here runs once per
+ * container instead of once per request. Starting the app takes a second or
+ * two, so only the first request pays for it.
  */
 let cachedApp: INestApplication | undefined;
 let cachedHttp: Handler | undefined;
@@ -81,13 +63,11 @@ async function getApp(): Promise<INestApplication> {
 }
 
 /**
- * The scheduled run. Calls the service directly rather than making an HTTP
- * request to itself — that would pay a second invocation, a second cold
- * start, and need a credential to talk to its own API.
+ * The scheduled run. Calls the code directly rather than making a web request
+ * to itself, which would cost a second startup and need its own credentials.
  *
- * Never throws: one bad symbol must not abort the rest of the batch, and a
- * scheduled invocation that throws gets retried by AWS, which would
- * re-analyse the symbols that already succeeded.
+ * Never fails outright: one bad coin must not stop the rest, and a failure
+ * here makes AWS retry the whole batch, re-analysing the coins that worked.
  */
 async function runScheduled(event: ScheduledEvent): Promise<{
   saved: string[];

@@ -1,9 +1,7 @@
 /**
- * The two pieces of the plan backtest that can be wrong silently.
- *
- * Both are pure and both have a spec next door, because a look-ahead leak and
- * a mis-scored exit ladder both produce plausible numbers rather than errors —
- * which is how the retracted results in docs/STATE_OF_PLAY.md §14c happened.
+ * The two parts of the backtest that can be wrong without anything breaking.
+ * Both are tested next door: if either is wrong it produces believable numbers
+ * rather than an error, which is how a past result had to be withdrawn.
  */
 import { Candle } from '../types/candle.types';
 
@@ -16,13 +14,11 @@ export const TIMEFRAME_MS: Record<string, number> = {
 };
 
 /**
- * The last `limit` candles that were COMPLETE at `asOfMs`.
+ * The most recent bars that had FINISHED at a given moment.
  *
- * The load-bearing detail is `time + durationMs <= asOfMs`, not `time <=
- * asOfMs`. A 12h candle that opened two hours ago is still forming: its high
- * and low already contain the next ten hours of price. Including it would let
- * the level map mark a swing that has not happened yet, and nothing downstream
- * could tell.
+ * The important part is that a bar still in progress is excluded. A 12-hour
+ * bar that opened two hours ago already contains the next ten hours of price,
+ * so using it would let the backtest see the future.
  */
 export function completedAsOf(
   candles: Candle[],
@@ -35,11 +31,11 @@ export function completedAsOf(
 }
 
 export interface LadderResult {
-  /** Weighted R actually realised across the exit ladder, before costs. */
+  /** What the trade actually made across all its exits, before fees. */
   realizedR: number;
   status: 'STOPPED' | 'PARTIAL' | 'ALL_TARGETS' | 'TIMEOUT';
   targetsHit: number;
-  /** Bars from fill to the last exit (or to the end of the window). */
+  /** Bars from opening the trade to the last exit, or to the end. */
   barsHeld: number;
 }
 
@@ -50,31 +46,24 @@ export interface LadderInput {
   riskPerUnit: number;
   targets: Array<{ price: number; weightPercent: number }>;
   /**
-   * How many targets must fill before the stop moves to breakeven.
-   *
-   * 1 is the playbook and the default, so every existing caller is unchanged.
-   * 0 disables it and lets the remaining size run on the original stop. Only
-   * the harness sets this — it exists to measure whether the rule pays for
-   * itself, not to be tuned per analysis.
+   * How many targets must be hit before the stop moves to break-even. 1 is the
+   * rule; 0 turns it off. Only the backtest changes this, to measure whether
+   * the rule is worth having.
    */
   breakevenAfterTarget?: number;
 }
 
 /**
- * Score a filled plan against the candles that followed it.
+ * Score an opened plan against the bars that followed it, selling off in
+ * stages exactly as the plan describes rather than at a single target.
  *
- * Scores the plan AS THE TOOL PRINTS IT — a laddered exit, not a single
- * target. That matters: TP1 is routinely below 1R because it is the next
- * confluence zone rather than a multiple of risk, so scoring TP1-only would
- * report a losing system by construction and blame the levels for it.
- *
- * Three rules, all from the playbook, all conservative:
- *  - Stop is checked BEFORE targets within a bar. OHLC carries no intra-candle
- *    ordering, so the pessimistic branch is the only honest one.
- *  - After TP1 the stop moves to breakeven (p14, "the trade should stop being
- *    able to hurt"). Remaining size then risks 0R, not -1R.
- *  - Weight still open when the window ends is marked to market at the last
- *    close, not assumed to reach its target.
+ * Three deliberately cautious rules:
+ *  - Within one bar the stop counts before any target. A bar's high and low
+ *    carry no order, so assume the worse one happened first.
+ *  - After the first target the stop moves to break-even, so the rest of the
+ *    position can no longer lose.
+ *  - Anything still open at the end is valued at the last price, never assumed
+ *    to have reached its target.
  */
 export function scoreLadder(post: Candle[], input: LadderInput): LadderResult {
   const long = input.direction === 'long';
@@ -111,7 +100,7 @@ export function scoreLadder(post: Candle[], input: LadderInput): LadderResult {
       realizedR += (t.weightPercent / 100) * rAt(t.price);
       remaining -= t.weightPercent;
       targetsHit += 1;
-      // Breakeven after the first target, per the playbook. 0 turns it off.
+      // Stop moves to break-even after the first target. 0 turns it off.
       const breakevenAfter = input.breakevenAfterTarget ?? 1;
       if (breakevenAfter > 0 && targetsHit === breakevenAfter) {
         stop = input.averageEntry;

@@ -96,12 +96,9 @@ export class ChecklistService {
   }
 
   /**
-   * 1. RSI Condition (20 points) - Dynamic Relative Thresholds
-   *
-   * LONG: RSI <= 40 OR RSI Z-Score <= -1.5 (at least 1.5 std dev BELOW 100-period MA)
-   * SHORT: RSI >= 60 OR RSI Z-Score >= 1.5 (at least 1.5 std dev ABOVE 100-period MA)
-   *
-   * If rsiHistory is not provided, falls back to strict thresholds.
+   * 1. Momentum. A buy wants price beaten down, a sell wants it stretched.
+   * Passes on a fixed level, or on being unusually extreme for this coin's
+   * own recent range.
    */
   private evaluateRSI(
     tradeType: 'long' | 'short',
@@ -282,17 +279,9 @@ export class ChecklistService {
   }
 
   /**
-   * 5. Support/Resistance Confluence (20 or 15 points with partial credit)
-   *
-   * Full Credit (20 points):
-   *   - Price within 2% of level AND level has >= 3 tests
-   *
-   * Partial Credit (15 points):
-   *   - Price within 1.5% of level AND level has exactly 2 tests
-   *   AND second touch was on above-average volume
-   *
-   * No Credit (0 points):
-   *   - Otherwise
+   * 5. Is price at a level that has mattered before? Full pass within 2% of a
+   * level touched 3+ times; a partial pass closer in on a level touched twice,
+   * if the second touch came with heavy trading.
    */
   private evaluateSupportResistance(
     tradeType: 'long' | 'short',
@@ -376,11 +365,8 @@ export class ChecklistService {
   }
 
   /**
-   * Get a human-readable summary of the checklist.
-   *
-   * States what is true rather than grading it: which conditions are met,
-   * which are not, and the value that decided each. There is no aggregate
-   * score and no tier label, because neither carried information.
+   * The checklist in words. States which conditions are met and the value that
+   * decided each. No overall score — see the note in checklist.types.ts.
    */
   getSummary(result: EntryChecklistResult): string {
     const conditionLines = result.conditions

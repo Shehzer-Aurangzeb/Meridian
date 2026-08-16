@@ -21,12 +21,15 @@ export const DEFAULT_FILTERS: HistoryFilters = {
   sort: 'newest',
 };
 
-/** The server takes a window in days; `all` is the row ceiling instead. */
+/** The server takes a window in days. */
 export const RANGE_DAYS: Record<HistoryFilters['dateRange'], number | undefined> = {
   '24h': 1,
   '7d': 7,
   '30d': 30,
-  all: undefined,
+  // 'all' must mean MORE, not less. The API defaults to the planner epoch when
+  // no window is asked for, so 'all' has to ask explicitly or it would show
+  // the least history of any option.
+  all: 3650,
 };
 
 interface SectionHeadProps {

@@ -5,28 +5,12 @@ import { IndicatorContext } from '../common/types/indicator-context.types';
 import { SqueezeBreakoutSetup } from './interfaces/squeeze-breakout.types';
 
 /**
- * SqueezeBreakoutService
+ * For a market that has gone quiet and coiled up: finds the top and bottom of
+ * the range it is stuck in, and how much trading volume a genuine break out
+ * of that range would need.
  *
- * Strategy service for assets currently classified as `COMPRESSION` by
- * MarketRegimeService. It identifies the consolidation envelope (the
- * Highest High / Lowest Low of the most recent N candles) and the
- * volume baseline that a breakout must exceed.
- *
- * Two entry points:
- *   - `calculateBreakoutTriggers(symbol, timeframe)` — legacy convenience:
- *     fetches its own candles. Kept for direct callers.
- *   - `calculateBreakoutTriggersFromContext(ctx)` — preferred path from
- *     `AnalysisCoordinatorService`. Pure transform on the shared
- *     `IndicatorContext`, no I/O, no extra fetch.
- *
- * Mathematically identical between the two paths: both reduce to the
- * same Highest-High / Lowest-Low / volume-SMA over the trailing
- * `SQUEEZE_LOOKBACK` candles.
- *
- * Stateless: every call is a deterministic function of fresh market data.
- * The service does not track positions, does not trigger orders, and does
- * not persist anything — it only produces the price/volume levels that
- * downstream execution logic will watch.
+ * It only produces levels to watch. It does not track positions or place
+ * orders.
  */
 @Injectable()
 export class SqueezeBreakoutService {
@@ -41,13 +25,7 @@ export class SqueezeBreakoutService {
 
   constructor(private readonly binanceService: BinanceService) {}
 
-  /**
-   * Calculate the breakout trigger levels for a compressed asset.
-   *
-   * Convenience wrapper: fetches a small candle window and delegates
-   * to `computeSetup`. Use this only when the caller does not already
-   * have a shared `IndicatorContext`.
-   */
+  /** Fetches its own data first. Use the version below if you already have it. */
   async calculateBreakoutTriggers(
     symbol: string,
     timeframe: string,
@@ -61,15 +39,7 @@ export class SqueezeBreakoutService {
     return this.computeSetup(symbol, timeframe, candles);
   }
 
-  /**
-   * Calculate the breakout trigger levels from a pre-built
-   * `IndicatorContext`. Pure synchronous transform — no I/O.
-   *
-   * Uses the trailing `SQUEEZE_LOOKBACK` candles from the shared
-   * context, which is mathematically equivalent to the dedicated
-   * 50-candle fetch used by the legacy convenience method (both
-   * windows end on the same most-recent candle).
-   */
+  /** The same, from price bars the caller already has. */
   calculateBreakoutTriggersFromContext(
     context: IndicatorContext,
   ): SqueezeBreakoutSetup {

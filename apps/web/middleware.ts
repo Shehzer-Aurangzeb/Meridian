@@ -13,14 +13,12 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
   return value.toLowerCase() === 'true' || value === '1';
 }
 
-// Duplicated from lib/feature-flags — middleware runs on the Edge runtime.
-// Hiding a nav link is not gating: without these, the gated pages are still
-// reachable by typing the URL.
+// Copied from lib/feature-flags because this file runs in a separate, limited
+// environment and cannot import it. Hiding a menu link is not enough on its
+// own — without this, the page is still reachable by typing its address.
 //
-// The DEFAULTS must match lib/feature-flags exactly. They did not: ANALYSIS
-// and HISTORY defaulted true there and false here, so a deployment without the
-// env vars showed both links in the sidebar and then redirected anyone who
-// clicked them.
+// TODO: these defaults MUST match lib/feature-flags exactly. They once did
+// not, and the menu showed links that then redirected anyone who clicked.
 const FEATURES = {
   ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, true),
   HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, true),

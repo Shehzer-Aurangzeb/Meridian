@@ -5,11 +5,8 @@ import { formatEnumLabel, formatListDate } from '@/lib/format';
 import type { AnalysisListItem, Regime } from '@/types/analyses';
 
 /**
- * Columns are exactly what `GET /analyses` returns.
- *
- * Signal, confidence, outcome and R are deliberately absent: scoring a plan
- * needs its payload and the candles since, which is what the detail route
- * does per analysis. Showing them here would mean a request per row.
+ * Shows exactly what the list endpoint returns, and nothing that would need a
+ * separate request per row.
  */
 
 const REGIME_STYLES: Record<Regime, string> = {

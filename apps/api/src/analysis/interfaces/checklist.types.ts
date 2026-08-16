@@ -1,20 +1,11 @@
 /**
- * 5-Point Entry Checklist Types
- * Based on Miraj's trading strategy.
+ * The five entry conditions, reported one by one as met or not, with the
+ * value that decided each.
  *
- * There is deliberately NO aggregate score and no tier label. Conditions are
- * reported individually as met/unmet with the value that decided each one.
- *
- * The removed 0-100 score and its four tiers (WATCHING / TACTICAL_SETUP /
- * STRATEGIC_TRADE / APEX_SETUP) were measured to carry no predictive
- * information: score buckets did not rank outcomes at any timeframe, and
- * APEX_SETUP never fired once in any run. Worse, every tier boundary was
- * calibrated on top of three mis-wired inputs, and the lowest passing tier
- * began at 40 — two of five conditions, below the playbook's own stated
- * minimum of three. See docs/STATE_OF_PLAY.md 14c-14f.
- *
- * A number that ranks nothing invites being trusted anyway, so it is gone
- * rather than merely unused.
+ * There is deliberately NO overall score out of 100 and no quality label.
+ * Both were tested and neither predicted anything: higher scores did not lead
+ * to better outcomes. A number that ranks nothing still gets trusted, so it
+ * was removed rather than left unused.
  */
 
 export interface ChecklistCondition {
@@ -146,13 +137,5 @@ export const SR_THRESHOLDS = {
   PARTIAL_VOLUME_MULTIPLIER: 1.2, // 2nd touch must be above-average volume
 } as const;
 
-/**
- * Minimum conditions that must be met for a setup to exist at all.
- *
- * Playbook p12, "Entry Checklist - LONG Position": *Minimum Requirements
- * (Must Have 3/5)*. The same wording appears for shorts on p12-13.
- *
- * Expressed in CONDITIONS, not points: the removed tier gate admitted
- * 2-of-5, below the playbook's own stated minimum.
- */
+/** How many of the five must be met before a setup counts at all. */
 export const PLAYBOOK_MIN_CONDITIONS_MET = 3;

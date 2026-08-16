@@ -3,28 +3,15 @@ import { scoreTrade } from '../common/replay/trade-scoring';
 import { TradePlan } from '../analysis/services/trade-plan.service';
 
 /**
- * Did the printed plan work?
+ * Did the plan we printed actually work?
  *
- * The same operation the plan backtest performs — replay candles from the
- * analysis timestamp against the plan's own entry, stop and target ladder —
- * applied to a SAVED analysis instead of a historical one. Deliberately the
- * same code (`scoreTrade`), because a badge scored differently from the
- * harness would quietly disagree with every number in STATE_OF_PLAY.md.
+ * Replays the hours after a saved analysis against its own entry, stop and
+ * targets. It calls the same `scoreTrade` as the backtest, with the same time
+ * windows, so a badge on the site and a trade in the backtest mean the same
+ * thing.
  *
- * What it does NOT yet share is the WINDOWS: the harness gives a plan 24 bars
- * to fill and 72 to resolve, and this passes infinity for both. That is C3 and
- * C4, and it is why a live badge and a backtested trade are still not the same
- * measurement even though the arithmetic between them now is.
- *
- * Computed on read, like freshness: nothing is stored, so nothing goes stale
- * and there is no job to keep in sync.
- *
- * ─── Why the ladder and not just TP1 ─────────────────────────────────────
- * TP1 is the next confluence zone, not a multiple of risk, so it is routinely
- * below 1R. Scoring TP1-only would report a losing plan by construction and
- * blame the levels for it. Breakeven moves to entry after TP1 (playbook p14),
- * and weight still open is marked to market at the latest candle — which is
- * exactly what "OPEN" means for a live position.
+ * Worked out fresh each time it is read. Nothing is stored, so nothing can go
+ * stale and there is no background job to keep in step.
  */
 export type PlanOutcome =
   | 'PENDING'
@@ -33,110 +20,70 @@ export type PlanOutcome =
   | 'STOPPED'
   | 'PARTIAL'
   | 'ALL_TARGETS'
-  /**
-   * Filled, never resolved, and the hold window is spent. Closed at the mark,
-   * not still running. The harness calls this TIMEOUT and counts it as an
-   * unresolved trade; before the hold window was applied here, every one of
-   * these read as OPEN indefinitely.
-   */
+  /** Opened, then ran out of time without hitting a target or the stop. */
   | 'EXPIRED'
   /**
-   * The candles this plan would have to be replayed against could not be
-   * fetched, so it has no badge and no R.
-   *
-   * Deliberately a state rather than a fallback. The bug this replaces scored
-   * every old analysis against whatever window happened to be available, which
-   * turned a closed trade back into MISSED and could invent a fill from a later
-   * touch of the same price. A missing badge is recoverable; a confident wrong
-   * one is not.
+   * The price history needed to judge this plan could not be loaded, so it gets
+   * no badge and no result. Saying nothing is better than showing a badge that
+   * might be wrong.
    */
   | 'UNSCOREABLE';
 
 export interface PlanResult {
   direction: 'long' | 'short';
   outcome: PlanOutcome;
-  /** Realised R before costs, or mark-to-market R while OPEN. Null before a fill. */
+  /** Result in R before costs. Null until the trade opens. */
   r: number | null;
-  /**
-   * The same number after the round trip. Anything shown to a person uses
-   * THIS one — the verdict quoting gross while the card beside it quoted net
-   * is how one trade came to have two numbers on one screen.
-   *
-   * Taken from `scoreTrade`, which already computes it. Re-deriving the cost
-   * at the call site is what let the two drift apart in the first place.
-   */
+  /** The same, after fees. Anything shown to a person uses this one. */
   netR: number | null;
   filledAt: Date | null;
   targetsHit: number;
   /**
-   * How many of the three entry legs actually filled, and what fraction of the
-   * planned position that is.
-   *
-   * The plan is a 20/40/40 ladder. Reaching the near edge opens the trade at
-   * 20% of size; the rest only fills if price works deeper into the zone, and
-   * whatever is left is cancelled once the stop or the first target lands. So a
-   * live position is routinely a fraction of the size the plan describes, and
-   * `r` is already scaled to it — a 20%-filled winner earns a fifth of what a
-   * full one would.
+   * The entry is split into three steps at different prices. Reaching the
+   * nearest one opens a fifth of the position; the rest only fills if price
+   * moves further in, and whatever is left is cancelled once the stop or the
+   * first target lands. So a real position is often smaller than the plan
+   * describes, and `r` is already scaled to the size actually held.
    */
   legsFilled: number;
   filledFraction: number;
 }
 
 /**
- * Hours a plan gets to be reached before it counts as MISSED rather than
- * still PENDING.
- *
- * 24 is not a guess: across the 582 backtested trades, 100% of the plans that
- * ever filled did so within 24 hours of the signal, median 3h
- * (STATE_OF_PLAY.md §14h). A plan unfilled after a day was not slow, it was
- * passed by.
+ * Hours a plan gets to be reached before it counts as missed rather than still
+ * waiting. Every backtested plan that ever filled did so within a day, half of
+ * them within three hours; after that price had simply moved on.
  */
 export const FILL_WINDOW_HOURS = 24;
 
 /**
- * Hours a filled position gets to resolve before it is unresolved rather than
- * open forever. The harness's `--max-bars` on a 1h series, and the same number,
- * because a badge measured over an unbounded hold is not the thing the backtest
- * reports.
- *
- * Live used to pass Infinity for this and for the fill window. That is why an
- * OPEN badge could sit on a position for months, marked at a price it had long
- * since walked away from.
+ * Hours an open position gets to finish before it is closed out at whatever
+ * price it sat at. The same number the backtest uses, so the two agree.
  */
 export const MAX_HOLD_HOURS = 72;
 
-/**
- * Candles a saved analysis must be replayed against: the fill window plus the
- * hold window, starting at the analysis itself. Anything less and the replay
- * cannot reach a verdict; anything more is not looked at.
- */
+/** Hours of price history needed to judge a plan, starting from the analysis. */
 export const OUTCOME_WINDOW_HOURS = FILL_WINDOW_HOURS + MAX_HOLD_HOURS;
 
 /**
- * Round-trip cost as a percentage of notional: 0.05% fee + 0.02% slippage,
- * each side. The §14h default, kept here so the API and the backtest harness
- * cannot drift apart — a scoreboard priced differently from STATE_OF_PLAY.md
- * would quietly disagree with every number in it.
+ * Cost of opening and closing, as a % of position value: 0.05% fee plus 0.02%
+ * slippage, each way. Kept here so the site and the backtest price trades the
+ * same.
  */
 export const DEFAULT_ROUND_TRIP_PCT = 2 * (0.05 + 0.02);
 
-/**
- * Cost in R. A plan with a 0.5% stop pays four times what a 2% stop pays,
- * because R is denominated in the stop distance. Fees are proportional to
- * size, so a laddered exit pays the same total as a single one.
- */
+/** The same cost expressed in R. A tighter stop pays proportionally more. */
 export function costR(riskPercent: number, roundTripPct = DEFAULT_ROUND_TRIP_PCT): number {
   return riskPercent === 0 ? 0 : roundTripPct / riskPercent;
 }
 
 /**
- * Is the replay series good enough to score against?
+ * Is this price history good enough to judge the plan against?
  *
- * It must START at the analysis — a series that begins later is a different
- * window, and scoring against it is how a closed trade turned back into MISSED.
- * It must also be LONG enough, unless the analysis is young and the rest of the
- * window has not happened yet, which is the ordinary case for a live plan.
+ * It has to START at the analysis and be long enough. History that begins
+ * later is a different stretch of time, and judging a plan against it can turn
+ * a finished trade back into "never started" or invent an entry from a price
+ * touched weeks afterwards.
  */
 export function isScoreable(
   candlesSince: Candle[],
@@ -146,14 +93,13 @@ export function isScoreable(
 ): boolean {
   const elapsedHours = (now - analysedAt.getTime()) / barMs;
   const expected = Math.min(Math.floor(elapsedHours), OUTCOME_WINDOW_HOURS);
-  // Nothing has completed yet, or the only bar since is still forming. An empty
-  // series is the honest answer here, and PENDING is the honest badge.
+  // Too soon for anything to have happened. Empty is the honest answer.
   if (expected <= 1) return true;
   if (candlesSince.length === 0) return false;
-  // The first candle must be the one that opened at or just after the analysis.
+  // The first bar must be the one that opened at or just after the analysis.
   const gapBars = (candlesSince[0].time.getTime() - analysedAt.getTime()) / barMs;
   if (gapBars > 1) return false;
-  // Allow one bar of slack for the still-forming candle at the live edge.
+  // One bar of slack for the hour still in progress.
   return candlesSince.length >= expected - 1;
 }
 
@@ -181,10 +127,6 @@ export function scorePlans(
   }
 
   return plans.map((plan) => {
-    // The same windows the harness uses. Live used to pass Infinity for both,
-    // which meant a plan could "fill" weeks after its thesis expired and then
-    // stay OPEN forever. A badge scored over a different window from the
-    // backtest is not comparable to anything the backtest reports.
     const scored = scoreTrade(candlesSince, plan, {
       fillBars: FILL_WINDOW_HOURS,
       maxBars: MAX_HOLD_HOURS,
@@ -205,23 +147,16 @@ export function scorePlans(
       };
     }
 
-    // TIMEOUT from the ladder means "unresolved when the window ran out". Which
-    // of two things that is depends on WHY it ran out:
-    //
-    //   - the hold window is spent  -> EXPIRED. The position is over, marked to
-    //     market at the last bar of the window. This is the harness's TIMEOUT.
-    //   - the candles simply have not happened yet -> OPEN, genuinely running.
-    //
-    // Before the hold window existed, every one of these was OPEN forever.
-    // NO_FILL is unreachable here: the `!scored.filled` branch above returned.
-    // SIGNAL_EXIT is a research-only status: it requires an `exitSignal`, and
-    // this call configures none. If it ever appears, someone has wired an exit
-    // rule into the live path without giving it a badge — say so rather than
-    // pick a badge that would be wrong.
+    // This status needs an exit signal, and none is set here. If it ever shows
+    // up, someone has added an exit rule to the live path without giving it a
+    // badge — better to fail loudly than to display the wrong one.
     if (scored.status === 'SIGNAL_EXIT') {
       throw new Error('SIGNAL_EXIT from the live scorer: an exitSignal was configured');
     }
 
+    // A trade that has not finished is one of two things: the hold time is up,
+    // so it is over and valued where it sat (EXPIRED), or the hours simply have
+    // not passed yet, so it is genuinely still running (OPEN).
     const heldOut = elapsedHours >= (scored.barsToFill as number) + MAX_HOLD_HOURS;
     const outcome: PlanOutcome =
       scored.status === 'TIMEOUT' || scored.status === 'NO_FILL'

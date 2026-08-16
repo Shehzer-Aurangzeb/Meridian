@@ -20,15 +20,11 @@ export function findFirstFill(
 }
 
 /**
- * Walk post-fill candles in order; the first wick to touch SL or TP1 wins.
+ * Steps through the bars after a trade opened; whichever of the stop or the
+ * first target price touches first decides the outcome.
  *
- * When one candle straddles both levels it counts as `STOPPED_OUT`. OHLC
- * carries no intra-candle ordering, so the pessimistic branch is the only
- * honest one — assuming the target filled first would flatter every result.
- *
- * Extracted from PerformanceService so the journal can replay a plan the user
- * actually took without a database: this is pure, and the DB path was the only
- * reason it was unreachable.
+ * If one bar covers both, it counts as stopped out. A bar's high and low carry
+ * no order, so assuming the target came first would flatter every result.
  */
 export function findFirstOutcome(
   candles: Candle[],

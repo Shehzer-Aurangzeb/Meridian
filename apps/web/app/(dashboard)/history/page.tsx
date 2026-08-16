@@ -7,6 +7,7 @@ import { AnalysisCard } from '@/components/features/history/analysis-card';
 import { Disclaimer } from '@/components/ui/disclaimer';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useHistoryPage } from '@/lib/hooks/use-history-page';
+import { isPreEpoch } from '@/lib/history-buckets';
 
 function HistoryLoading() {
   return (
@@ -26,6 +27,7 @@ function HistoryLoading() {
 export default function HistoryPage() {
   const {
     summary,
+    epoch,
     truncated,
     entries,
     coins,
@@ -87,6 +89,7 @@ export default function HistoryPage() {
                   key={entry.id}
                   entry={entry}
                   livePrice={prices[entry.symbol]}
+                  preEpoch={isPreEpoch(entry, epoch)}
                   onOpen={() => openAnalysis(entry)}
                 />
               ))}

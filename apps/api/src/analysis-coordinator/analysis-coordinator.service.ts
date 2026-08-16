@@ -20,25 +20,14 @@ import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 export const ANALYSIS_CANDLE_LIMIT = 250;
 
 /**
- * AnalysisCoordinatorService
+ * Runs the analysis end to end:
  *
- * Central orchestrator for the entire analysis pipeline. Single entry
- * point upstream of AI execution and strategy execution layers.
+ *   1. fetch the price history once
+ *   2. work out every measurement from it, once
+ *   3. decide what kind of market this is, then apply the matching approach
  *
- * Pipeline:
- *   1. Fetch candles ONCE from Binance.
- *   2. Build a shared `IndicatorContext` with every baseline indicator.
- *   3. Pass the context to:
- *        - `MarketRegimeService.classifyFromContext`
- *        - `SqueezeBreakoutService.calculateBreakoutTriggersFromContext`
- *          (COMPRESSION route only)
- *        - `ChecklistService.evaluateChecklist`
- *          (TRENDING / MEAN_REVERSION route only)
- *
- * No service downstream of the coordinator performs its own Binance
- * fetch or recomputes any indicator that already lives on the context.
- * This guarantees zero duplicate I/O and zero duplicate math per
- * `analyzeAsset` call.
+ * Nothing further down fetches its own data or recalculates anything, so a
+ * number cannot come out differently in two places.
  */
 @Injectable()
 export class AnalysisCoordinatorService {
@@ -53,12 +42,7 @@ export class AnalysisCoordinatorService {
     private readonly supportResistanceService: SupportResistanceService,
   ) {}
 
-  /**
-   * Analyze an asset through the full pipeline (one-shot, no streaming).
-   *
-   * @param symbol    Base symbol (e.g. 'BTC')
-   * @param timeframe Candle interval (e.g. '1h')
-   */
+  /** Run the whole thing for one coin. */
   async analyzeAsset(
     symbol: string,
     timeframe: string,
@@ -86,12 +70,8 @@ export class AnalysisCoordinatorService {
   }
 
   /**
-   * Route a pre-classified regime to its strategy (squeeze breakout vs
-   * confluence checklist) and build the final `CoordinatorAnalysisResult`.
-   *
-   * Public so the SSE controller can interleave progress emissions
-   * between candle fetch / regime classification / strategy routing
-   * without re-running any work.
+   * Picks the approach that matches the market type and applies it. Separate
+   * so a caller can report progress between steps without repeating work.
    */
   routeFromRegime(
     context: IndicatorContext,
@@ -129,12 +109,9 @@ export class AnalysisCoordinatorService {
     const checklistResult =
       this.checklistService.evaluateChecklist(checklistInputs);
 
-    // No gate. The coordinator describes; it does not decide whether the
-    // analysis is worth having. Distance to a confluence zone replaced the
-    // "is this a setup" verdict (see TradePlanService.ZONE_BANDS), and the
-    // cost of a Claude call is a CALLER policy — the CLI has `--ai`, the
-    // scanner has its own constant. A pipeline-level verdict here is what
-    // made the tool silent on 99.6% of bars.
+    // Nothing is filtered out here. This describes what it sees; it does not
+    // decide whether the analysis was worth doing. An earlier version made
+    // that judgement and stayed silent on 99.6% of the bars it looked at.
     this.logger.debug(
       `Checklist ${checklistResult.conditionsMet}/5 conditions met`,
     );
@@ -155,16 +132,8 @@ export class AnalysisCoordinatorService {
   }
 
   /**
-   * Build the checklist input payload from the shared `IndicatorContext`.
-   *
-   * Pure synchronous transform: no I/O, no recomputation of any series
-   * already present on the context. Only the per-request bits the
-   * checklist needs on top of the baseline indicators (support /
-   * resistance, market structure, nearest level) are derived here.
-   *
-   * Mathematically identical to the previous `gatherChecklistInputs`
-   * implementation — only the data source changed (shared context
-   * instead of a duplicate Binance fetch + indicator recomputation).
+   * Gathers what the entry checklist needs, reusing measurements already
+   * taken and adding only the few extras it needs on top.
    */
   private buildChecklistInputs(
     context: IndicatorContext,
@@ -190,16 +159,8 @@ export class AnalysisCoordinatorService {
       );
     }
 
-    // Last candle close. Indicators are computed on closes, so the price
-    // anchor must match them.
-    //
-    // This previously passed `bollingerBands.middle` (the 20-SMA), which
-    // silently broke three of the five checklist conditions: BB proximity
-    // is measured as (price - lower) / (upper - lower), and the bands are
-    // symmetric about the middle, so feeding it the middle scored exactly
-    // 50% on every single run against a 10% threshold — condition 3 could
-    // never pass. Market structure and S/R proximity were anchored to a
-    // lagging average rather than price.
+    // The last closing price. Every measurement is based on closing prices,
+    // so the price compared against them has to be one too.
     const currentPrice = closes[closes.length - 1];
 
     // Support / resistance derived from the same candle series.
@@ -225,14 +186,8 @@ export class AnalysisCoordinatorService {
       }
     }
 
-    // Nearest key level + volume context.
-    //
-    // Uses the swing-clustered, touch-counted engine — the same one the
-    // levels endpoints use — rather than the old price-anchored grid, which
-    // measured a lattice from zero with spacing derived from current price,
-    // so a 0.07% move could relabel a level from "support, 4 touches" to
-    // "resistance, 1 test". `levelsFromCandles` is the pure half of
-    // `findLevels`, so this costs no extra fetch.
+    // The nearest important level, found the same way the rest of the app
+    // finds them — from actual turning points in price, not a fixed grid.
     const levels = this.supportResistanceService.levelsFromCandles(
       candlesArr,
       context.timeframe as Timeframe,
@@ -275,19 +230,16 @@ export class AnalysisCoordinatorService {
   }
 
   /**
-   * Derive long/short bias from regime DI spread + observed market
-   * structure. Priority:
-   *   1. Market structure (HH/HL → long, LH/LL → short) — strongest signal
-   *   2. DI spread (+DI vs -DI) — directional trend tiebreaker
-   *   3. Fallback to 'long' when neither is conclusive
+   * Guesses a direction from the trend, in order:
+   *   1. the pattern of highs and lows — rising means up, falling means down
+   *   2. which side of the trend measure is stronger
+   *   3. otherwise, up
    */
   /**
-   * Fallback direction when the caller supplies none: read it off the trend.
-   *
-   * This is only a guess, and it is the WRONG guess whenever the setup's
-   * direction is implied by something other than trend — most obviously a
-   * level, where arriving at support is a long regardless of the prevailing
-   * structure. Prefer passing `direction` explicitly.
+   * Only used when the caller does not say which direction it means. It is a
+   * guess, and a poor one whenever the direction comes from something other
+   * than the trend — arriving at support is a buy whatever the trend says.
+   * Pass the direction in wherever possible.
    */
   private deriveTradeType(
     regimeResult: MarketRegimeResult,

@@ -50,7 +50,7 @@ export function PlanCard({ plan, outcome }: PlanCardProps) {
       <header className="px-6 py-4 border-b border-border/10 dark:border-border flex flex-wrap items-center gap-2.5">
         <DirectionBadge direction={plan.direction} />
         <StateBadge state={plan.state} />
-        {outcome && <OutcomeBadge outcome={outcome.outcome} r={outcome.r} />}
+        {outcome && <OutcomeBadge outcome={outcome.outcome} r={outcome.netR} />}
         <span className="ml-auto font-mono text-[11px] text-text-tertiary tracking-[0.04em]">
           {plan.distanceToZonePercent >= 0 ? '+' : ''}
           {plan.distanceToZonePercent.toFixed(2)}% away

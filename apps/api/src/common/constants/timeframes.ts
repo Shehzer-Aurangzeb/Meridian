@@ -59,22 +59,12 @@ export const CANDLE_LIMITS: Record<Timeframe, number> = {
 };
 
 /**
- * Timeframe the regime description and the 5 condition readings are computed
- * on, when the caller does not name one — which, after `analyze` became
- * symbol-only, is always.
+ * The chart the market type and the five entry conditions are read from.
  *
- * 12h because the playbook takes its checklist readings from HTF ("RSI in
- * oversold zone (15-30) on HTF", p12) and names "12h, Daily" as the
- * level-to-level frame (p51). It is also the Fibonacci anchor, so the
- * description and the level map agree about what "the higher timeframe" is.
- *
- * NOT reused from the level map's 12h fetch: the regime needs 250 candles for
- * its 200-sample bandwidth percentile, and the map fetches 120. Sharing them
- * would silently degrade the percentile.
- *
- * Siblings live in `level-map.service.ts`: LEVEL_TIMEFRAMES,
- * FIB_ANCHOR_TIMEFRAME, ATR_TIMEFRAME. All four are surfaced by `analyze`, so
- * no timeframe choice is implicit.
+ * 12 hours, matching the chart the levels are anchored to, so both parts of
+ * the analysis mean the same thing by "the bigger picture". It fetches its own
+ * longer history rather than sharing, because one of its measures needs 200
+ * past readings.
  */
 export const ANALYSIS_TIMEFRAME: Timeframe = TIMEFRAMES.TWELVE_HOUR;
 

@@ -34,30 +34,22 @@ export interface SavedNarration {
 }
 
 /**
- * What became of one analysis, for the history cards.
- *
- * Everything here is already computed elsewhere — this is the detail route's
- * work done for a whole page at once, not a second opinion. Same `leadPlan`,
- * same `scorePlans`, same `analysisFreshness`, so a card can never disagree
- * with the page it opens.
+ * What became of one analysis, for the history cards. Uses the same code as
+ * the detail page, so a card can never disagree with the page it opens.
  */
 export interface AnalysisStatus {
   direction: 'long' | 'short' | null;
   outcome: PlanOutcome | null;
-  /** Gross R, marked to market while OPEN. Null until a fill. */
+  /** Result in R before fees. Null until the trade opens. */
   r: number | null;
-  /** After the round-trip cost — the number the scoreboard sums. */
+  /** After fees. This is the number the scoreboard adds up. */
   netR: number | null;
   freshness: Freshness;
   filledAt: Date | null;
-  /** How many targets the replay reached, in order. Drives the ticks. */
+  /** How many targets price reached, in order. */
   targetsHit: number;
   currentPrice: number;
-  /**
-   * The lead plan's geometry, projected rather than embedded. The full plan is
-   * ~2.5KB and fifty of them is a response nobody reads; these eight numbers
-   * are what a card draws.
-   */
+  /** Just the prices a card draws. The full plan is far larger and unused here. */
   plan: {
     entries: number[];
     averageEntry: number;
@@ -75,54 +67,45 @@ function readNarration(payload: unknown): SavedNarration | null {
 }
 
 /**
- * Outcome replay series: 1h wicks, anchored at the analysis and exactly as long
- * as the scoring window.
- *
- * It used to be "the most recent 720", which for an analysis older than 30 days
- * is a window the plan's entry was never in — the recorded fill went invisible
- * and a later touch of the same price could manufacture a new one. `+2` is slack
- * for the partially-formed bar at each end.
+ * The price history each analysis is judged against: hourly bars starting at
+ * the analysis itself, long enough to cover the fill and hold windows. The
+ * extra 2 bars allow for the part-formed hour at each end.
  */
 const OUTCOME_TIMEFRAME: TimeInterval = '1h';
 const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
 
 /**
- * The oldest analysis the list will return.
+ * Analyses before this date were built by an older version of the planner that
+ * had known bugs, so averaging them together with new ones describes neither.
  *
- * Everything before this was produced by a planner with known bugs — the target
- * ladder weighted a one-target plan at 33% of size, and the entry checklist was
- * scored once per bar instead of per direction. Those plans are now scored
- * correctly, which is exactly the problem: a correct score of a bad plan mixes
- * two different strategies into one scoreboard and neither number means
- * anything.
+ * This is the DEFAULT start of the list, not a filter you cannot turn off:
+ * `?days=` overrides it and gets exactly what it asks for, and every response
+ * reports where this boundary sits. Older rows are meant to be SHOWN but left
+ * out of the totals.
  *
- * The rows stay in the database and stay reachable by id. They are excluded
- * from the list, the scoreboard, and every total computed from it.
- *
- * Set this to the deploy date. To include the whole history again, set it to 0.
+ * TODO: a date is a rough stand-in for "which version of the code made this
+ * row". The proper fix is a version column written with each analysis, which
+ * needs a database migration.
  */
 export const RESULTS_EPOCH = new Date('2026-08-16T00:00:00Z');
 
 /**
- * How many outcome windows to fetch at once.
- *
- * One Binance request per row, and `limit` goes to 1000 — firing that as a
- * single burst is how an IP gets rate-limited off the exchange. Each window is
- * a single page, so a page of 50 rows is 7 short rounds.
+ * How many price-history requests to send at once. Each row needs its own, and
+ * a page can hold up to 1000 — sending them all together gets the exchange to
+ * block us.
  */
 const OUTCOME_FETCH_CONCURRENCY = 8;
 
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
 /**
- * The API the frontend and the scheduler both use.
+ * The API the website and the scheduled runs both use.
  *
  *   POST /analyses?symbol=BTC   run one analysis and save it
- *   GET  /analyses              list saved analyses (newest first)
- *   GET  /analyses/:id          one analysis, with its freshness
+ *   GET  /analyses              list saved analyses, newest first
+ *   GET  /analyses/:id          one analysis in full
  *
- * Every route here is protected by the global AuthGuard: a session token from
- * the frontend, or the API key from the scheduler.
+ * All of it requires a login or the scheduler's key.
  */
 @ApiTags('analyses')
 @Controller('analyses')
@@ -163,12 +146,13 @@ export class AnalysesController {
     count: number;
     analyses: unknown[];
     truncated: boolean;
-    /**
-     * The window actually applied. `?days=365` before the epoch returns the
-     * epoch, and saying so is the point — a caller that asked for a year and
-     * silently got a fortnight would compute a total for the wrong period.
-     */
+    /** The date range actually used, so nothing has to be guessed. */
     from: string;
+    /**
+     * Where the old-planner boundary sits. Rows older than this should be
+     * shown but not counted, and the count that was left out stated.
+     */
+    epoch: string;
   }> {
     const where: Prisma.CoordinatorRunWhereInput = {};
     if (symbol) {
@@ -179,27 +163,21 @@ export class AnalysesController {
       where.symbol = coin;
     }
 
-    // A window is honest in a way a row cap is not: `?days=30` returns thirty
-    // days or says it could not, where a bare limit of 200 silently drops the
-    // oldest analyses and makes any total computed from the response wrong.
-    // Never earlier than the epoch: a `?days=365` must not drag pre-fix
-    // analyses back into a total that claims to describe the current planner.
+    // Asking for a date range is honest in a way a row limit is not: a limit
+    // silently drops the oldest rows and makes any total wrong.
     const windowDays = Number(days);
     const from =
       Number.isFinite(windowDays) && windowDays > 0
-        ? Math.max(Date.now() - windowDays * 86_400_000, RESULTS_EPOCH.getTime())
+        ? Date.now() - windowDays * 86_400_000
         : RESULTS_EPOCH.getTime();
     where.createdAt = { gte: new Date(from) };
 
-    // Anything not a positive number falls back to the default. Clamping
-    // instead would turn `?limit=-5` into a single row, which reads as "there
-    // is one analysis" rather than "that limit was nonsense".
+    // Nonsense values fall back to the default rather than being squashed to
+    // 1, which would read as "there is one analysis".
     const parsed = Number(limit);
     const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 50;
-    // Payload deliberately excluded from the RESPONSE — a list of 50 full
-    // level maps is a large body nobody reads. `?status=true` still reads it
-    // server-side to score each row; at ~3.5KB a payload that is 180KB for
-    // every analysis ever run, so the read is not the expensive part.
+    // The full analysis is left out of the response — fifty of them is a large
+    // download nobody reads. It is still loaded here to score each row.
     const wantStatus = status === 'true' || status === '1';
     const analyses = await this.prisma.coordinatorRun.findMany({
       where,
@@ -218,19 +196,18 @@ export class AnalysesController {
       },
     });
 
-    // The caller asked for a window and got exactly `take` rows back, so there
-    // may be more it cannot see. Say so rather than let a scoreboard built on
-    // this response quietly describe a subset.
+    // Exactly as many rows came back as were asked for, so there may be more.
+    // Say so, rather than let a total quietly describe only part of the data.
     const truncated = analyses.length === take;
 
-    const fromIso = new Date(from).toISOString();
-    if (!wantStatus) return { count: analyses.length, analyses, truncated, from: fromIso };
+    const window = { from: new Date(from).toISOString(), epoch: RESULTS_EPOCH.toISOString() };
+    if (!wantStatus) return { count: analyses.length, analyses, truncated, ...window };
 
     const statuses = await this.statusBySymbol(analyses);
     return {
       count: analyses.length,
       truncated,
-      from: fromIso,
+      ...window,
       analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,
@@ -239,16 +216,11 @@ export class AnalysesController {
   }
 
   /**
-   * Score every row on the page.
+   * Work out how every row on the page turned out.
    *
-   * The price and the newest-analysis lookup are per SYMBOL and shared. The
-   * REPLAY SERIES is not: each analysis is scored against the window that
-   * starts at that analysis, so it is one fetch per row.
-   *
-   * That is more requests than the single shared series it replaces, and it is
-   * the price of the badge being right — a shared "most recent 720" cannot
-   * serve rows taken weeks apart. Each window is small (98 bars) and cached by
-   * (symbol, start, length), so repeated loads of the same page are free.
+   * The current price is looked up once per coin. The price HISTORY cannot be
+   * shared, because each analysis is judged from its own moment in time — so
+   * that is one request per row. They are small and cached.
    */
   private async statusBySymbol(
     rows: Array<{ id: string; symbol: string; createdAt: Date; coordinatorPayload: unknown }>,
@@ -259,8 +231,8 @@ export class AnalysesController {
     const perSymbol = new Map(
       await Promise.all(
         symbols.map(async (coin) => {
-          // A failure here must not take the page down: a coin Binance cannot
-          // serve loses its status, not its row.
+          // A failure here must not take the page down: the row still shows,
+          // just without a result.
           const [price, newest] = await Promise.all([
             this.binance.getCurrentPrice(coin).catch(() => NaN),
             this.prisma.coordinatorRun.findFirst({
@@ -274,9 +246,9 @@ export class AnalysesController {
       ),
     );
 
-    // One window per row, in bounded batches. A row whose candles cannot be
-    // fetched scores UNSCOREABLE rather than being scored against someone
-    // else's window.
+    // One history request per row, a few at a time. A row whose history cannot
+    // be loaded is marked unscoreable rather than judged against the wrong
+    // stretch of time.
     const perRow = new Map<string, Candle[]>();
     for (let i = 0; i < rows.length; i += OUTCOME_FETCH_CONCURRENCY) {
       const batch = await Promise.all(
@@ -324,8 +296,7 @@ export class AnalysesController {
         continue;
       }
 
-      // Score only the lead plan — the card shows one line, and scoring both
-      // then discarding one is work for a number nobody reads.
+      // Only the lead plan: the card shows one line.
       const [scored] = scorePlans(
         [lead],
         (perRow.get(row.id) ?? []).filter(
@@ -339,9 +310,8 @@ export class AnalysesController {
         direction: scored.direction,
         outcome: scored.outcome,
         r: scored.r,
-        // Straight from the scorer, which charges the round trip on the size
-        // actually acquired. Re-deriving it here is what let the card and the
-        // verdict print two different numbers for one trade.
+        // Taken straight from the scorer. Working it out again here is how the
+        // card and the summary ended up showing two different numbers.
         netR: scored.netR,
         freshness,
         filledAt: scored.filledAt,
@@ -390,9 +360,8 @@ export class AnalysesController {
 
     const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
 
-    // Everything the two verdicts need, in one round of I/O: the price the
-    // chart wants anyway, the newest analysis for this symbol, and the
-    // candles since this one was taken.
+    // Everything the page needs, fetched together: the current price, the
+    // newest analysis for this coin, and the price history since this one.
     const [currentPrice, newestRow, candles] = await Promise.all([
       this.binance.getCurrentPrice(row.symbol),
       this.prisma.coordinatorRun.findFirst({
@@ -400,9 +369,8 @@ export class AnalysesController {
         orderBy: { createdAt: 'desc' },
         select: { coordinatorPayload: true },
       }),
-      // 1h is the finest series paged cheaply, so a stop or target touched
-      // intraday is not missed by a coarser candle. Anchored at the analysis,
-      // not at now — see OUTCOME_CANDLES.
+      // Hourly bars, so a stop or target touched during the day is not missed.
+      // Starting at the analysis, not at now.
       this.binance
         .getCandlesFrom(
           row.symbol,
@@ -420,8 +388,8 @@ export class AnalysesController {
       currentPrice,
       newest?.map ? { map: newest.map } : null,
     );
-    // Strictly after the analysis: a candle already forming when it was taken
-    // must not be allowed to "fill" a plan retroactively.
+    // Strictly after the analysis: the hour already in progress when it was
+    // taken must not be allowed to open the trade after the fact.
     const outcomes = scorePlans(
       analysis.plans,
       candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
@@ -442,21 +410,15 @@ export class AnalysesController {
   }
 
   /**
-   * Claude's read of an analysis, written once and kept.
+   * A written explanation of an analysis, produced once and kept.
    *
-   * On demand rather than on every scheduled run: at thirty analyses a day
-   * that is thirty model calls for the two or three anyone opens. The result
-   * is cached in `aiPayload`, so a second visit costs nothing and the text
-   * never changes under you.
-   *
-   * Narration cannot alter the analysis. Every number was computed before
-   * this runs, and `PriceProvenanceError` discards the whole text if Claude
-   * cites a price nothing produced — a missing read is strictly better than
-   * an invented level.
+   * Only when someone asks, not on every scheduled run — most analyses are
+   * never opened. It cannot change the analysis: every number already exists
+   * before this runs, and the whole text is thrown away if it quotes a price
+   * that nothing computed.
    */
   @Post(':id/narrate')
-  // One a minute: each call is a paid model request, and the answer is cached
-  // anyway, so there is no legitimate reason to hammer it.
+  // One a minute: each call costs money and the answer is saved anyway.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: "Write (or return) Claude's read of this analysis" })
   async narrate(@Param('id') id: string): Promise<SavedNarration> {
@@ -483,9 +445,8 @@ export class AnalysesController {
         regimeTimeframe: analysis.timeframes.regime,
       });
     } catch (err) {
-      // A missing key, a refusal, or an invented price. All three mean "no
-      // narration", and none of them says anything about the analysis — so
-      // report it as the optional extra it is, not as a broken analysis.
+      // Whatever went wrong, the analysis itself is fine — the explanation is
+      // an optional extra, so report it as missing rather than as a failure.
       throw new HttpException(
         err instanceof Error ? err.message : 'Narration failed',
         HttpStatus.SERVICE_UNAVAILABLE,

@@ -1,15 +1,12 @@
 import type { APIGatewayProxyEventV2, Context } from 'aws-lambda';
 
 /**
- * Calls the real handler with the event shape API Gateway actually sends.
+ * Calls the real AWS entry point with the kind of event AWS actually sends —
+ * no deploy needed, because it is just a function.
  *
- * This is how a Lambda is tested without AWS: the handler is just a function,
- * so you call it with an event and assert on what it returns. No server, no
- * deploy, no `sam local` needed for the basics.
- *
- * What it proves: the app boots inside Lambda, routing works, the guard is
- * applied, and the response is shaped the way API Gateway requires. Those are
- * the four things that break first when moving a working app to Lambda.
+ * Proves the four things that break first when moving an app to AWS: it
+ * starts, routing works, logins are checked, and the response is the shape
+ * AWS requires.
  */
 describe('lambda handler', () => {
   const event = (

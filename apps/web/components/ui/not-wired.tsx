@@ -8,11 +8,9 @@ interface NotWiredProps {
 }
 
 /**
- * Stands in for a panel whose feature flag is off.
- *
- * Deliberately visible rather than rendered as nothing: an empty dashboard
- * reads as broken, and a placeholder that names what is missing reads as
- * scaffolding. It also keeps the flag's effect obvious while wiring.
+ * Placeholder for a panel that is switched off. Deliberately visible: an empty
+ * space reads as broken, while a label saying what is missing reads as
+ * unfinished.
  */
 export function NotWired({ title, detail, className }: NotWiredProps) {
   return (

@@ -5,13 +5,10 @@ import { useNarrate } from '@/lib/hooks/use-analyses';
 import type { Freshness, SavedNarration, Verdict } from '@/types/analyses';
 
 /**
- * What this analysis amounts to, before any of the numbers.
+ * What the analysis amounts to, before the numbers. Two layers:
  *
- * Two layers, and the difference matters:
- *   verdict    computed in TypeScript, always present, restates the struct
- *   narration  Claude's read, on request, may decline — and cannot change a
- *              number, because a cited price with no computed source throws
- *              the whole text away
+ *   verdict    plain code, always there, just restates what was computed
+ *   narration  the AI's explanation, only on request, and it can decline
  */
 
 const TONE: Record<Freshness, string> = {
@@ -21,13 +18,10 @@ const TONE: Record<Freshness, string> = {
 };
 
 /**
- * The narration arrives as Markdown and was being printed raw, so headings
- * showed up as `## What this comes to` and emphasis as `**Long.**`.
+ * The AI writes in Markdown, so it needs formatting rather than printing raw.
  *
- * ponytail: no Markdown library. The prompt asks for prose under plain
- * headings — no tables, no lists — so the whole grammar is `##`, `**bold**`,
- * `*italic*`, and blank-line paragraphs. Reach for react-markdown the day the
- * prompt starts asking for something this cannot draw.
+ * TODO: no Markdown library — only headings, bold, italic and paragraphs are
+ * handled, which is all the prompt asks for. Add one if that changes.
  */
 const INLINE = /(\*\*[^*]+\*\*|\*[^*\n]+\*|\$\s?[\d,]+(?:\.\d+)?)/g;
 

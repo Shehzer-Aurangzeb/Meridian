@@ -1,19 +1,11 @@
 /**
- * The playbook, distilled for a single Claude call.
+ * The trading method, boiled down to what fits in one AI request. The full
+ * document is thousands of lines, most of it examples and screenshots that do
+ * not change how a setup is read.
  *
- * The full extract is ~6,100 lines — far too large to send per analysis, and
- * most of it is worked examples, tool screenshots and psychology chapters that
- * do not change how a setup should be read. What survives here is the part
- * that governs INTERPRETATION: what the method values, what it avoids, and
- * what it treats as invalidation.
- *
- * Deliberately excluded: entry/stop/target arithmetic. Those are computed in
- * TypeScript and are immutable by the time Claude sees them. Including the
- * formulas would invite the model to recompute and disagree, which is exactly
- * the failure the provenance check exists to catch.
- *
- * Page references are to `docs/MIRAJ CRYPTO TRADING STRATEGY - COMPLETE
- * PLAYBOOK.pdf` so any line here can be audited against the source.
+ * The entry, stop and target formulas are deliberately left OUT: those are
+ * already calculated, and including them would invite the model to work them
+ * out again and disagree.
  */
 export const PLAYBOOK_RULES = `
 # THE METHOD (Miraj playbook, distilled)

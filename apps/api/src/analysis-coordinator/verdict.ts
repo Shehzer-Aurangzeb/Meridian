@@ -4,22 +4,15 @@ import { Freshness } from './freshness';
 import { PlanResult } from './outcome';
 
 /**
- * The analysis, in sentences.
+ * The analysis written out as sentences.
  *
- * ─── Why this is not Claude's job ────────────────────────────────────────
- * Nothing here is interpretation. Every clause restates a number that was
- * already computed — which zone, how far, what it risks, what happened since.
- * A model is not needed to read a struct out loud, and one that did would be
- * a moving part that can fail, cost money, and occasionally lie.
- *
- * Claude's narration is a separate, optional thing: it says what the numbers
- * MEAN in context, and it can decline. This always renders.
- *
- * Lives beside `freshness` and `outcome` rather than in the frontend because
- * those two are its inputs, it is pure, and the CLI wants it too.
+ * Nothing here is interpretation — every phrase just reads back a number that
+ * was already worked out. That is why it is plain code and not an AI: it
+ * cannot fail, cost money, or make something up. The AI explanation is a
+ * separate, optional extra.
  */
 export interface Verdict {
-  /** One line — the whole analysis reduced to its point. */
+  /** One line: the whole analysis reduced to its point. */
   headline: string;
   /** Two to four plain sentences. */
   body: string[];
@@ -27,12 +20,7 @@ export interface Verdict {
   status: string | null;
 }
 
-/**
- * No locale games: this is read by one person, and `en-GB` is stable.
- *
- * The non-finite guards are for the formatter itself, not for missing fields —
- * the route rejects an incomplete payload before it reaches here.
- */
+/** Fixed number formatting, so the same value always reads the same way. */
 function num(value: number, dp: number): string {
   return Number.isFinite(value) ? value.toFixed(dp) : '—';
 }
@@ -58,9 +46,8 @@ const ROUTE_WORDS: Record<string, string> = {
 };
 
 /**
- * The plan worth leading with: one that can be taken now, else one that is
- * close, else whichever is nearest. Not "the best" — the tool does not pick a
- * side, and both plans stay on the page.
+ * Which plan to lead with: one that can be taken now, else one that is close,
+ * else the nearest. Not "the best" — both plans stay on the page.
  */
 export function leadPlan(plans: TradePlan[]): TradePlan | null {
   if (plans.length === 0) return null;
@@ -74,13 +61,7 @@ export function leadPlan(plans: TradePlan[]): TradePlan | null {
   );
 }
 
-/**
- * R as a person reads it, always NET of the round trip.
- *
- * Gross flatters every sentence on the page, and the card beside this one has
- * shown net since it was written — one trade with two numbers on one screen is
- * worse than either number alone.
- */
+/** The result as a person reads it, always after fees. */
 const rr = (r: PlanResult, whenNull: string): string =>
   r.netR === null
     ? whenNull
@@ -123,7 +104,7 @@ export function buildVerdict(
     };
   }
 
-  // Index-aligned: scorePlans maps over plans in order.
+  // Results come back in the same order as the plans.
   const outcome = outcomes[plans.indexOf(lead)];
 
   const headline =
@@ -153,9 +134,7 @@ export function buildVerdict(
       `against ${lead.targets.length} target${lead.targets.length === 1 ? '' : 's'} that blend to ${num(lead.blendedR, 2)}R.`,
   );
 
-  // The lead plan's OWN checklist. Reading a single shared one printed the
-  // opposite side's score next to this plan whenever the trend disagreed with
-  // the zone.
+  // This plan's own checklist — not the other direction's.
   const leadChecklist = record.checklists?.[lead.direction];
   const checklistClause = leadChecklist
     ? ` ${leadChecklist.conditionsMet} of 5 entry conditions are met for the ${lead.direction}.`

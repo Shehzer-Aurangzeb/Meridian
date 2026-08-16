@@ -8,12 +8,11 @@ import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
 
 /**
  * One analysis, readable without opening it: what it said, where price is now
- * relative to every level it set, and which targets were reached.
+ * against every level it set, and which targets were reached.
  *
- * The ladder is the whole idea — prices sorted high to low with a "now" line
- * inserted at its position. That single rule draws a long (stop below, targets
- * above) and a short (the reverse) with no branch, and the live price walks the
- * line up and down the card.
+ * All the prices are simply listed high to low with a "now" line slotted into
+ * place. That one rule draws both a buy and a sell with no special cases, and
+ * the live price walks up and down the card.
  */
 
 const OUTCOME_TONE: Record<string, string> = {
@@ -128,10 +127,16 @@ interface AnalysisCardProps {
   entry: AnalysisListItem;
   /** From the socket; falls back to the price the API scored against. */
   livePrice?: number;
+  /**
+   * Built by an earlier planner, so it is shown but not counted in the
+   * scoreboard. Labelled rather than hidden — a card whose numbers are real
+   * but excluded needs to say which, or it reads as an arithmetic error.
+   */
+  preEpoch?: boolean;
   onOpen: () => void;
 }
 
-export function AnalysisCard({ entry, livePrice, onOpen }: AnalysisCardProps) {
+export function AnalysisCard({ entry, livePrice, preEpoch, onOpen }: AnalysisCardProps) {
   const [expanded, setExpanded] = useState(false);
   const status = entry.status;
 
@@ -179,8 +184,18 @@ export function AnalysisCard({ entry, livePrice, onOpen }: AnalysisCardProps) {
         className="w-full text-left px-4 pt-3.5 pb-3 hover:bg-surface-hover/40 transition-colors"
       >
         <div className="flex items-baseline justify-between gap-3">
-          <span className="font-display text-lg font-semibold tracking-[0.04em] uppercase text-text-primary">
-            {entry.symbol}
+          <span className="flex items-baseline gap-2 min-w-0">
+            <span className="font-display text-lg font-semibold tracking-[0.04em] uppercase text-text-primary">
+              {entry.symbol}
+            </span>
+            {preEpoch && (
+              <span
+                title="Built by an earlier version of the planner — shown, but not counted in the scoreboard above"
+                className="text-[9px] font-semibold tracking-[0.12em] uppercase px-1.5 py-0.5 rounded bg-primary/[0.08] text-text-tertiary shrink-0"
+              >
+                not counted
+              </span>
+            )}
           </span>
           <span className="font-mono text-[11px] text-text-tertiary tabular-nums">
             {formatRelative(entry.createdAt)}

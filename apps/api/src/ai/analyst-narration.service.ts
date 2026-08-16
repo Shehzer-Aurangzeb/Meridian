@@ -42,21 +42,13 @@ export class PriceProvenanceError extends Error {
 }
 
 /**
- * AnalystNarrationService
+ * Asks Claude to EXPLAIN the analysis, never to produce it. Every price and
+ * every number already exists before this runs and cannot be changed by it.
  *
- * Claude's only job here is INTERPRETATION. Every number — spot, zones,
- * entries, stop, targets, R multiples — is computed in TypeScript before this
- * runs and is immutable by the time the model sees it.
- *
- * The division is enforced, not requested. `assertProvenance` extracts every
- * `$`-prefixed figure from the response and rejects the whole narration if any
- * of them fails to trace to a computed value. A model that quietly rounds is
- * fine; a model that invents a support level at a price nothing computed is
- * not, and a warning in a log would be read by nobody.
- *
- * Superseded: `ClaudePromptService` / `ClaudeService.analyzeWithChecklist`
- * asked Claude to PRODUCE entry, stop and targets. That contract is the thing
- * this replaces — it is exactly the freedom that has to be removed.
+ * That split is enforced rather than requested: every price in the reply is
+ * checked against the computed ones, and the whole explanation is thrown away
+ * if any of them cannot be traced. Rounding is fine; inventing a level is not,
+ * and a warning in a log would never be read.
  */
 @Injectable()
 export class AnalystNarrationService {
@@ -65,15 +57,8 @@ export class AnalystNarrationService {
   private client?: Anthropic;
 
   /**
-   * Built on first use, not in the constructor.
-   *
-   * Nest instantiates every provider at boot, so throwing here for a missing
-   * key took down the WHOLE APPLICATION — including routes that never
-   * narrate. On Lambda that means a cold start that dies instead of serving,
-   * for a key the served routes do not need. Found by lambda.spec.ts.
-   *
-   * Still fails closed, just at the right moment: narration without a key is
-   * impossible and says so, while everything else runs.
+   * Set up on first use, not at startup. A missing API key must fail only the
+   * explanation, not take down the whole app for the pages that never use it.
    */
   private anthropic(): Anthropic {
     if (!this.client) {
@@ -93,29 +78,15 @@ export class AnalystNarrationService {
     const allowed = this.allowedPrices(input);
     const prompt = this.buildPrompt(input);
 
-    // ─── Everything here is in service of one hard number ───────────────
-    // API Gateway's integration timeout is 30s and cannot be raised (Lambda's
-    // own limit is 120s, so it is not the constraint). At defaults this call
-    // measured 45s and the gateway hung up before the narration returned.
+    // These settings exist to stay under a hard 30-second limit imposed by
+    // the hosting, which cannot be raised. At the defaults this took about 45
+    // seconds and the request was cut off before the answer came back. Less
+    // thinking is safe here: the task is to read numbers aloud, not solve
+    // anything.
     //
-    //   effort medium   less thinking; this reads computed numbers, it does
-    //                   not solve anything
-    //   max_tokens      caps thinking PLUS text together — 8000 is ~4x the
-    //                   measured spend, so it bounds the tail without
-    //                   truncating a 450-650 word read
-    //
-    // NOT fast mode: `speed: 'fast'` would be the ideal lever here (same
-    // model, up to 2.5x output tokens/sec) but this org is provisioned at
-    // *zero* fast-mode tokens per minute, so every request 429s. Revisit if
-    // that quota is ever granted.
-    //
-    // Measured on one LTC analysis, Claude call only:
-    //   default (high)  ~45s   1906 out   — times out
-    //   medium          ~21s   1453 out   — shipped
-    //   low             ~18s   1211 out   — 3s cheaper, visibly terser
-    // `low` is the lever if this creeps back over. Do NOT disable thinking:
-    // on this model that makes it emit tool calls as plain text and leak
-    // <thinking> tags, and it is the more expensive lever anyway.
+    // TODO: if this creeps back over the limit, reduce the effort one more
+    // step. Do not turn thinking off entirely — that makes the model misbehave
+    // in other ways.
     const response = await this.anthropic().messages.create({
       model: this.model,
       output_config: { effort: 'medium' },
@@ -162,11 +133,9 @@ export class AnalystNarrationService {
   // ════════════════════════════════════════════════════════════════════
 
   /**
-   * Every price the narration is permitted to mention.
-   *
-   * Anything derived from these — a midpoint, an average, a level "just
-   * below" — is NOT permitted. If a number is worth saying, it should have
-   * been computed.
+   * The only prices the explanation is allowed to mention. Anything worked out
+   * from them — a midpoint, an average — is not allowed. If a number is worth
+   * saying, the code should have calculated it.
    */
   allowedPrices(input: NarrationInput): number[] {
     const prices: number[] = [input.map.spot, input.map.atr];
@@ -191,16 +160,11 @@ export class AnalystNarrationService {
   }
 
   /**
-   * Reject the narration if it cites a price nothing computed.
+   * Throws the explanation away if it quotes a price nothing computed.
    *
-   * Only `$`-prefixed figures are checked, which is why the prompt requires
-   * prices to be written that way: percentages, R multiples and touch counts
-   * are legitimately Claude's own arithmetic over given values, and treating
-   * every number as a price claim would make the check unusable.
-   *
-   * Rounding is allowed by comparing at the precision Claude used — "$73"
-   * matches a computed 73.48, "$74" does not. That permits readable prose
-   * without permitting invention.
+   * Only figures written with a dollar sign are checked — percentages and
+   * ratios are the model's own arithmetic and are allowed. Rounding passes:
+   * "$73" matches a computed 73.48, "$74" does not.
    */
   assertProvenance(text: string, allowed: number[]): number[] {
     const cited: number[] = [];

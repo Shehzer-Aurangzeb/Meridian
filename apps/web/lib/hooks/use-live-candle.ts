@@ -14,15 +14,13 @@ export interface LiveCandle {
 const MAX_BACKOFF_MS = 30_000;
 
 /**
- * The candle currently forming, straight from Binance's WebSocket.
+ * The bar currently forming, streamed live from the exchange.
  *
- * Browser-side, unlike /api/candles: a socket cannot be proxied through a Next
- * route handler without holding a server connection open per viewer, which is
- * a lot of machinery for a price tick. The cost is that this is the one piece
- * of Meridian a blocked region loses — so every consumer must treat `connected`
- * as false being normal, and fall back to the price the API returned.
- *
- * `close` is the live price: Binance updates the forming candle on every trade.
+ * This one runs in the BROWSER, unlike the rest — a live stream cannot be
+ * passed through our server without holding a connection open per visitor.
+ * The cost is that it is the one thing a blocked country loses, so every user
+ * of this must treat "not connected" as normal and fall back to the last
+ * price the API gave.
  */
 export function useLiveCandle(symbol: string | undefined, interval: string) {
   const [candle, setCandle] = useState<LiveCandle | null>(null);

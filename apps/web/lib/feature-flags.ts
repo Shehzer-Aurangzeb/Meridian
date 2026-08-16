@@ -4,12 +4,9 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
 }
 
 /**
- * What is actually wired to the backend.
- *
- * A flag is true only when the screen behind it reads a live endpoint. Off
- * means the UI exists but its data does not — mock arrays, or a hook pointing
- * at a route that was deleted. Turning one on before its rewire gives you a
- * screen that 404s, which is worse than one that says it is not ready.
+ * Which screens are actually connected to real data. Off means the screen
+ * exists but its data does not. Turning one on early gives a page that fails,
+ * which is worse than one that says it is not ready.
  */
 export const FEATURES = {
   DASHBOARD: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_DASHBOARD, true),

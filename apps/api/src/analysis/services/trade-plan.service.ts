@@ -2,64 +2,38 @@ import { Injectable } from '@nestjs/common';
 import { ConfluenceZone } from '../interfaces/support-resistance.types';
 
 /**
- * How close price is to a zone. Purely a statement about distance — it makes
- * no claim about what happens next, which is the whole point: "price is 2.1%
- * from a zone" is checkable, "this will bounce" is not.
+ * How close price is to a zone. A statement about distance only — it says
+ * nothing about what price will do next, on purpose.
  */
 export type ZoneState = 'ACTIONABLE' | 'APPROACHING' | 'FAR';
 
 /**
- * Distance bands, measured to the NEAR EDGE of the zone (the edge price
- * reaches first), not its centre — the question is "how far until I can act".
- *
- * These are the only tunable numbers left in the analysis path, and unlike
- * the thresholds they replaced they are honest: they control what counts as
- * "close", not a claim about outcomes. Nothing is gated on them — every
- * direction always returns a full plan — so widening them cannot silence
- * the tool.
+ * What counts as "close", as a % away from the near edge of the zone — the
+ * edge price reaches first. Changing these changes labels only; a plan is
+ * still built either way.
  */
 export const ZONE_BANDS = { ACTIONABLE: 1.0, APPROACHING: 3.0 } as const;
 
 /**
- * Entry ladder, from the playbook's zone-entry procedure (p53, "STEP 6:
- * Entry Execution"): 20% at the first touch of the zone, 40% mid-zone, 40%
- * at the far edge. Its worked example is $200 / $400 / $400 on $1,000, which
- * confirms these weights arithmetically.
+ * How the position is built up: 20% when price first touches the zone, 40%
+ * in the middle, 40% at the far side. From the playbook's zone-entry steps.
  *
- * NOTE the playbook contradicts itself: the general "3-Entry Rule" (p11) says
- * 20/20/60, and STEP 6 labels its own third entry "heaviest at safest" while
- * giving it the same 40% as the second. STEP 6 is used because it is the
- * procedure being implemented — entering a confluence zone — and because its
- * arithmetic is explicit. Change here if the 60% version is preferred.
+ * TODO: the playbook also states a general 20/20/60 split elsewhere. This
+ * follows the zone-entry procedure; switch if the other one is preferred.
  */
 export const ENTRY_WEIGHTS = [20, 40, 40] as const;
 
-/** Take-profit split across successive zones (p14, TP1/TP2/TP3 = 33/33/34). */
+/** How the position is sold off across the next zones up (or down). */
 export const TARGET_WEIGHTS = [33, 33, 34] as const;
 
 /**
- * The ladder, rescaled to however many targets a zone map actually offered.
+ * Spreads the sell-off across however many targets actually exist, so the
+ * whole position always has somewhere to go.
  *
- * The weights are a SPLIT, not a set of absolute sizes: they answer "how do I
- * divide the position across the exits I have", and with two exits the answer
- * is 50/50, not 33/33 with a third of the position left holding nothing.
+ *   3 targets -> 33 / 33 / 34      2 targets -> 50 / 50      1 target -> 100
  *
- * Taking `TARGET_WEIGHTS.slice(0, n)` unscaled is what produced the stuck
- * positions: a plan with one target exited 33% of size at that target and the
- * other 67% had no exit rule at all, so it could never reach ALL_TARGETS and
- * rode to the end of the hold window — where it was marked to market at
- * whatever price happened to be there and booked as a large gain. 31% of live
- * plans (106 of 337) were built this way.
- *
- * Proportional, so the relative emphasis of the playbook's split survives:
- *   3 targets -> 33 / 33 / 34   (already sums to 100 — bit-identical, asserted)
- *   2 targets -> 50 / 50
- *   1 target  -> 100
- *   0 targets -> []             (nothing to divide; no target exit exists)
- *
- * Note what this does NOT fix: a plan with zero targets still has no way to
- * close on profit. That is not a weight bug — there is no exit to weight — and
- * it is a question about whether such a plan should be printed at all.
+ * Without this, a plan with one target sold only a third and the rest had no
+ * exit at all, so it drifted to the end of the hold window every time.
  */
 export function renormaliseTargetWeights(count: number): number[] {
   const taken = TARGET_WEIGHTS.slice(0, count);
@@ -69,11 +43,9 @@ export function renormaliseTargetWeights(count: number): number[] {
 }
 
 /**
- * Stop distance beyond the zone, in ATR multiples.
- *
- * "Stop Loss Price = Support Level − ATR Value" (p17). Anchored to the ZONE,
- * not to the entry: what invalidates the idea is price leaving the structure,
- * and the ATR is wick protection so a normal-sized probe does not stop you.
+ * How far past the zone the stop sits, as a multiple of recent volatility
+ * (ATR). Measured from the ZONE, not the entry: the idea is wrong when price
+ * leaves the zone, and the extra distance stops a normal-sized dip closing it.
  */
 export const STOP_ATR_MULTIPLE = 1.0;
 
@@ -93,53 +65,39 @@ export interface TradePlan {
   direction: 'long' | 'short';
   state: ZoneState;
   zone: ConfluenceZone;
-  /** Distance to the near edge, signed. Negative = zone is below spot. */
+  /** % to the near edge. Negative means the zone is below the current price. */
   distanceToZonePercent: number;
   entries: PlanEntry[];
   averageEntry: number;
   stop: number;
-  /** Loss at the stop, as a percentage of average entry. */
+  /** What a full stop-out loses, as a % of the entry price. */
   riskPercent: number;
-  /** Price move per unit of risk — what one R is worth in price terms. */
+  /** What 1R is worth in price: the gap from average entry to stop. */
   riskPerUnit: number;
   targets: PlanTarget[];
   /**
-   * Weighted R across the take-profit ladder — the number that decides
-   * whether the plan is worth taking.
-   *
-   * Reported because TP1 alone is routinely below 1R: targeting successive
-   * zones puts the first exit wherever the next zone happens to be, and in
-   * dense structure that is close. A 0.65R first target is not a defect, but
-   * it is only acceptable because the later ones carry the blend.
-   *
-   * Now that the weights are renormalised this is a genuine weighted mean.
-   * Before, a one-target plan reported a THIRD of its own target's R, because
-   * the ladder's other two thirds were multiplied by nothing.
+   * Average reward across all the targets, weighted by how much is sold at
+   * each. The first target is often worth less than the risk, because it sits
+   * at the next zone rather than at a chosen multiple — the later ones carry
+   * the average.
    */
   blendedR: number;
   comeBackWhen: string;
 }
 
 /**
- * TradePlanService
+ * Turns a price zone into a full plan: where to enter, where the idea is
+ * wrong, where to take profit, and what has to happen for it to go live.
  *
- * Turns a confluence zone into a complete, checkable plan: where to enter,
- * where the idea is wrong, where to take profit, and what has to happen for
- * it to become live.
- *
- * Pure arithmetic on numbers computed upstream. Every price it emits is
- * derived from a zone edge, a zone centre, or an ATR offset from one — never
- * invented — which is what lets the narration layer be checked against it.
+ * Every price it produces comes from a zone edge, a zone centre, or a fixed
+ * offset from one. None are invented.
  */
 @Injectable()
 export class TradePlanService {
   /**
-   * Best plan for each direction: the nearest zone below spot is where a long
-   * goes, the nearest above is where a short goes.
-   *
-   * Both are always returned when a zone exists on that side. The tool does
-   * not decide which side you should take — that is a prediction, and it does
-   * not make those.
+   * One plan per direction: the nearest zone below the price for a buy, the
+   * nearest above for a sell. Both are returned — the tool does not pick a
+   * side for you.
    */
   buildPlans(
     zones: ConfluenceZone[],
@@ -149,18 +107,15 @@ export class TradePlanService {
     const below = zones.filter((z) => z.high < spot);
     const above = zones.filter((z) => z.low > spot);
 
-    // Nearest on each side. Zones straddling spot are skipped: price is
-    // already inside them, so there is no approach to plan and no clean edge
-    // to anchor a stop to.
+    // Zones the price is already sitting inside are skipped: there is nothing
+    // to wait for and no clean edge to put a stop behind.
     const nearestBelow = below.sort((a, b) => b.high - a.high)[0];
     const nearestAbove = above.sort((a, b) => a.low - b.low)[0];
 
-    // A plan with no zone ahead of its entry has no profit exit — its only
-    // reachable outcomes are the stop and the end of the hold window. Across
-    // the 626 backtested trades those were 57 plans at −1.08R resolved, every
-    // resolved one a stop-out, because there was nothing else for them to hit.
-    // "Never exit at random prices" (p14) rules out inventing an R-multiple
-    // target, so the honest answer is not to print the plan.
+    // A plan with no zone ahead of it has nowhere to take profit, so the only
+    // way it can end is at the stop. In the backtest every one of those lost.
+    // Targets must sit at real levels, so rather than invent one, do not show
+    // the plan at all.
     const plans: TradePlan[] = [];
     for (const [zone, direction] of [
       [nearestBelow, 'long'],
@@ -186,16 +141,16 @@ export class TradePlanService {
   ): TradePlan {
     const long = direction === 'long';
 
-    // Near edge = the one price reaches first. Falling into a support zone
-    // touches its top; rising into a resistance zone touches its bottom.
+    // Near edge = the side price reaches first: the top of a zone below, the
+    // bottom of a zone above.
     const nearEdge = long ? zone.high : zone.low;
     const farEdge = long ? zone.low : zone.high;
 
     const distanceToZonePercent = ((nearEdge - spot) / spot) * 100;
     const state = this.classify(Math.abs(distanceToZonePercent));
 
-    // Ladder walks from the first touch to the far edge — heaviest at the
-    // better price, which is the point of scaling in.
+    // Buy in from the first touch to the far side, most of it at the better
+    // price.
     const entries: PlanEntry[] = [
       { price: nearEdge, weightPercent: ENTRY_WEIGHTS[0] },
       { price: zone.center, weightPercent: ENTRY_WEIGHTS[1] },
@@ -246,10 +201,9 @@ export class TradePlanService {
   }
 
   /**
-   * Targets are the next zones in the direction of travel — "Never exit at
-   * random prices. Always exit at marked resistance levels" (p14). A fixed R
-   * multiple would put the target wherever the arithmetic lands rather than
-   * where sellers actually are.
+   * Targets are the next zones in the direction of the trade. Never a round
+   * number or a fixed multiple — exits go where other traders are already
+   * acting, not where the arithmetic happens to land.
    */
   private buildTargets(
     allZones: ConfluenceZone[],
@@ -266,13 +220,12 @@ export class TradePlanService {
       )
       .slice(0, TARGET_WEIGHTS.length);
 
-    // Rescaled to the number of zones actually ahead, so the exits always
-    // account for the whole position rather than a third of it.
+    // Spread across however many zones are actually ahead.
     const weights = renormaliseTargetWeights(ahead.length);
 
     return ahead.map((z, i) => ({
-      // Exit at the edge price reaches first — waiting for the far side of a
-      // zone to fill is how a target gets missed by a few ticks.
+      // Sell at the near side of the zone. Waiting for the far side is how a
+      // target gets missed by a few cents.
       price: long ? z.low : z.high,
       weightPercent: weights[i],
       rMultiple:

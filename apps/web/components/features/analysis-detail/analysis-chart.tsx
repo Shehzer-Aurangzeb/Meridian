@@ -20,15 +20,11 @@ import type { LiveCandle } from '@/lib/hooks/use-live-candle';
 import type { AnalysisRecord, Direction, TradePlan } from '@/types/analyses';
 
 /**
- * The analysis, drawn.
+ * The analysis, drawn. Every line is a price the analysis already worked out,
+ * so the chart cannot disagree with the cards below it.
  *
- * Every line here is a number the pipeline already computed — zone boundaries
- * from the level map, the ladder and stop and targets from the plan. Nothing
- * is derived in this component, so the chart cannot disagree with the cards
- * below it.
- *
- * ponytail: zones are their two boundary lines, not filled bands. A band needs
- * a custom series primitive; two lines carry the same information.
+ * TODO: zones are drawn as their two edges rather than a shaded band, which
+ * would need a custom chart element for no extra information.
  */
 
 // 1m and 5m exist so candle formation is actually watchable. On 1h the socket
@@ -49,15 +45,11 @@ const BAR_SECONDS: Record<Interval, number> = {
 
 const CANDLE_LIMIT = 500;
 /**
- * Bars of context to the left of the analysis.
+ * How much price history to show BEFORE the analysis.
  *
- * The window is anchored here rather than at now. "The most recent 500" is a
- * window an analysis older than 500 bars is not IN — and the marker below
- * snapped to the nearest bar in it, which put "analysed" on an unrelated
- * candle weeks from the real one, with no indication anything was wrong.
- *
- * The same anchoring for a fresh analysis costs nothing: it still runs to the
- * live edge, because the limit reaches past now.
+ * The chart is centred on the analysis rather than on today, because "the most
+ * recent 500 bars" does not contain an analysis from six weeks ago at all. For
+ * a recent one this costs nothing — it still runs up to the present.
  */
 const LEAD_BARS = 150;
 
@@ -132,12 +124,9 @@ export function AnalysisChart({
   } = useCandles(analysis.symbol, interval, CANDLE_LIMIT, windowStart);
 
   /**
-   * Does the loaded window run up to the present?
-   *
-   * The window is anchored at the analysis, so for an old one it ends weeks
-   * ago and the live socket has nothing to say about it. Everything live —
-   * the forming bar, the OHLC readout — is gated on this, because today's
-   * price shown over a chart of June is the same lie as the misplaced arrow.
+   * Does the chart reach up to now? For an older analysis it ends weeks ago,
+   * so everything live is switched off — today's price shown over a chart of
+   * June would be simply wrong.
    */
   const windowReachesNow =
     !!candles?.length &&
@@ -230,14 +219,13 @@ export function AnalysisChart({
       fittedRef.current = key;
     }
 
-    // Where the analysis was taken. Without it the levels read as arbitrary
-    // rather than as something computed from the candles to its left.
+    // Marks when the analysis was taken, so the levels read as something
+    // worked out from the bars to its LEFT.
     //
-    // The bar it belongs on is the one whose period CONTAINS the analysis, not
-    // whichever bar is closest — closest has no upper bound, so an analysis
-    // outside the loaded range used to snap to the nearest edge of it and put
-    // the arrow on an unrelated candle. If the window does not contain the
-    // moment, no marker: an arrow in the wrong place is worse than none.
+    // It goes on the bar whose hour CONTAINS that moment, not the nearest one
+    // — "nearest" has no limit, so an analysis outside the chart used to snap
+    // to the edge and land on an unrelated bar. If the moment is not on the
+    // chart, no marker at all: an arrow in the wrong place is worse than none.
     const at = Math.floor(new Date(analysedAt).getTime() / 1000);
     const bar = candles.find((c) => at >= c.time && at < c.time + barSeconds);
     createSeriesMarkers(

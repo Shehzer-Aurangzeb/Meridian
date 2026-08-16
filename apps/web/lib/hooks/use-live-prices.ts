@@ -3,16 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Live price for every coin on the page, over ONE socket.
+ * Live prices for every coin on the page, over ONE connection — the exchange
+ * allows many coins on a single stream, and one costs the same as fifty.
  *
- * Binance combined streams take many symbols on a single connection, so
- * subscribing per visible card would add an IntersectionObserver and
- * subscribe/unsubscribe churn to optimise a resource that costs the same
- * whether one card is on screen or fifty.
- *
- * ponytail: flushed on an interval rather than per message. Ten coins at
- * ~1 message/sec each would otherwise re-render the whole list ten times a
- * second for prices that move in the fourth decimal.
+ * Updates are applied on a timer rather than on every message: ten coins
+ * ticking once a second would otherwise redraw the whole list ten times a
+ * second for changes in the fourth decimal place.
  */
 const FLUSH_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;

@@ -6,24 +6,9 @@ import {
 } from '../../indicators/interfaces/indicator.types';
 
 /**
- * IndicatorContext
- *
- * A single, immutable bundle of market data + pre-computed indicator
- * baselines for a given symbol/timeframe. Built ONCE at the start of an
- * analysis pipeline and shared across every downstream service
- * (regime classifier, squeeze breakout, checklist, etc.).
- *
- * This pattern eliminates:
- *   - Duplicate Binance candle fetches per request.
- *   - Redundant RSI/BB/ADX/QQE recomputation across services.
- *
- * Services that previously did their own I/O + math should now expose a
- * `*FromContext(context: IndicatorContext)` variant. Their original
- * `(symbol, timeframe)` signatures should delegate to the context-based
- * implementation so they remain usable in isolation.
- *
- * Mathematically equivalent to the legacy per-service pipelines —
- * we only de-duplicate work, never alter inputs or calculations.
+ * One bundle of price data and every measurement taken from it, built once at
+ * the start of an analysis and passed to everything that needs it. Nothing
+ * downstream fetches or recalculates, so no two parts can disagree.
  */
 export interface IndicatorContext {
   /** Symbol the context was built for (uppercase). */

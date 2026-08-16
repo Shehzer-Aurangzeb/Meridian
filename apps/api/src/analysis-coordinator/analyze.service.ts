@@ -20,16 +20,13 @@ import {
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 
 /**
- * One analysis, complete: everything the CLI prints, everything a saved row
- * holds, everything a chart needs to draw. One shape for all three, because
- * a saved analysis that cannot be reproduced locally is not a record.
- *
- * JSON-serialisable by construction — it goes straight into the
- * `CoordinatorRun.coordinatorPayload` Json column.
+ * One complete analysis: what the command line prints, what gets saved, and
+ * what the chart draws. One shape for all three, so a saved analysis can
+ * always be reproduced.
  */
 export interface AnalysisRecord {
   symbol: string;
-  /** Every timeframe is a declared decision; all four are surfaced. */
+  /** Which chart each part was measured on. Always stated, never assumed. */
   timeframes: {
     levels: Timeframe[];
     fib: Timeframe;
@@ -39,19 +36,9 @@ export interface AnalysisRecord {
   regime: CoordinatorAnalysisResult['regimeResult'];
   route: CoordinatorAnalysisResult['strategyRoute'];
   /**
-   * One checklist PER PLAN DIRECTION, on the CONFLUENCE_CHECKLIST route.
-   *
-   * Was a single result, which was wrong because the level leg emits a long
-   * AND a short from the same map while the checklist scores one side. With
-   * no direction passed, the coordinator derived one from trend and that
-   * single verdict was attached to both legs, so the opposite leg carried a
-   * checklist scored for the trade it was not.
-   *
-   * The derived side is also systematically unsatisfiable: HH/HL derives
-   * `long`, which needs RSI <= 40 and price at the LOWER band, but an uptrend
-   * sits high on both. Across 84 days of saved analyses the RSI and Bollinger
-   * conditions passed 0 times out of 31; scored per leg they pass 14%/24% and
-   * 10%/14%. See checklist-wiring.spec.ts bug C.
+   * One checklist per direction. A buy plan and a sell plan come out of the
+   * same map, and a checklist only makes sense for one side at a time — a
+   * single shared one put the wrong side's score next to half the plans.
    */
   checklists: Partial<
     Record<'long' | 'short', NonNullable<CoordinatorAnalysisResult['checklistResult']>>
@@ -63,23 +50,10 @@ export interface AnalysisRecord {
 }
 
 /**
- * AnalyzeService
+ * Puts the whole analysis together: what kind of market this is, and where
+ * the levels and plans are.
  *
- * The whole analysis, assembled in one place.
- *
- * This composition used to live ONLY inside `test/manual/analyze.ts`, which
- * meant nothing in `src/` could produce a full analysis: not a route, not a
- * scheduled job, not a Lambda. The coordinator handles the regime leg and
- * `LevelMapService` the level leg, but nobody joined them.
- *
- * Lives in the coordinator module rather than the analysis module because it
- * needs both, and `AnalysisCoordinatorModule` already imports `AnalysisModule`
- * — the other direction would be a cycle.
- *
- * Note what this does NOT do: print, persist, or call Claude. Those are
- * caller policy. The CLI prints and writes JSONL (it must run without
- * Docker); the route persists to Postgres; `--ai` is a flag, not a pipeline
- * stage.
+ * It does not print, save, or call the AI — those are the caller's job.
  */
 @Injectable()
 export class AnalyzeService {
@@ -98,10 +72,8 @@ export class AnalyzeService {
     const startedAt = Date.now();
     const coin = symbol.toUpperCase();
 
-    // ── Regime leg ──────────────────────────────────────────────────────
-    // Its own 12h fetch at 250 candles: the bandwidth percentile needs a
-    // 200-sample history and the level map only fetches 120. Sharing them
-    // would silently degrade the percentile.
+    // What kind of market this is. Fetches its own, longer history: one of
+    // its measures compares today against the last 200 readings.
     const candles = await this.binanceService.getCandles(
       coin,
       ANALYSIS_TIMEFRAME,
@@ -114,25 +86,22 @@ export class AnalyzeService {
     );
     const regime = this.marketRegimeService.classifyFromContext(context);
 
-    // Route and squeeze setup read only the regime, so one call settles them.
+    // Both of these depend only on the market type, so one call settles them.
     const routed = this.coordinatorService.routeFromRegime(
       context,
       ANALYSIS_TIMEFRAME,
       regime,
     );
 
-    // ── Level leg ───────────────────────────────────────────────────────
-    // Independent of the regime leg by design: nothing here reads the
-    // regime, so a plan is never silently filtered by it. Whether it SHOULD
-    // be is the one untested idea left (STATE_OF_PLAY.md §14h).
+    // The levels and plans. Deliberately independent of the market type, so
+    // a plan is never quietly hidden because of it.
+    //
+    // TODO: whether plans SHOULD be filtered by market type is untested.
     const map = await this.levelMapService.build(coin);
     const plans = this.tradePlanService.buildPlans(map.zones, map.spot, map.atr);
 
-    // The checklist DOES depend on direction — it is a confirmation filter,
-    // and a filter has to be told which side it is confirming. Evaluated once
-    // per direction the level leg actually produced, which is the whole fix:
-    // `routeFromRegime` has always accepted `direction`, this caller just
-    // never passed it.
+    // The checklist confirms a trade, so it has to be told which side it is
+    // confirming. Run once for each direction a plan was built for.
     const checklists =
       routed.strategyRoute === 'CONFLUENCE_CHECKLIST'
         ? (Object.fromEntries(

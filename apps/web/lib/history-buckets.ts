@@ -1,12 +1,11 @@
 import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
 
 /**
- * Where an analysis stands, in the six buckets that answer "how is this
- * going" without opening anything.
+ * Where an analysis stands, in a handful of groups that answer "how is this
+ * going" without opening it.
  *
- * The win/lose split uses NET R, after the round-trip cost. Gross would flatter
- * every number on the page: §14h was +0.046R gross and −0.039R net, which is
- * the difference between "this works" and "this does not".
+ * Won or lost is decided AFTER fees. Before fees the same set of trades can
+ * look profitable while actually losing money.
  */
 export type Bucket =
   | 'openUp'
@@ -61,6 +60,11 @@ export function bucketOf(status: AnalysisStatus | null | undefined): Bucket {
   }
 }
 
+/** Was this analysis produced before the planner boundary? */
+export function isPreEpoch(row: AnalysisListItem, epoch: string | undefined): boolean {
+  return epoch !== undefined && Date.parse(row.createdAt) < Date.parse(epoch);
+}
+
 export interface ResultsSummary {
   counts: Record<Bucket, number>;
   /** Sum of net R over everything that filled. */
@@ -68,15 +72,26 @@ export interface ResultsSummary {
   total: number;
   filled: number;
   closed: number;
+  /**
+   * Rows left out of every number above because an older planner built them.
+   * Reported rather than quietly dropped: a total that silently covers fewer
+   * rows than the list below it is the same lie as hiding the rows outright.
+   */
+  excluded: number;
 }
 
 /**
- * The funnel matters as much as the split. "2 won, 1 lost" reads as a 67% win
- * rate; "2 won, 1 lost, 44 never started" is a different statement about the
- * tool, and it is the true one. Callers must show `total` and `filled`
- * alongside the buckets.
+ * The totals matter as much as the split, so callers must show how many
+ * analyses there were and how many actually opened, next to the groups.
+ *
+ * `epoch` leaves older analyses OUT of these numbers while they stay visible
+ * in the list: they were built by code with known bugs, so averaging them with
+ * current ones describes neither.
  */
-export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
+export function summariseResults(
+  rows: AnalysisListItem[],
+  epoch?: string,
+): ResultsSummary {
   const counts: Record<Bucket, number> = {
     openUp: 0,
     openDown: 0,
@@ -90,8 +105,13 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
   let netR = 0;
   let filled = 0;
   let closed = 0;
+  let excluded = 0;
 
   for (const row of rows) {
+    if (isPreEpoch(row, epoch)) {
+      excluded += 1;
+      continue;
+    }
     const bucket = bucketOf(row.status);
     counts[bucket] += 1;
     if (row.status?.netR != null) {
@@ -104,7 +124,8 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
     }
   }
 
-  return { counts, netR, total: rows.length, filled, closed };
+  // `total` is what the numbers describe, not how many rows were handed in.
+  return { counts, netR, total: rows.length - excluded, filled, closed, excluded };
 }
 
 /** The buckets a status filter offers, in the order they read best. */
