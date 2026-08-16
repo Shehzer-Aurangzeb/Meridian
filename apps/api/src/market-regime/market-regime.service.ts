@@ -9,42 +9,24 @@ import {
 } from './interfaces/market-regime.types';
 
 /**
- * MarketRegimeService
+ * Decides what kind of market this is, which then decides which approach the
+ * rest of the analysis takes:
  *
- * Acts as the "Master Switch" that classifies the current market state
- * (compression / trending / mean-reversion) so downstream strategy logic
- * can pick the appropriate playbook.
- *
- * Two entry points:
- *   - `classifyMarketRegime(symbol, timeframe)` — legacy convenience:
- *     fetches its own candles and builds an `IndicatorContext` internally.
- *     Kept for direct callers that don't yet share a context.
- *   - `classifyFromContext(ctx)` — preferred path used by
- *     `AnalysisCoordinatorService`. Pure transform on a pre-built
- *     context, no I/O, no re-computation.
- *
- * Mathematically identical between the two paths.
+ *   COMPRESSION      quiet and coiled, price barely moving
+ *   TRENDING         moving persistently in one direction
+ *   MEAN_REVERSION   drifting sideways
  */
 @Injectable()
 export class MarketRegimeService {
   private readonly logger = new Logger(MarketRegimeService.name);
 
   /**
-   * How many historical band-width samples the COMPRESSION percentile is
-   * measured over. A DECLARED CHOICE, not an accident of the fetch size.
+   * How many past readings "quiet" is measured against. Fixed on purpose: if
+   * it followed however much data happened to be loaded, fetching more history
+   * would silently change the answer.
    *
-   * This used to be "however many samples `bandWidthSeries` happened to
-   * contain", i.e. `candles - interval + 1 - 1`. Both the percentile rank
-   * AND the 15th-percentile cutoff (`sorted[idx]`) scale with that length,
-   * so raising the candle limit from 250 to 1000 silently moved the
-   * COMPRESSION verdict with nothing in the code or output explaining why.
-   *
-   * 200 samples: comfortably enough to estimate a 15th percentile, and
-   * available with headroom at the 250-candle default fetch
-   * (BB(20) over 250 closes yields ~230 samples).
-   *
-   * Below this we do NOT quietly compute over fewer — that is the behaviour
-   * being removed. We take the explicit fallback path instead, and say so.
+   * With fewer than this we use a simpler rule and say so, rather than quietly
+   * measuring against a shorter history.
    */
   private static readonly BANDWIDTH_PERCENTILE_LOOKBACK = 200;
 
@@ -68,13 +50,7 @@ export class MarketRegimeService {
     private readonly indicatorsService: IndicatorsService,
   ) {}
 
-  /**
-   * Classify the current market regime for a given symbol / timeframe.
-   *
-   * Convenience wrapper: fetches candles, builds an `IndicatorContext`,
-   * and delegates to `classifyFromContext`. Use this only when the caller
-   * does not already have a shared context.
-   */
+  /** Fetches its own data first. Use the version below if you already have it. */
   async classifyMarketRegime(
     symbol: string,
     timeframe: string,
@@ -95,19 +71,12 @@ export class MarketRegimeService {
   }
 
   /**
-   * Classify the market regime from a pre-built `IndicatorContext`.
+   * The classification itself, from measurements already taken. Checked in
+   * order:
    *
-   * Pure synchronous transform — no I/O, no recomputation. This is the
-   * preferred entry point from `AnalysisCoordinatorService`, which
-   * builds the context once and shares it across all downstream
-   * services.
-   *
-   * Rules (evaluated in order):
-   *   1. COMPRESSION    -> BB-width is in the bottom 15% of its historical
-   *                       range. If we don't yet have enough history we
-   *                       fall back to the strict rule: bandWidth < 1.5%.
-   *   2. TRENDING       -> ADX(14) > 25.
-   *   3. MEAN_REVERSION -> Otherwise (ADX <= 25 and not compressed).
+   *   1. quieter than 85% of its own history  -> COMPRESSION
+   *   2. trend strength above 25              -> TRENDING
+   *   3. otherwise                            -> MEAN_REVERSION
    */
   classifyFromContext(context: IndicatorContext): MarketRegimeResult {
     const { symbol, timeframe, candles, bandWidth, bandWidthSeries, adx, rsi, atr, bollingerBands } =

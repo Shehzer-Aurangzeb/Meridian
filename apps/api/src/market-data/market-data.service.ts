@@ -25,12 +25,7 @@ export class BinanceService {
     private readonly cacheTelemetry: CacheTelemetryService,
   ) {}
 
-  /**
-   * Fetches candle (OHLCV) data from Binance with caching
-   * @param symbol - Trading pair base (e.g., 'BTC', 'ETH') - automatically appends 'USDT'
-   * @param interval - Candle timeframe
-   * @param limit - Number of candles to fetch (max 1000)
-   */
+  /** Price bars from the exchange, cached. Max 1000 per request. */
   async getCandles(
     symbol: string,
     interval: TimeInterval,
@@ -71,34 +66,19 @@ export class BinanceService {
   }
 
   /**
-   * Fetch more than Binance's 1000-candle-per-request cap by walking
-   * backwards with `endTime`, then stitching the pages into one ascending
-   * series.
-   *
-   * Binance returns the `limit` candles ending at/before `endTime`, so each
-   * page asks for the candles immediately preceding the oldest one we hold.
-   *
-   * Used by the backtest harness (statistical power needs more than the
-   * 125 days a single 4h request yields) and available to
-   * `PerformanceService`, which currently over-fetches a recent window and
-   * slices in memory because it had no way to request a time range.
-   *
-   * @param symbol   Trading pair base (e.g. 'BTC')
-   * @param interval Candle timeframe
-   * @param total    How many candles to end up with
+   * More than 1000 bars, by asking for them a page at a time going backwards
+   * and joining the pages together. Used by the backtest, which needs years
+   * of history rather than the few months one request allows.
    */
   /**
-   * Candles FORWARD from a point in time, rather than backward from now.
+   * Bars going FORWARD from a moment in time, rather than backwards from now.
    *
-   * `getCandlesPaged` answers "the most recent N", which is the wrong question
-   * for scoring a saved analysis: an analysis taken 40 days ago was being
-   * replayed against the last 30 days, a window its entry was never in. The
-   * fill it recorded became invisible and a fresh one could be manufactured
-   * from a later touch of the same price.
+   * This is what judging a saved analysis needs: one from six weeks ago has to
+   * be replayed against the hours that followed IT, not against last week.
    *
-   * Returns at most `limit` candles starting at or after `startTime`. Fewer
-   * means the exchange could not serve the window — the caller must treat that
-   * as unscoreable rather than scoring what did arrive.
+   * Returns fewer bars than asked for if the exchange cannot serve them, and
+   * the caller must then treat the analysis as unscoreable rather than judging
+   * it on whatever did arrive.
    */
   async getCandlesFrom(
     symbol: string,
@@ -199,18 +179,13 @@ export class BinanceService {
   }
 
   /**
-   * Funding-rate history for a perpetual future, paged forward from
-   * `startTime`. Free, no API key.
+   * History of the funding rate: a fee traders betting on a rise pay to those
+   * betting on a fall, every 8 hours. A strongly positive rate means the crowd
+   * is heavily on one side and paying to stay there — unlike most measures,
+   * this is not just another way of looking at price.
    *
-   * Funding is the fee perp longs pay shorts (or vice versa) every 8h. It
-   * is a direct read on crowd positioning: strongly positive means the
-   * book is crowded long and paying to stay there. Unlike RSI/BB/ATR it is
-   * not another transform of price — which is why it is the first genuinely
-   * new input we've added.
-   *
-   * NOTE: the sibling endpoint `futures/data/openInterestHist` only retains
-   * ~30 days, so open interest cannot be backtested over a multi-month
-   * window and is deliberately not wired up here.
+   * TODO: open interest would be the natural companion, but the exchange only
+   * keeps about 30 days of it, which is too short to backtest.
    */
   async getFundingRates(
     symbol: string,
@@ -284,13 +259,8 @@ export class BinanceService {
   }
 
   /**
-   * Generate a deterministic cache key for a candle request.
-   *
-   * The key intentionally contains ONLY the request parameters so it can
-   * be reused by every identical call. Expiry is owned exclusively by the
-   * global `CacheModule` TTL configuration — adding an artificial time
-   * bucket here would short-circuit that TTL and cause spurious misses
-   * around bucket boundaries.
+   * The cache key for a request. Only the request's own details go in, so
+   * identical calls share a result. How long it lives is set centrally.
    */
   private generateCandleCacheKey(
     symbol: string,
@@ -381,16 +351,11 @@ export class BinanceService {
 
 
   /**
-   * Turn a Binance failure into the right kind of error, in one place.
+   * Turns an exchange failure into the right kind of error.
    *
-   * An unrecognised trading pair is the CALLER's mistake, not ours: it must
-   * not surface as a 500. `pnpm analyze NOTACOIN` and
-   * `POST /analyses?symbol=NOTACOIN` both reached here, and the second
-   * answered "Internal server error" — which reads as an outage for what is
-   * a typo, and would page you at 3am for one.
-   *
-   * Binance signals it with code -1121 / "Invalid symbol." on an HTTP 400.
-   * Everything else stays a plain Error and keeps its 500, because it IS ours.
+   * A coin that does not exist is the caller's typo, not our outage, so it
+   * must not be reported as a server fault. Everything else stays a server
+   * error, because then it really is ours.
    */
   private binanceError(
     error: unknown,

@@ -3,36 +3,26 @@ import { TradePlan } from '../analysis/services/trade-plan.service';
 import { AnalysisRecord } from './analyze.service';
 
 /**
- * Whether a saved analysis still describes the market.
+ * Does a saved analysis still describe the market?
  *
  *   LIVE         the plan can still be taken
- *   INVALIDATED  price went through the level the plan said it would not
- *   SUPERSEDED   the structure moved on — those zones no longer exist
+ *   INVALIDATED  price went past the level the plan said it would not
+ *   SUPERSEDED   the price zones it was built on are no longer there
  *
- * ─── Computed on read, never stored ──────────────────────────────────────
- * A stored freshness column is wrong the moment it is written: the market
- * moves and the row does not. Both inputs are free at read time — the live
- * price is already being fetched for the chart, and the newest analysis for
- * the symbol is one indexed query away. So this is a pure function of
- * (old record, current price, newest record) and there is no background job,
- * no TTL column, and nothing to keep in sync.
+ * Worked out each time it is read, never stored — a stored answer is wrong
+ * the moment the market moves.
  *
- * ─── Why order matters ───────────────────────────────────────────────────
- * INVALIDATED is checked first because it is definitive: price went through
- * the stop, and no amount of surviving structure makes that plan takeable
- * again. SUPERSEDED is the weaker statement — the idea was never disproved,
- * it just stopped being the current read.
+ * Invalidated is checked first because it is final: price went through the
+ * stop, and no amount of surviving structure makes that plan takeable again.
  */
 export type Freshness = 'LIVE' | 'INVALIDATED' | 'SUPERSEDED';
 
 /**
- * A plan is invalidated when price is beyond its stop.
+ * A plan is dead once price is past its stop.
  *
- * ponytail: uses the current price, while the plan says "invalidated on a
- * CLOSE below X". A wick through the stop reads as invalidated here and a
- * candle close would say otherwise. Upgrade to the last closed candle of the
- * lowest level timeframe if that difference ever costs a real judgement — it
- * is one extra fetch, deliberately not paid for a state badge.
+ * TODO: this uses the current price, but the plan says "invalidated on a
+ * CLOSE past X". A brief spike through the stop counts as invalidated here.
+ * Fixing it costs one extra request, not paid for a status label.
  */
 export function planInvalidated(plan: TradePlan, currentPrice: number): boolean {
   return plan.direction === 'long'
@@ -41,11 +31,9 @@ export function planInvalidated(plan: TradePlan, currentPrice: number): boolean 
 }
 
 /**
- * Do two zone sets still describe the same structure?
- *
- * A zone survives if the fresh map has one centred within the same 0.5% band
- * the clustering itself uses (`SR_DEFAULTS.CLUSTER_THRESHOLD`) — reused
- * rather than picked, so "the same zone" means here what it means there.
+ * Do two sets of zones still describe the same thing? A zone counts as
+ * surviving if the new set has one at nearly the same price — using the same
+ * tolerance that decides what a zone is in the first place.
  */
 export function zonesSurvive(
   oldCenters: number[],
@@ -61,10 +49,7 @@ export function zonesSurvive(
   );
 }
 
-/**
- * `newest` is the most recent analysis for the same symbol, or null when the
- * record IS the newest — in which case nothing can have superseded it.
- */
+/** `newest` is null when this record IS the newest, so nothing replaced it. */
 export function analysisFreshness(
   record: Pick<AnalysisRecord, 'plans' | 'map'>,
   currentPrice: number,
@@ -72,9 +57,8 @@ export function analysisFreshness(
 ): Freshness {
   const plans = record.plans ?? [];
 
-  // Every plan gone means the whole read is spent. One surviving plan keeps
-  // the analysis alive — an invalidated long does not invalidate the short
-  // printed beside it.
+  // One surviving plan keeps the analysis alive: a dead buy plan does not
+  // kill the sell plan printed beside it.
   if (plans.length > 0 && plans.every((p) => planInvalidated(p, currentPrice))) {
     return 'INVALIDATED';
   }
