@@ -1,44 +1,11 @@
 /**
- * Series adapters over `trading-signals`.
+ * Wrappers around the maths library, so the rest of the code can work with
+ * whole lists of values instead of feeding it one price at a time.
  *
- * `trading-signals` is instance-based and streaming (`new RSI(14)`,
- * `.update(v)`), while this codebase consumes whole series. These helpers
- * bridge the two and, critically, normalise WARM-UP LENGTH.
- *
- * ─── INVARIANT: warm-up length is load-bearing ───────────────────────────
- * Trailing reads (`series[length-1]`, `[length-2]`, `[length-3]`) do not
- * care how many leading values exist. But `bandWidthSeries` is consumed
- * WHOLE by the regime classifier:
- *
- *     historical = bandWidthSeries.slice(0, -1)
- *     percentileRank(bandWidth, historical)      // denominator = length
- *     sorted[idx] where idx derives from length   // 15th-pct cutoff
- *
- * So a change in leading count silently shifts the COMPRESSION decision.
- * It is the only whole-series consumer in the codebase — `rsiHistory` looks
- * like the same hazard but takes `rsiSeries.slice(-100)`, a trailing slice,
- * which is immune. Audited 4 Aug 2026. If you add another whole-series
- * consumer, it inherits this dependency.
- *
- * Therefore every adapter here emits EXACTLY the number of values the
- * previous library (`technicalindicators@3.1.0`) emitted, trimming leading
- * values where the new library starts earlier.
- *
- * ─── Seeding decision (recorded, not silent) ─────────────────────────────
- * `technicalindicators` seeded EMA with an SMA of the first `period` values;
- * `trading-signals` seeds with the first price. We accept the new seeding
- * and trim, because the seed's influence decays geometrically at
- * (1 - 2/(period+1)) per bar. EMA is used in exactly one place — smoothing
- * RSI for QQE at period 5 — so the decay factor is (1 - 2/6) = 0.667, and
- * over our 250+ candle windows the residual is 0.667^200 ~= 1e-35. The
- * trimmed-away values are the only ones where seeding is observable, and
- * they are warm-up, not information.
- *
- * ATR, ADX and RSI need no such decision: both libraries use Wilder's
- * `1/period` recursion seeded with an SMA. ADX looks different — the old
- * library smoothed +DM/-DM/TR as running SUMS, the new one as AVERAGES —
- * but S_t = N * A_t exactly, and DI is the ratio smoothed(DM)/smoothed(TR),
- * so the factor cancels. Bollinger uses population SD (/N) in both.
+ * These deliberately return the same NUMBER of values the previous library
+ * did. That matters in one place: the "is the market quiet" check compares
+ * today's reading against the whole list, so a list that started a few bars
+ * earlier would quietly change the answer.
  */
 import { ADX, ATR, BollingerBands, EMA, RSI } from 'trading-signals';
 

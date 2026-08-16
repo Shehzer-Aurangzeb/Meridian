@@ -22,28 +22,21 @@ const KEY_VAR = 'MERIDIAN_API_KEY';
 const SECRET_VAR = 'MERIDIAN_TOKEN_SECRET';
 
 /**
- * The single authentication point. Two credentials, one door.
+ * The single place logins are checked. Two ways in, one door:
  *
- *   Authorization: Bearer <session token>   humans, from POST /auth/login
- *   x-api-key: <key>                        machines, the scheduler
+ *   Authorization: Bearer <token>   a person, after logging in
+ *   x-api-key: <key>                the scheduler
  *
- * ─── Why two ─────────────────────────────────────────────────────────────
- * They fail differently. A session token expires and is issued against a
- * password, so it can live in a browser without the password ever being
- * there. A static key never expires, which is exactly what a cron needs and
- * exactly what a browser must not hold — anything shipped to a browser is
- * readable in devtools, and a static key read there is permanent access.
+ * Two, because they fail differently. A session token expires, so it is safe
+ * in a browser. A fixed key never expires, which is what a scheduled job
+ * needs and exactly what a browser must never hold — anything sent to a
+ * browser can be read out of it.
  *
- * ─── Global, not per-controller ──────────────────────────────────────────
- * Registered once as APP_GUARD in AppModule. A guard applied per-controller
- * protects the controllers someone remembered, and the next route added is
- * open by default. Here the default is closed and `@Public()` is the
- * deliberate, greppable exception.
+ * Applied to everything at once rather than route by route, so a new route is
+ * protected by default and only an explicit `@Public()` opens it.
  *
- * ─── Fail closed ─────────────────────────────────────────────────────────
- * A missing MERIDIAN_API_KEY throws at BOOT. "No key configured means auth is
- * off" is the standard way a guard like this ends up protecting nothing,
- * usually found after a deploy where the env var was never set.
+ * A missing key stops the app at STARTUP. "No key set means no checking" is
+ * the usual way something like this ends up protecting nothing.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {

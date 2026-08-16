@@ -123,16 +123,9 @@ export class LeverageService {
   }
   
   /**
-   * Get base leverage from timeframe.
-   *
-   * Throws on an unrecognised timeframe. This previously fell back to `|| 5`,
-   * so an unknown timeframe silently received 5x leverage — a risk control
-   * granting leverage on input it does not understand.
-   *
-   * A "conservative" fallback of 1x would be no better: it is still a
-   * made-up number presented as an answer. If leverage cannot be determined
-   * the system must refuse to produce a plan, because a plausible number is
-   * exactly how this repo's earlier indicator bugs survived for months.
+   * Starting leverage for a given timeframe. Refuses an unfamiliar one rather
+   * than guessing: a made-up number here is a risk setting nobody chose, and a
+   * plausible wrong answer is how bugs survive unnoticed.
    */
   private getBaseLeverageFromTimeframe(timeframe: string): number {
     const base = this.TIMEFRAME_BASE_LEVERAGE[timeframe];
@@ -146,16 +139,8 @@ export class LeverageService {
   }
   
   /**
-   * Scale leverage by how much of the checklist is satisfied.
-   *
-   * Was keyed to the removed 0-100 score at >=80 / >=60 / below. Translated
-   * 1:1 onto conditions, since those boundaries were exactly 4-of-5 and
-   * 3-of-5: no aggregate score is reintroduced here.
-   *
-   * `null` means no checklist ran — the squeeze-breakout route has no
-   * conditions to count. It takes the same 20% reduction the previous
-   * `?? 60` default produced, so behaviour is unchanged; stated explicitly
-   * rather than arriving via a fallback on a missing value.
+   * Reduces leverage when fewer entry conditions are met. `null` means no
+   * checklist ran, which takes the same reduction as a middling one.
    */
   private adjustForConfidence(
     baseLeverage: number,

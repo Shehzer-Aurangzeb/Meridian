@@ -12,12 +12,11 @@ export interface AnalysesSummary {
 }
 
 /**
- * Counts derived from a list response. Shared by the history strip and the
- * dashboard so the two cannot disagree about the same numbers.
+ * Counts taken from a list of analyses, shared by the dashboard and the
+ * history page so the two cannot disagree.
  *
- * No hit rate and no average R on purpose: both are measurement-harness
- * numbers, and a live-looking win rate is how a research result gets mistaken
- * for a track record.
+ * No success rate or average result on purpose — on a dashboard those read as
+ * a track record rather than as research numbers.
  */
 export function summariseAnalyses(rows: AnalysisListItem[]): AnalysesSummary | null {
   if (rows.length === 0) return null;

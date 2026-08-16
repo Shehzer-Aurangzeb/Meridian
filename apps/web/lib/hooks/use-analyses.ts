@@ -68,12 +68,9 @@ export function useRunAnalysis() {
 }
 
 /**
- * Claude's read of one analysis.
- *
- * Costs a model call the first time and nothing after — the backend caches it
- * on the row. Kept out of `useAnalysis` deliberately: the analysis must render
- * whether or not anyone wants the prose, and whether or not Claude is even
- * reachable.
+ * The AI's explanation of one analysis. Costs money the first time and nothing
+ * after. Kept separate on purpose: the analysis must display whether or not
+ * the AI is available.
  */
 export function useNarrate(id: string) {
   const queryClient = useQueryClient();

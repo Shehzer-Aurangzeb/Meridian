@@ -3,20 +3,13 @@ import { NextResponse } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/session-cookie';
 
 /**
- * GET /api/candles?symbol=BTC&interval=1h&limit=300
+ * Price bars for the chart, fetched straight from the exchange rather than
+ * through our own API — this data is public and identical for everyone.
  *
- * Straight to Binance rather than through the Meridian API: candles are public
- * market data, identical for everyone, and routing them through Lambda would
- * add a cold start and a deploy to a request that needs neither.
- *
- * Server-side rather than from the browser so the chart keeps working where
- * Binance blocks the visitor's region, and so it stays same-origin.
- *
- * That cuts both ways: Binance geo-blocks the US with a 451, and Vercel's
- * default function region is iad1 (Washington DC), so this returned 502 from
- * the deployed app while working everywhere else. vercel.json pins the
- * functions to fra1 — which also sits next to the API in eu-central-1, so
- * every other BFF call got faster too.
+ * Fetched by the server, not the browser, so the chart still works for
+ * visitors in countries the exchange blocks. That means the SERVER's location
+ * matters: it must not be somewhere the exchange refuses, which is why the
+ * hosting region is pinned in vercel.json.
  */
 const BINANCE = 'https://api.binance.com/api/v3/klines';
 

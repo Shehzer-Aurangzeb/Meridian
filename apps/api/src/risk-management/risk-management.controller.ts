@@ -26,12 +26,11 @@ export class RiskManagementController {
   ) {}
 
   /**
-   * @deprecated Not consumed by frontend. Risk sizing is embedded in portfolio-scan.
-   * Calculate Position Size
-   * Based on Miraj's risk management rules:
-   * - Risk Amount = accountBalance × (riskPercentage / 100)
-   * - Position Size = riskAmount / (stopLossPercentage / 100)
-   * - Margin = positionSize / leverage
+   * How large a position to take, from the account size and how much of it you
+   * are willing to lose.
+   *
+   * TODO: unused by the website — position sizing happens inside the portfolio
+   * scan instead. Remove if nothing starts calling it.
    */
   @Post('position-size')
   @SkipThrottle()
@@ -102,12 +101,11 @@ export class RiskManagementController {
   }
 
   /**
-   * @deprecated Not consumed by frontend. Portfolio allocation is a static strategy.
-   * Get Portfolio Allocation
-   * Based on Miraj's 60/20/20 rule:
-   * - 60% Long-term (1x leverage, HTF trades)
-   * - 20% Mid-term (2-3x leverage, day trades)
-   * - 20% Short-term (5-10x leverage, scalps)
+   * How to split an account across long, medium and short-term trades: 60% /
+   * 20% / 20%, with more leverage allowed on the smaller, faster slices.
+   *
+   * TODO: unused by the website, and the split never changes. Remove or make
+   * it configurable.
    */
   @Get('portfolio-allocation')
   @SkipThrottle()

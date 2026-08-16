@@ -3,16 +3,12 @@ import { Candle } from '../../common/types/candle.types';
 import { SupportResistanceService } from './support-resistance.service';
 
 /**
- * Stability guard for the level engine.
+ * Checks the levels stay put as price moves.
  *
- * The engine this replaced (`IndicatorsService.identifyKeyLevels`) snapped
- * swings onto a lattice whose spacing was `currentPrice * 0.5%` and whose
- * origin was zero. Both moved with price, so the whole marked set shifted on
- * every tick: a measured 0.07% move on BTC relabelled the nearest level from
- * "support, 4 touches" to "resistance, 1 test".
- *
- * That was tolerable when levels fed a score nobody trusted. The levels are
- * now the product, so a marked set that moves with spot is a correctness bug.
+ * An older version placed levels on a grid measured from the CURRENT price,
+ * so the whole set shifted on every tick — a 0.07% move could relabel a level
+ * from "support, touched 4 times" to "resistance, touched once". The levels
+ * are the product now, so that is a correctness bug rather than a nuisance.
  */
 function buildCandles(): Candle[] {
   // A triangle wave: repeated swing highs at ~$31k and lows at ~$29k, so the

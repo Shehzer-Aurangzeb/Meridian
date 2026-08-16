@@ -6,17 +6,11 @@ import { ClaudeAnalysisResponse } from '../ai/interfaces/claude-response.types';
 import { AnalysisRecord } from './analyze.service';
 
 /**
- * Input payload for a single coordinator run record.
+ * What gets saved for one analysis run.
  *
- * `aiResponse` is null when the AI gate was not triggered (e.g. checklist
- * the entry gate was not met). `errorMessage` is populated only for failed
- * runs.
- *
- * NOTE: `checklistStatus` and `totalScore` are deliberately no longer
- * written. Both columns remain in the schema as nullable and are NOT dropped:
- * historical rows hold what the old system actually said at the time, which
- * is the record to consult when reconstructing why a past call was made.
- * New rows leave them null. A drop migration can happen later, if ever.
+ * TODO: two old columns are no longer written but kept in the database, so
+ * past rows still show what the old system said at the time. They can be
+ * dropped later if that history stops mattering.
  */
 export interface CoordinatorRunInput {
   coordinatorResult: CoordinatorAnalysisResult;
@@ -91,15 +85,8 @@ export class CoordinatorPersistenceService {
   }
 
   /**
-   * Persist a full `AnalysisRecord` — regime leg AND level leg.
-   *
-   * Separate from `persist` because that one stores `CoordinatorAnalysisResult`,
-   * which carries regime/route/checklist but NOT the level map or the plans.
-   * Every row written before this method existed is missing the entire level
-   * leg, which is most of what an analysis is.
-   *
-   * Awaited, unlike `persist`: a scheduled run that silently failed to save
-   * has done nothing at all, whereas the SSE stream must not block on the DB.
+   * Saves a complete analysis, levels and plans included. Waited on, unlike
+   * the other save: a scheduled run that failed to save has done nothing.
    */
   async persistAnalysis(record: AnalysisRecord): Promise<{ id: string }> {
     return this.prisma.coordinatorRun.create({

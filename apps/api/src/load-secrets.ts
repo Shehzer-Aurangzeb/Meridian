@@ -1,24 +1,14 @@
 /**
- * Pull secrets from AWS Secrets Manager into `process.env` at cold start.
+ * Loads passwords and API keys from AWS when the app starts.
  *
- * ─── Why not just put them in the Lambda's environment variables ─────────
- * Because CDK would then write them into the CloudFormation template, and
- * that template is stored in S3, visible in the console, and usually
- * committed or logged somewhere. Secrets in an infrastructure template are
- * secrets in plaintext.
+ * They are fetched at runtime rather than set as plain environment variables,
+ * because the deployment files that would hold them are stored and viewable
+ * in several places. Those files hold only the NAME of the secret; the app is
+ * given permission to look up the value itself.
  *
- * So the template holds only the NAME of a secret. The function is granted
- * permission to read it, and fetches the value at runtime. This is the
- * standard AWS pattern and the reason Lambda execution roles exist.
- *
- * ─── Cost ────────────────────────────────────────────────────────────────
- * One API call per container, not per request — it runs inside the same
- * cached bootstrap as Nest. At six scheduled runs a day this is free.
- *
- * ─── Local development ───────────────────────────────────────────────────
- * If MERIDIAN_SECRET_ID is unset (any laptop), this does nothing and the
- * values come from .env.local as before. Deployed, it is set by the CDK
- * stack. One code path, two environments, no branching in the app itself.
+ * Runs once per container, not per request. On a laptop it does nothing and
+ * the values come from the local .env file instead, so there is one code path
+ * for both.
  */
 export async function loadSecrets(): Promise<void> {
   const secretId = process.env.MERIDIAN_SECRET_ID;

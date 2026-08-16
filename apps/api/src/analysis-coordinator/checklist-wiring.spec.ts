@@ -8,39 +8,25 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisCoordinatorService } from './analysis-coordinator.service';
 
 /**
- * Regression guards for two silent wiring bugs that made the 5-point
- * checklist structurally unable to score:
+ * Guards against three wiring mistakes that each made the entry checklist
+ * unable to pass, while still producing believable output:
  *
- *   A. The coordinator passed `bollingerBands.middle` (the 20-SMA) as
- *      "current price". Bollinger bands are symmetric about the middle, so
- *      the band-proximity condition scored *exactly* 50% of the band range
- *      on every run against a 10% threshold — it could never pass.
+ *   A. an average price was passed in where the CURRENT price was expected,
+ *      so one condition scored the same value every single time
+ *   B. recent PRICES were passed in where recent momentum readings were
+ *      expected, so another condition passed or failed for free
+ *   C. the direction was guessed from the trend, so a buy at support during
+ *      a downtrend was scored as if it were a sell
  *
- *   B. `IndicatorContext.rsiHistory` held the last 100 *closes* instead of
- *      the last 100 RSI values, so the checklist Z-scored RSI against price.
- *      For BTC that yields Z ≈ -66 every run: every LONG passed condition 1
- *      for free, every SHORT failed it.
- *
- *   C. The coordinator DERIVED the direction from trend and then evaluated
- *      direction-specific conditions against it. A setup whose direction is
- *      implied by something other than trend — arriving at support during a
- *      downtrend is a long — was therefore evaluated as the opposite side,
- *      where `rsi >= 60` and the UPPER Bollinger band can never pass. In a
- *      zone-arrival test this scored 0 out of 839 on both conditions.
- *
- * Both bugs are invisible in the output unless you know the numbers, which
- * is why they survived a refactor that claimed to preserve behaviour.
+ * None of these showed up as an error, which is why they survived a rewrite
+ * that was supposed to change nothing.
  */
 
 /**
- * 250 candles priced ~$30,000 with small alternating noise, ending in a
- * sharp drop to $27,000.
- *
- * Chosen so the final close sits *below* the lower Bollinger band:
- * over the last 20 candles mean ≈ 29,850 and σ ≈ 654, giving a lower band
- * of ≈ 28,542 and a bandwidth of ≈ 8.8% (well clear of the 2% squeeze
- * floor). The noise keeps ATR/ADX well-defined — a perfectly flat series
- * degenerates them.
+ * Test data: 250 bars around $30,000 with small wobbles, ending in a sharp
+ * drop to $27,000 — far enough for the final price to sit below the lower
+ * band. The wobbles matter: a perfectly flat series breaks the volatility
+ * and trend measures.
  */
 function buildCandles(): Candle[] {
   const candles: Candle[] = [];

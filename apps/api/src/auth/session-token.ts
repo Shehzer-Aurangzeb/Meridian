@@ -6,28 +6,18 @@ import {
 } from 'crypto';
 
 /**
- * Password verification and signed session tokens, on node crypto alone.
+ * Login checking and signed session tokens, using only built-in crypto.
  *
- * ─── Why not JWT ─────────────────────────────────────────────────────────
- * Nothing outside this API ever reads these tokens. JWT's value is that a
- * THIRD party can validate one — an API Gateway authorizer, another service,
- * an OIDC consumer. With a single self-issued HMAC token that value is zero,
- * and what remains is JWT's failure surface: the `alg` header. Libraries have
- * repeatedly been talked into accepting `alg: none`, or into verifying an
- * RS256 token as HS256 using the public key as the HMAC secret.
+ *   v1.<payload>.<signature>
  *
- * This format has no algorithm field to confuse. The signature is always
- * HMAC-SHA256 over the exact bytes that follow the version prefix, and
- * anything that does not verify under that one rule is rejected. Swap this
- * for @nestjs/jwt the day something else has to validate a token.
+ * Deliberately not the usual JWT format. JWT exists so OTHER systems can
+ * check a token, which nothing here needs, and its flexible "which algorithm"
+ * field has been the source of repeated security holes. This format has no
+ * such field: one signing method, and anything that does not match is
+ * rejected. Switch to JWT the day another system has to read these.
  *
- *   v1.<base64url payload>.<base64url signature>
- *
- * ─── Revocation ──────────────────────────────────────────────────────────
- * Stateless: there is no session store to check, so a token is valid until it
- * expires. Rotating MERIDIAN_TOKEN_SECRET invalidates every outstanding token
- * at once, which is the logout-everywhere button. Per-token revocation needs
- * a store and is not worth it for one user.
+ * There is no list of active sessions, so a token stays valid until it
+ * expires. Changing the signing secret logs everyone out at once.
  */
 
 const VERSION = 'v1';

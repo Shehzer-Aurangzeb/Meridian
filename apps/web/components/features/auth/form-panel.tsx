@@ -9,12 +9,11 @@ import { Input } from '@/components/ui/input';
 import { useLogin } from '@/lib/hooks/use-auth';
 
 /**
- * `next` normally comes back from middleware, but anyone can hand you a
- * sign-in link with it set to anything. Only same-origin paths are followed.
+ * Where to go after signing in. Anyone can send you a sign-in link with this
+ * set to any address, so only paths inside this site are followed.
  *
- * The second character matters as much as the first: `//evil.com` is
- * protocol-relative, and browsers normalise the backslash in `/\evil.com` to
- * the same thing — a `//` check alone still lets that one through.
+ * Both of the first two characters matter: an address starting `//` or `/\`
+ * points at another website, not at a page here.
  */
 function safeNext(value: string | null): string {
   if (!value || value[0] !== '/' || value[1] === '/' || value[1] === '\\') {

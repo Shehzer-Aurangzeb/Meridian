@@ -18,27 +18,15 @@ import {
 
 @Injectable()
 export class IndicatorsService {
-  /**
-   * Calculate RSI (Relative Strength Index)
-   * @param closes - Array of closing prices
-   * @param period - RSI period (default 14)
-   * @returns Latest RSI value
-   */
+  /** Momentum, 0-100. High means price has risen hard recently, low the opposite. */
   calculateRSI(closes: number[], period: number = 14): number {
     const rsiValues = this.calculateRSISeries(closes, period);
     return rsiValues[rsiValues.length - 1];
   }
 
   /**
-   * Calculate the full RSI series (not just the latest value).
-   *
-   * The checklist needs a trailing window of *RSI* values to compute a
-   * relative-momentum Z-score. `RSI.calculate` already produces the whole
-   * series, so exposing it costs nothing over `calculateRSI`.
-   *
-   * @param closes - Array of closing prices
-   * @param period - RSI period (default 14)
-   * @returns RSI values, oldest first. Last element is guaranteed finite.
+   * The whole momentum history, not just the latest. The checklist compares
+   * today's reading against its own recent range, which needs the series.
    */
   calculateRSISeries(closes: number[], period: number = 14): number[] {
     if (closes.length < period + 1) {
@@ -62,11 +50,8 @@ export class IndicatorsService {
   }
 
   /**
-   * Calculate Bollinger Bands
-   * @param closes - Array of closing prices
-   * @param period - Moving average period (default 20)
-   * @param stdDev - Standard deviation multiplier (default 2)
-   * @returns Latest Bollinger Bands values (upper, middle, lower)
+   * A band around the average price that widens when the market is volatile
+   * and narrows when it is quiet.
    */
   calculateBollingerBands(
     closes: number[],
@@ -102,14 +87,7 @@ export class IndicatorsService {
     };
   }
 
-  /**
-   * Calculate ATR (Average True Range)
-   * @param highs - Array of high prices
-   * @param lows - Array of low prices
-   * @param closes - Array of closing prices
-   * @param period - ATR period (default 14)
-   * @returns Latest ATR value
-   */
+  /** How far price typically moves in one bar. Used to size stop distance. */
   calculateATR(
     highs: number[],
     lows: number[],
@@ -134,12 +112,7 @@ export class IndicatorsService {
     return latestATR;
   }
 
-  /**
-   * Identify support and resistance levels
-   * @param candles - Array of candle data
-   * @param lookback - Number of candles to look back (default 20)
-   * @returns Support and resistance levels
-   */
+  /** Prices that have repeatedly stopped a move up or down. */
   identifySupportResistance(
     candles: Candle[],
     lookback: number = 20,
@@ -304,16 +277,8 @@ export class IndicatorsService {
 
 
   /**
-   * Calculate ADX (Average Directional Index) with +DI / -DI.
-   *
-   * Uses Wilder's smoothing via `trading-signals` (see ./series.ts).
-   * Requires roughly 2 * period candles to produce a stable value.
-   *
-   * @param highs  - Array of high prices
-   * @param lows   - Array of low prices
-   * @param closes - Array of closing prices
-   * @param period - ADX period (default 14)
-   * @returns Latest ADX, +DI, -DI and DX values
+   * Trend strength, and which way it points. Above about 25 counts as a real
+   * trend. Needs roughly twice the period in bars before it settles.
    */
   calculateADX(
     highs: number[],
@@ -392,23 +357,10 @@ export class IndicatorsService {
   }
 
   /**
-   * Build an `IndicatorContext` from a candle series.
+   * Works out every measurement once, from one set of price bars, so the rest
+   * of the analysis can share them instead of recalculating.
    *
-   * Computes every baseline indicator needed by downstream strategy
-   * services (regime classifier, squeeze breakout, checklist) exactly
-   * once, so the coordinator can share a single context object across
-   * the entire analysis pipeline.
-   *
-   * Pure function: no I/O, no caching, no side effects. The returned
-   * object is mathematically identical to what each service would have
-   * computed on its own from the same candle dataset.
-   *
-   * @param symbol    Base symbol (uppercased for the context).
-   * @param timeframe Candle interval used for the fetch.
-   * @param candles   Raw OHLCV series (already fetched by BinanceService).
-   *
-   * @throws If the supplied candle series is too small to compute the
-   *         core indicators (RSI / BB / ADX require >= 30 candles).
+   * Throws if there are too few bars to measure anything reliably.
    */
   buildContext(
     symbol: string,
@@ -436,13 +388,8 @@ export class IndicatorsService {
     const adx = this.calculateADX(highs, lows, closes);
     const qqe = this.calculateQQE(closes);
 
-    // Trailing window of RSI values, used by the checklist to Z-score the
-    // current RSI against its own recent distribution.
-    //
-    // This previously held the last 100 *closes*, so the checklist computed
-    // (rsi - mean(price)) / stdDev(price) — for BTC at ~$100k that yields
-    // Z ≈ -66 every run, which made every LONG pass condition 1 for free
-    // and every SHORT fail it.
+    // Recent momentum readings, so the checklist can judge today's against
+    // its own recent range rather than against a fixed threshold.
     const rsiHistory = rsiSeries.slice(-100);
 
     return {

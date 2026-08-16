@@ -22,12 +22,9 @@ export class ApiError extends Error {
 }
 
 /**
- * Where the API lives.
- *
- * The localhost default is for `pnpm dev` only. A deployed frontend that fell
- * back to it reported "Backend unreachable", which reads as "the API is down"
- * and sent a debugging session at AWS instead of at one missing variable.
- * ApiError so `proxy` returns the message rather than swallowing it.
+ * Where the API lives. The localhost fallback is for local development only —
+ * a deployed site reaching for it means the address was never configured, and
+ * it says so rather than reporting the API as down.
  */
 function backendUrl(): string {
   const url = process.env.BACKEND_URL;
@@ -85,11 +82,9 @@ export async function backendFetch<T>(
 }
 
 /**
- * Uniform error shape for every BFF route.
- *
- * Clearing the cookie on 401 is what stops an expired token looping: middleware
- * lets you in on the cookie merely existing, so it has to go for the next
- * navigation to reach sign-in.
+ * One error shape for every route here. An expired login clears the cookie —
+ * otherwise the next page load sees a cookie, lets you through, and fails
+ * again in a loop.
  */
 export async function proxy<T>(fn: () => Promise<T>): Promise<NextResponse> {
   try {

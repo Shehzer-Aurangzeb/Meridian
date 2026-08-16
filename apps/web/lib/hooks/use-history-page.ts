@@ -13,15 +13,13 @@ import {
 } from '@/components/features/history/filter-bar';
 
 /**
- * One scored fetch per window, then filter, sort and reveal in memory.
+ * Fetches one window of analyses, then filters and sorts them in the browser.
  *
- * The fetch is bounded by DATE, not by an arbitrary row count — `days=30`
- * returns thirty days or says it was truncated, where the old cap of 200
- * silently dropped the oldest rows and made every total on the page wrong.
+ * The fetch asks for a DATE RANGE rather than a number of rows: a row limit
+ * silently drops the oldest ones and makes every total on the page wrong.
  *
- * Outcome filtering is deliberately client-side: outcome comes from replaying
- * candles rather than from a column, so the server cannot filter it in SQL and
- * doing it after scoring would re-score the whole set on every reveal.
+ * Filtering by outcome happens here rather than on the server because an
+ * outcome is worked out by replaying prices, not stored in a column.
  */
 const FETCH_LIMIT = 1000;
 const PAGE_SIZE = 20;

@@ -7,12 +7,9 @@ export interface CacheStats {
 }
 
 /**
- * Per-request cache hit/miss counter scoped via AsyncLocalStorage.
- *
- * Callers wrap a unit of work in `run()` and any code path executed
- * inside that callback can record hits / misses on the active scope.
- * Outside any scope the recorders are no-ops, so this is safe to call
- * from background jobs and unrelated request paths.
+ * Counts how often cached data was reused during one request. Wrap a piece of
+ * work in `run()` and anything inside it can record against that count.
+ * Outside one, recording does nothing, so it is always safe to call.
  */
 @Injectable()
 export class CacheTelemetryService {

@@ -8,12 +8,11 @@ import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
 
 /**
  * One analysis, readable without opening it: what it said, where price is now
- * relative to every level it set, and which targets were reached.
+ * against every level it set, and which targets were reached.
  *
- * The ladder is the whole idea — prices sorted high to low with a "now" line
- * inserted at its position. That single rule draws a long (stop below, targets
- * above) and a short (the reverse) with no branch, and the live price walks the
- * line up and down the card.
+ * All the prices are simply listed high to low with a "now" line slotted into
+ * place. That one rule draws both a buy and a sell with no special cases, and
+ * the live price walks up and down the card.
  */
 
 const OUTCOME_TONE: Record<string, string> = {

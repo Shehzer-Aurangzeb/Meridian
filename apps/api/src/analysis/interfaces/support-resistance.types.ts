@@ -39,14 +39,9 @@ export interface ClusteredLevel {
 }
 
 /**
- * A single Fibonacci level, playbook-style.
- *
- * The playbook is QUARTER-based — 0 / 0.25 / 0.5 / 0.75 / 1.0 (p51) — not the
- * classic 0.236 / 0.382 / 0.618 ratios. It also assigns support vs resistance
- * by position in the range, not by where price happens to be now:
- * "0 and 0.25 and 0.5: BLUE (support zones) · 0.75 and 1.0: RED (resistance)".
- * That makes the marks a fixed function of the swing, which is what keeps them
- * stable as price moves.
+ * One Fibonacci level. Quarters of the range, not the more common ratios, and
+ * labelled by where they sit in that range rather than by where price is now
+ * — so the marks stay put as price moves.
  */
 export interface FibLevel {
   ratio: number; // 0 | 0.25 | 0.5 | 0.75 | 1
@@ -93,11 +88,9 @@ export interface MarkedLevel {
 }
 
 /**
- * A band where several INDEPENDENT marks agree.
- *
- * The playbook's definition: levels within ~0.5% of each other, and its
- * worked example (p53) spans 0.524%. Confluence is the whole point — a lone
- * level is not a zone, which is why `sources` carries every contributor.
+ * A price band where several levels, found in different ways, land within
+ * about half a percent of each other. A single level is not a zone, which is
+ * why every contributor is listed.
  */
 export interface ConfluenceZone {
   low: number;

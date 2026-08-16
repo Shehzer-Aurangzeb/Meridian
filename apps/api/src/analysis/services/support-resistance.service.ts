@@ -17,14 +17,9 @@ export class SupportResistanceService {
   private readonly logger = new Logger(SupportResistanceService.name);
 
   /**
-   * The pure half of `findLevels`: swing detection → clustering → touch
-   * filtering → strength. No I/O.
-   *
-   * Exists so callers that already hold a candle window (the coordinator's
-   * shared `IndicatorContext`) can get levels without a second fetch. This
-   * is the ONLY level engine — the price-anchored grid it replaced snapped
-   * swings onto a lattice derived from current price, so a 0.07% move could
-   * relabel a level from "support, 4 touches" to "resistance, 1 test".
+   * Finds levels from price bars the caller already has: spot the turning
+   * points, group the ones at similar prices, keep those touched more than
+   * once, then score them.
    */
   levelsFromCandles(
     candles: Candle[],
@@ -251,16 +246,12 @@ export class SupportResistanceService {
     };
   }
 
-  /**
-   * Check if a level held (didn't get broken through)
-   */
-  // ponytail: scans from the FIRST touch, so on a 250-candle window almost
-  // every level reads `held: false` — price nearly always violates by >0.5%
-  // somewhere between two touches. Measured on BTC 1d: 10 of 10 levels false.
-  // The −0.5 penalty in `calculateLevelStrength` therefore applies uniformly
-  // and does not change ORDERING, only the absolute number, so it is not
-  // urgent. Fix when "invalidated" is defined for the zone state machine:
-  // "held" should almost certainly mean "held since the MOST RECENT touch".
+  /** Did price respect this level, or push straight through it? */
+  // TODO: this looks all the way back to the FIRST touch, so nearly every
+  // level reads as "did not hold" — price usually breaks through at some
+  // point between two touches. The penalty is therefore applied to everything
+  // equally and does not change the ranking, only the scores. It should
+  // probably mean "held since the most recent touch".
   private checkIfLevelHeld(cluster: ClusteredLevel, candles: Candle[]): boolean {
     const levelPrice = cluster.price;
     const tolerance = levelPrice * 0.005; // 0.5% tolerance
@@ -320,15 +311,10 @@ export class SupportResistanceService {
   }
 
   /**
-   * Playbook Fibonacci (p51, "STEP 1: Fibonacci Level Marking").
-   *
-   * Quarter-based: 0 / 0.25 / 0.5 / 0.75 / 1.0. NOT the classic
-   * 0.236 / 0.382 / 0.618 — this trader marks quarters, and the worked
-   * example (low 25,000 / high 40,000 -> 28,750 / 32,500 / 36,250) only
-   * reproduces on quarters.
-   *
-   * Types come from position in the range, per the playbook's colour code,
-   * so the marks do not move when spot does.
+   * Splits the range between a high and a low into quarters, and marks those
+   * prices. Deliberately quarters, not the more common 0.382 / 0.618 — the
+   * playbook this follows marks quarters, and its worked example only comes
+   * out right that way.
    */
   fibLevels(swingLow: number, swingHigh: number): FibLevel[] {
     const range = swingHigh - swingLow;
@@ -342,11 +328,9 @@ export class SupportResistanceService {
   }
 
   /**
-   * The swing high / low that anchor the Fibonacci range.
-   *
-   * "Swing High: Highest point in recent range · Swing Low: Lowest point"
-   * (p51). Uses detected swings rather than raw min/max so a single wick
-   * cannot define the range.
+   * The high and low the range is measured between. Uses proper turning
+   * points rather than the raw highest and lowest prices, so one freak spike
+   * cannot define the whole range.
    */
   fibAnchors(candles: Candle[]): { low: number; high: number } | null {
     const highs = this.findSwingHighs(candles);
@@ -360,21 +344,12 @@ export class SupportResistanceService {
   }
 
   /**
-   * Group marks that agree into confluence zones.
+   * Groups levels that land on nearly the same price into a ZONE.
    *
-   * Same running-average grouping as `clusterLevels`, but over heterogeneous
-   * marks (Fib + S/R, any timeframe) rather than swing points of one type.
-   *
-   * A zone needs `minSources` INDEPENDENT contributors — that is what makes
-   * it confluence rather than one level with a wide band. Duplicate sources
-   * are collapsed, so the same level counted twice does not manufacture
-   * agreement.
-   *
-   * Callers therefore control what "independent" means through `source`.
-   * Encode the METHOD (and timeframe), not the touch count: two 1d
-   * resistance clusters sitting next to each other are one piece of
-   * evidence, whereas a resistance and a support at the same price are two
-   * — that is an S/R flip, and it is exactly what confluence should reward.
+   * A zone only counts if several INDEPENDENT methods agree — that is what
+   * makes it meaningful rather than one level with a wide band. Levels found
+   * the same way on the same chart are collapsed into one, so repetition
+   * cannot fake agreement.
    */
   findConfluenceZones(
     marks: MarkedLevel[],

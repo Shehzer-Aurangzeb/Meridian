@@ -4,12 +4,11 @@ import { cn } from '@/lib/utils';
 import { BUCKET_LABEL, type Bucket, type ResultsSummary } from '@/lib/history-buckets';
 
 /**
- * How the analyses turned out, in counts.
+ * How the analyses turned out, as counts and never percentages.
  *
- * Counts, never percentages. Three closed trades make any win rate noise, and
- * the funnel line above the buckets is the reason: "2 won, 1 lost" reads as
- * 67%, while "2 won, 1 lost, 44 never started" is the honest sentence and a
- * different claim about the tool.
+ * "2 won, 1 lost" reads as a 67% success rate. "2 won, 1 lost, 44 never
+ * started" is the same data and a completely different claim — so the totals
+ * above the boxes are as important as the boxes.
  */
 
 const TONE: Partial<Record<Bucket, string>> = {

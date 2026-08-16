@@ -1,12 +1,9 @@
 /**
- * Wire types for the /analyses API, hand-mirrored from apps/api — `web` does
- * not depend on `api`.
+ * The shapes the API returns, copied by hand because the website does not
+ * import from the backend.
  *
- * Dates are `string`, not `Date`: typing them as `Date` compiles and then
- * throws on `.getTime()`.
- *
- * Not re-exported from `@/types` — the legacy `Timeframe` there is missing
- * `12h`, which the level map uses for its Fibonacci anchor.
+ * Dates are text, not Date objects: JSON has no dates, so calling a date
+ * method on one would compile fine and then fail when it runs.
  */
 
 export type AnalysisTimeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '12h' | '1d' | '1w';
@@ -94,11 +91,7 @@ export interface TradePlan {
   riskPercent: number;
   riskPerUnit: number;
   targets: PlanTarget[];
-  /**
-   * Not comparable between plans with different target counts — the 33/33/34
-   * weights leave 34% unallocated with only two targets. Show per plan; never
-   * sum or average across plans.
-   */
+  /** Average reward across the targets, weighted by how much is sold at each. */
   blendedR: number;
   comeBackWhen: string;
 }
@@ -166,11 +159,7 @@ export interface AnalysisRecord {
   };
   regime: RegimeResult;
   route: Route;
-  /**
-   * Only on the CONFLUENCE_CHECKLIST route, one entry per plan direction.
-   * Was a single result scored for a trend-derived side and shown against
-   * both plans.
-   */
+  /** One per plan direction: a checklist only makes sense for one side. */
   checklists: Partial<Record<'long' | 'short', ChecklistResult>> | null;
   /** Only on the SQUEEZE_BREAKOUT route. */
   squeeze: SqueezeSetup | null;
@@ -182,8 +171,10 @@ export interface AnalysisRecord {
 export interface PlanResult {
   direction: Direction;
   outcome: PlanOutcome;
-  /** Realised R, or mark-to-market while OPEN. Null before a fill. */
+  /** Result in R before fees. Null until the trade opens. */
   r: number | null;
+  /** After fees. Anything shown to a person uses this one. */
+  netR: number | null;
   filledAt: string | null;
   targetsHit: number;
 }
@@ -202,20 +193,19 @@ export interface AnalysisListItem {
 }
 
 /**
- * What became of one analysis — the lead plan's outcome and geometry, computed
- * on read by the same code the detail page uses. Present only when the list was
- * fetched with `status=true`.
+ * What became of one analysis. Worked out when read, by the same code the
+ * detail page uses. Only present when the list was asked for it.
  */
 export interface AnalysisStatus {
   direction: Direction | null;
   outcome: PlanOutcome | null;
-  /** Gross R, marked to market while OPEN. Null until a fill. */
+  /** Result in R before fees. Null until the trade opens. */
   r: number | null;
-  /** After the round-trip cost — the number the scoreboard sums. */
+  /** After fees. This is the number the scoreboard adds up. */
   netR: number | null;
   freshness: Freshness;
   filledAt: string | null;
-  /** Targets reached in order; drives the ticks on the ladder. */
+  /** How many targets price reached, in order. */
   targetsHit: number;
   currentPrice: number;
   plan: {
@@ -236,10 +226,9 @@ export interface AnalysisListResponse {
   /** ISO. The window actually applied, whether or not it was asked for. */
   from: string;
   /**
-   * ISO. Rows older than this were produced by a planner with known bugs.
-   * They are still listed and still open — they are kept out of the SCOREBOARD,
-   * because mixing two planners in one expectancy is the harm, and hiding the
-   * rows was never what fixed it.
+   * Analyses older than this were built by an earlier version of the planner.
+   * They are still listed and still open normally — they are only left OUT of
+   * the scoreboard totals, because averaging two planners describes neither.
    */
   epoch: string;
 }
@@ -267,9 +256,8 @@ export interface AnalysisDetail {
   freshness: Freshness;
   outcomes: PlanResult[];
   /**
-   * Null against an API deployed before the verdict shipped. The frontend and
-   * the API deploy on different clocks — Vercel in seconds, CDK in minutes —
-   * so every deploy has a window where this field is not there yet.
+   * Null if the API is older than the website. The two deploy at different
+   * speeds, so every release has a window where this is missing.
    */
   verdict: Verdict | null;
   narration: SavedNarration | null;

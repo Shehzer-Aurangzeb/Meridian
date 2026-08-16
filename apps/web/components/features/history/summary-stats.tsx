@@ -3,11 +3,9 @@
 import type { AnalysesSummary } from '@/lib/summarise-analyses';
 
 /**
- * Counts only — every value here is derivable from the list response.
- *
- * Hit rate and average R used to sit in this strip. They are gone on purpose:
- * both are measurement-harness numbers, and a live-looking win rate on a
- * dashboard is exactly how a research result gets mistaken for a track record.
+ * Counts only. A success rate and an average result used to sit here and were
+ * removed on purpose: on a dashboard they read as a track record, when they
+ * are research numbers from a strategy that has not been proven.
  */
 
 interface SumCellProps {

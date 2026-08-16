@@ -4,16 +4,9 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { PerformanceInterceptor } from './common/interceptors/performance.interceptor';
 
 /**
- * Everything applied to the Nest app that is NOT "start listening".
- *
- * Extracted so `main.ts` (a normal server) and `lambda.ts` (AWS) configure the
- * app identically. If these two drifted, the API would validate, CORS, or
- * authenticate differently in production than it does on your laptop — and
- * that difference would only ever be discovered in production.
- *
- * The only real difference between the two entry points is the last line:
- * a server calls `app.listen(port)`, Lambda calls `app.init()` and hands the
- * app to the runtime instead.
+ * All the app's setup except actually starting it, shared by the local server
+ * and the AWS one. If these two drifted apart, the deployed app would behave
+ * differently from the one on your laptop, and only production would show it.
  */
 export function configureApp(
   app: INestApplication,

@@ -1,12 +1,11 @@
 import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
 
 /**
- * Where an analysis stands, in the six buckets that answer "how is this
- * going" without opening anything.
+ * Where an analysis stands, in a handful of groups that answer "how is this
+ * going" without opening it.
  *
- * The win/lose split uses NET R, after the round-trip cost. Gross would flatter
- * every number on the page: §14h was +0.046R gross and −0.039R net, which is
- * the difference between "this works" and "this does not".
+ * Won or lost is decided AFTER fees. Before fees the same set of trades can
+ * look profitable while actually losing money.
  */
 export type Bucket =
   | 'openUp'
@@ -82,13 +81,11 @@ export interface ResultsSummary {
 }
 
 /**
- * The funnel matters as much as the split. "2 won, 1 lost" reads as a 67% win
- * rate; "2 won, 1 lost, 44 never started" is a different statement about the
- * tool, and it is the true one. Callers must show `total` and `filled`
- * alongside the buckets.
+ * The totals matter as much as the split, so callers must show how many
+ * analyses there were and how many actually opened, next to the groups.
  *
- * `epoch` keeps pre-boundary analyses OUT OF THE AGGREGATE while they stay in
- * the list. Their plans came from code with known bugs, so averaging them with
+ * `epoch` leaves older analyses OUT of these numbers while they stay visible
+ * in the list: they were built by code with known bugs, so averaging them with
  * current ones describes neither.
  */
 export function summariseResults(
