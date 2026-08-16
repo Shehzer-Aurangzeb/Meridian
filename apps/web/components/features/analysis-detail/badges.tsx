@@ -40,10 +40,26 @@ const OUTCOME: Record<PlanOutcome, { style: string; label: string; title: string
   STOPPED: { style: BAD, label: 'Stopped', title: 'Price hit the stop' },
   PARTIAL: { style: GOOD, label: 'Partial', title: 'Some targets hit, the rest still open' },
   ALL_TARGETS: { style: GOOD, label: 'All targets', title: 'Every target was reached' },
+  EXPIRED: {
+    style: MUTED,
+    label: 'Expired',
+    title: 'Filled but never resolved — closed at the mark after 72h',
+  },
+  UNSCOREABLE: {
+    style: MUTED,
+    label: 'Not scored',
+    title: 'The price history needed to score this could not be loaded',
+  },
 };
 
 export function OutcomeBadge({ outcome, r }: { outcome: PlanOutcome; r: number | null }) {
-  const { style, label, title } = OUTCOME[outcome];
+  // Fall back rather than throw: a badge the API adds before the web knows it
+  // should read as unknown, not take the page down.
+  const { style, label, title } = OUTCOME[outcome] ?? {
+    style: MUTED,
+    label: outcome,
+    title: '',
+  };
   return (
     <span className={cn(BADGE, style)} title={title}>
       {label}

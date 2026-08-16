@@ -26,7 +26,11 @@ export type PlanOutcome =
   | 'OPEN'
   | 'STOPPED'
   | 'PARTIAL'
-  | 'ALL_TARGETS';
+  | 'ALL_TARGETS'
+  /** Filled, never reached a target or the stop, and the 72h hold is spent. */
+  | 'EXPIRED'
+  /** The candles needed to score it could not be fetched. No badge, no R. */
+  | 'UNSCOREABLE';
 
 export interface FibLevel {
   /** 0 | 0.25 | 0.5 | 0.75 | 1 */

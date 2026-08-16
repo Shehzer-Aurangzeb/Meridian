@@ -70,8 +70,11 @@ const outcome = (over: Partial<PlanResult> = {}): PlanResult => ({
   direction: 'long',
   outcome: 'PENDING',
   r: null,
+  netR: null,
   filledAt: null,
   targetsHit: 0,
+  legsFilled: 0,
+  filledFraction: 0,
   ...over,
 });
 
@@ -120,11 +123,17 @@ describe('buildVerdict', () => {
     const v = buildVerdict(
       record({ plans: [watch, take] }),
       'LIVE',
-      [outcome({ outcome: 'STOPPED', r: -1 }), outcome({ outcome: 'OPEN', r: 0.42 })],
+      [
+        outcome({ outcome: 'STOPPED', r: -1, netR: -1.07 }),
+        outcome({ outcome: 'OPEN', r: 0.42, netR: 0.35 }),
+      ],
       64300,
     );
 
-    expect(v.status).toContain('+0.42R');
+    // NET, not the 0.42 gross. The card beside this one has always shown net,
+    // and one trade with two numbers on one screen is worse than either.
+    expect(v.status).toContain('+0.35R');
+    expect(v.status).not.toContain('0.42');
     expect(v.status).not.toContain('stopped');
   });
 
@@ -134,8 +143,11 @@ describe('buildVerdict', () => {
 
     expect(at({ outcome: 'PENDING' })).toContain('not reached the entry');
     expect(at({ outcome: 'MISSED' })).toContain('passed by');
-    expect(at({ outcome: 'STOPPED', r: -1 })).toContain('stopped out');
-    expect(at({ outcome: 'PARTIAL', r: 0.6, targetsHit: 1 })).toContain('1 target hit');
-    expect(at({ outcome: 'ALL_TARGETS', r: 1.8 })).toContain('every target');
+    expect(at({ outcome: 'STOPPED', r: -1, netR: -1.07 })).toContain('stopped out');
+    expect(at({ outcome: 'PARTIAL', r: 0.6, netR: 0.53, targetsHit: 1 })).toContain(
+      '1 target hit',
+    );
+    expect(at({ outcome: 'ALL_TARGETS', r: 1.8, netR: 1.73 })).toContain('every target');
+    expect(at({ outcome: 'EXPIRED', r: 0.2, netR: 0.13 })).toContain('+0.13R');
   });
 });

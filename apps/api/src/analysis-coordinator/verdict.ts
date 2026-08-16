@@ -74,17 +74,32 @@ export function leadPlan(plans: TradePlan[]): TradePlan | null {
   );
 }
 
+/**
+ * R as a person reads it, always NET of the round trip.
+ *
+ * Gross flatters every sentence on the page, and the card beside this one has
+ * shown net since it was written — one trade with two numbers on one screen is
+ * worse than either number alone.
+ */
+const rr = (r: PlanResult, whenNull: string): string =>
+  r.netR === null
+    ? whenNull
+    : `${r.netR >= 0 ? '+' : '−'}${Math.abs(r.netR).toFixed(2)}R`;
+
 const STATUS: Record<PlanResult['outcome'], (r: PlanResult) => string> = {
   PENDING: () => 'Price has not reached the entry yet.',
   MISSED: () => 'Price never came back to the entry within a day, so this one was passed by.',
-  OPEN: (r) =>
-    `Filled, and still running at ${r.r === null ? 'break-even' : `${r.r >= 0 ? '+' : '−'}${Math.abs(r.r).toFixed(2)}R`}.`,
-  STOPPED: (r) =>
-    `Filled, then stopped out at ${r.r === null ? 'the stop' : `${r.r.toFixed(2)}R`}.`,
+  EXPIRED: (r) =>
+    `Filled, but never reached a target or the stop. Closed at the end of the hold window ` +
+    `at ${rr(r, 'break-even')}.`,
+  UNSCOREABLE: () =>
+    'The price history needed to score this analysis could not be loaded, so it has no result.',
+  OPEN: (r) => `Filled, and still running at ${rr(r, 'break-even')}.`,
+  STOPPED: (r) => `Filled, then stopped out at ${rr(r, 'the stop')}.`,
   PARTIAL: (r) =>
-    `Filled and ${r.targetsHit} target${r.targetsHit === 1 ? '' : 's'} hit so far, worth ${r.r === null ? '—' : `${r.r >= 0 ? '+' : '−'}${Math.abs(r.r).toFixed(2)}R`}.`,
-  ALL_TARGETS: (r) =>
-    `Filled and every target was reached, worth ${r.r === null ? '—' : `+${r.r.toFixed(2)}R`}.`,
+    `Filled and ${r.targetsHit} target${r.targetsHit === 1 ? '' : 's'} hit so far, ` +
+    `worth ${rr(r, '—')}.`,
+  ALL_TARGETS: (r) => `Filled and every target was reached, worth ${rr(r, '—')}.`,
 };
 
 export function buildVerdict(
