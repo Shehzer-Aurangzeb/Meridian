@@ -47,6 +47,11 @@ export async function GET(request: Request) {
   const symbol = (params.get('symbol') ?? '').trim().toUpperCase();
   const interval = params.get('interval') ?? '1h';
   const limit = Math.min(Number(params.get('limit')) || 500, 1000);
+  // Anchors the window at a point in time instead of at now. A chart of an
+  // analysis from six weeks ago needs the candles around THAT moment; the most
+  // recent 500 do not contain it, and a marker snapped into them lands on an
+  // unrelated bar.
+  const startTime = Number(params.get('startTime'));
 
   if (!SYMBOL.test(symbol)) {
     return NextResponse.json({ message: 'Invalid symbol' }, { status: 400 });
@@ -55,7 +60,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: 'Invalid interval' }, { status: 400 });
   }
 
-  const url = `${BINANCE}?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`;
+  const url =
+    `${BINANCE}?symbol=${symbol}USDT&interval=${interval}&limit=${limit}` +
+    (Number.isFinite(startTime) && startTime > 0 ? `&startTime=${startTime}` : '');
 
   try {
     // A minute of caching: the newest candle is still forming, so a fresher

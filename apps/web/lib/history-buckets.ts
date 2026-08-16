@@ -15,6 +15,13 @@ export type Bucket =
   | 'lostClosed'
   | 'neverStarted'
   | 'tooEarly'
+  /**
+   * Filled, held the full 72h, and never reached a target or the stop. Its own
+   * bucket rather than won/lost by sign, because the R is a MARK, not a
+   * realised exit — folding it into "closed, won" is the survivorship error
+   * that made the live scoreboard read better than the backtest.
+   */
+  | 'expired'
   | 'unscored';
 
 export const BUCKET_LABEL: Record<Bucket, string> = {
@@ -22,6 +29,7 @@ export const BUCKET_LABEL: Record<Bucket, string> = {
   openDown: 'Open, in loss',
   wonClosed: 'Closed, won',
   lostClosed: 'Closed, lost',
+  expired: 'Expired, no verdict',
   neverStarted: 'Never started',
   tooEarly: 'Too early',
   unscored: 'No plan',
@@ -42,6 +50,14 @@ export function bucketOf(status: AnalysisStatus | null | undefined): Bucket {
       return 'wonClosed';
     case 'PARTIAL':
       return (status.netR ?? 0) >= 0 ? 'wonClosed' : 'lostClosed';
+    case 'EXPIRED':
+      return 'expired';
+    // No candles, no verdict. Counted nowhere visible, so it cannot flatter or
+    // damage the split — it is absent, and absent is the honest reading.
+    case 'UNSCOREABLE':
+      return 'unscored';
+    default:
+      return 'unscored';
   }
 }
 
@@ -66,6 +82,7 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
     openDown: 0,
     wonClosed: 0,
     lostClosed: 0,
+    expired: 0,
     neverStarted: 0,
     tooEarly: 0,
     unscored: 0,
@@ -80,7 +97,10 @@ export function summariseResults(rows: AnalysisListItem[]): ResultsSummary {
     if (row.status?.netR != null) {
       netR += row.status.netR;
       filled += 1;
-      if (bucket === 'wonClosed' || bucket === 'lostClosed') closed += 1;
+      // Expired counts as closed — the position is over. It just has no verdict.
+      if (bucket === 'wonClosed' || bucket === 'lostClosed' || bucket === 'expired') {
+        closed += 1;
+      }
     }
   }
 
@@ -93,6 +113,7 @@ export const FILTERABLE_BUCKETS: Bucket[] = [
   'openDown',
   'wonClosed',
   'lostClosed',
+  'expired',
   'neverStarted',
   'tooEarly',
 ];

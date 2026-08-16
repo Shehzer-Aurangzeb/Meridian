@@ -23,6 +23,8 @@ const OUTCOME_TONE: Record<string, string> = {
   STOPPED: 'text-rust',
   MISSED: 'text-text-tertiary',
   PENDING: 'text-text-tertiary',
+  EXPIRED: 'text-text-secondary',
+  UNSCOREABLE: 'text-text-tertiary',
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -32,6 +34,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   STOPPED: 'Stopped out',
   MISSED: 'Never filled',
   PENDING: 'Waiting to fill',
+  EXPIRED: 'Expired unresolved',
+  UNSCOREABLE: 'Not scored',
 };
 
 /** Enough decimals for the coin: LINK needs four, BTC needs two. */

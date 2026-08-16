@@ -15,7 +15,12 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
-import { costR, PlanOutcome, PlanResult, scorePlans } from './outcome';
+import {
+  OUTCOME_WINDOW_HOURS,
+  PlanOutcome,
+  PlanResult,
+  scorePlans,
+} from './outcome';
 import { buildVerdict, leadPlan, Verdict } from './verdict';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { Candle, TimeInterval } from '../common/types/candle.types';
@@ -69,9 +74,43 @@ function readNarration(payload: unknown): SavedNarration | null {
   return typeof value?.text === 'string' ? (value as SavedNarration) : null;
 }
 
-/** Outcome replay series: 1h wicks, 30 days — see the detail route. */
+/**
+ * Outcome replay series: 1h wicks, anchored at the analysis and exactly as long
+ * as the scoring window.
+ *
+ * It used to be "the most recent 720", which for an analysis older than 30 days
+ * is a window the plan's entry was never in — the recorded fill went invisible
+ * and a later touch of the same price could manufacture a new one. `+2` is slack
+ * for the partially-formed bar at each end.
+ */
 const OUTCOME_TIMEFRAME: TimeInterval = '1h';
-const OUTCOME_CANDLES = 720;
+const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
+
+/**
+ * The oldest analysis the list will return.
+ *
+ * Everything before this was produced by a planner with known bugs — the target
+ * ladder weighted a one-target plan at 33% of size, and the entry checklist was
+ * scored once per bar instead of per direction. Those plans are now scored
+ * correctly, which is exactly the problem: a correct score of a bad plan mixes
+ * two different strategies into one scoreboard and neither number means
+ * anything.
+ *
+ * The rows stay in the database and stay reachable by id. They are excluded
+ * from the list, the scoreboard, and every total computed from it.
+ *
+ * Set this to the deploy date. To include the whole history again, set it to 0.
+ */
+export const RESULTS_EPOCH = new Date('2026-08-16T00:00:00Z');
+
+/**
+ * How many outcome windows to fetch at once.
+ *
+ * One Binance request per row, and `limit` goes to 1000 — firing that as a
+ * single burst is how an IP gets rate-limited off the exchange. Each window is
+ * a single page, so a page of 50 rows is 7 short rounds.
+ */
+const OUTCOME_FETCH_CONCURRENCY = 8;
 
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
@@ -120,7 +159,17 @@ export class AnalysesController {
     @Query('limit') limit?: string,
     @Query('status') status?: string,
     @Query('days') days?: string,
-  ): Promise<{ count: number; analyses: unknown[]; truncated: boolean }> {
+  ): Promise<{
+    count: number;
+    analyses: unknown[];
+    truncated: boolean;
+    /**
+     * The window actually applied. `?days=365` before the epoch returns the
+     * epoch, and saying so is the point — a caller that asked for a year and
+     * silently got a fortnight would compute a total for the wrong period.
+     */
+    from: string;
+  }> {
     const where: Prisma.CoordinatorRunWhereInput = {};
     if (symbol) {
       const coin = symbol.trim().toUpperCase();
@@ -133,10 +182,14 @@ export class AnalysesController {
     // A window is honest in a way a row cap is not: `?days=30` returns thirty
     // days or says it could not, where a bare limit of 200 silently drops the
     // oldest analyses and makes any total computed from the response wrong.
+    // Never earlier than the epoch: a `?days=365` must not drag pre-fix
+    // analyses back into a total that claims to describe the current planner.
     const windowDays = Number(days);
-    if (Number.isFinite(windowDays) && windowDays > 0) {
-      where.createdAt = { gte: new Date(Date.now() - windowDays * 86_400_000) };
-    }
+    const from =
+      Number.isFinite(windowDays) && windowDays > 0
+        ? Math.max(Date.now() - windowDays * 86_400_000, RESULTS_EPOCH.getTime())
+        : RESULTS_EPOCH.getTime();
+    where.createdAt = { gte: new Date(from) };
 
     // Anything not a positive number falls back to the default. Clamping
     // instead would turn `?limit=-5` into a single row, which reads as "there
@@ -170,12 +223,14 @@ export class AnalysesController {
     // this response quietly describe a subset.
     const truncated = analyses.length === take;
 
-    if (!wantStatus) return { count: analyses.length, analyses, truncated };
+    const fromIso = new Date(from).toISOString();
+    if (!wantStatus) return { count: analyses.length, analyses, truncated, from: fromIso };
 
     const statuses = await this.statusBySymbol(analyses);
     return {
       count: analyses.length,
       truncated,
+      from: fromIso,
       analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,
@@ -186,11 +241,14 @@ export class AnalysesController {
   /**
    * Score every row on the page.
    *
-   * The expensive inputs are per SYMBOL, not per analysis: the live price, the
-   * candles to replay against, and whichever analysis is newest for that coin.
-   * Fifty-three rows across ten coins is ten price calls and ten candle calls,
-   * shared — which is why a status column is affordable at all and opening
-   * fifty-three detail pages is not.
+   * The price and the newest-analysis lookup are per SYMBOL and shared. The
+   * REPLAY SERIES is not: each analysis is scored against the window that
+   * starts at that analysis, so it is one fetch per row.
+   *
+   * That is more requests than the single shared series it replaces, and it is
+   * the price of the badge being right — a shared "most recent 720" cannot
+   * serve rows taken weeks apart. Each window is small (98 bars) and cached by
+   * (symbol, start, length), so repeated loads of the same page are free.
    */
   private async statusBySymbol(
     rows: Array<{ id: string; symbol: string; createdAt: Date; coordinatorPayload: unknown }>,
@@ -203,21 +261,39 @@ export class AnalysesController {
         symbols.map(async (coin) => {
           // A failure here must not take the page down: a coin Binance cannot
           // serve loses its status, not its row.
-          const [price, candles, newest] = await Promise.all([
+          const [price, newest] = await Promise.all([
             this.binance.getCurrentPrice(coin).catch(() => NaN),
-            this.binance
-              .getCandlesPaged(coin, OUTCOME_TIMEFRAME, OUTCOME_CANDLES)
-              .catch(() => [] as Candle[]),
             this.prisma.coordinatorRun.findFirst({
               where: { symbol: coin },
               orderBy: { createdAt: 'desc' },
               select: { coordinatorPayload: true },
             }),
           ]);
-          return [coin, { price, candles, newest }] as const;
+          return [coin, { price, newest }] as const;
         }),
       ),
     );
+
+    // One window per row, in bounded batches. A row whose candles cannot be
+    // fetched scores UNSCOREABLE rather than being scored against someone
+    // else's window.
+    const perRow = new Map<string, Candle[]>();
+    for (let i = 0; i < rows.length; i += OUTCOME_FETCH_CONCURRENCY) {
+      const batch = await Promise.all(
+        rows.slice(i, i + OUTCOME_FETCH_CONCURRENCY).map(async (row) => {
+          const candles = await this.binance
+            .getCandlesFrom(
+              row.symbol,
+              OUTCOME_TIMEFRAME,
+              row.createdAt.getTime(),
+              OUTCOME_CANDLES,
+            )
+            .catch(() => [] as Candle[]);
+          return [row.id, candles] as const;
+        }),
+      );
+      for (const [id, candles] of batch) perRow.set(id, candles);
+    }
 
     const out = new Map<string, AnalysisStatus>();
     for (const row of rows) {
@@ -252,7 +328,9 @@ export class AnalysesController {
       // then discarding one is work for a number nobody reads.
       const [scored] = scorePlans(
         [lead],
-        shared.candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
+        (perRow.get(row.id) ?? []).filter(
+          (c) => c.time.getTime() > row.createdAt.getTime(),
+        ),
         row.createdAt,
         now,
       );
@@ -261,7 +339,10 @@ export class AnalysesController {
         direction: scored.direction,
         outcome: scored.outcome,
         r: scored.r,
-        netR: scored.r === null ? null : scored.r - costR(lead.riskPercent),
+        // Straight from the scorer, which charges the round trip on the size
+        // actually acquired. Re-deriving it here is what let the card and the
+        // verdict print two different numbers for one trade.
+        netR: scored.netR,
         freshness,
         filledAt: scored.filledAt,
         targetsHit: scored.targetsHit,
@@ -320,10 +401,15 @@ export class AnalysesController {
         select: { coordinatorPayload: true },
       }),
       // 1h is the finest series paged cheaply, so a stop or target touched
-      // intraday is not missed by a coarser candle. 720 = 30 days, which is
-      // well past the 24h in which every backtested fill happened.
+      // intraday is not missed by a coarser candle. Anchored at the analysis,
+      // not at now — see OUTCOME_CANDLES.
       this.binance
-        .getCandlesPaged(row.symbol, OUTCOME_TIMEFRAME, OUTCOME_CANDLES)
+        .getCandlesFrom(
+          row.symbol,
+          OUTCOME_TIMEFRAME,
+          row.createdAt.getTime(),
+          OUTCOME_CANDLES,
+        )
         .catch(() => [] as Candle[]),
     ]);
 

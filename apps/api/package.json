@@ -18,7 +18,8 @@
     "backtest": "npx ts-node test/manual/backtest.ts",
     "backtest:plans": "npx ts-node test/manual/backtest-plans.ts",
     "forward-test": "npx ts-node test/manual/forward-test.ts",
-    "journal": "npx ts-node test/manual/journal.ts"
+    "journal": "npx ts-node test/manual/journal.ts",
+    "golden": "npx ts-node --transpile-only scripts/golden-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

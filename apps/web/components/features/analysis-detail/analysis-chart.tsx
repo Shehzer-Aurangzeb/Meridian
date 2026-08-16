@@ -36,6 +36,31 @@ import type { AnalysisRecord, Direction, TradePlan } from '@/types/analyses';
 export const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '12h', '1d', '1w'] as const;
 export type Interval = (typeof INTERVALS)[number];
 
+const BAR_SECONDS: Record<Interval, number> = {
+  '1m': 60,
+  '5m': 300,
+  '15m': 900,
+  '1h': 3600,
+  '4h': 14_400,
+  '12h': 43_200,
+  '1d': 86_400,
+  '1w': 604_800,
+};
+
+const CANDLE_LIMIT = 500;
+/**
+ * Bars of context to the left of the analysis.
+ *
+ * The window is anchored here rather than at now. "The most recent 500" is a
+ * window an analysis older than 500 bars is not IN — and the marker below
+ * snapped to the nearest bar in it, which put "analysed" on an unrelated
+ * candle weeks from the real one, with no indication anything was wrong.
+ *
+ * The same anchoring for a fresh analysis costs nothing: it still runs to the
+ * live edge, because the limit reaches past now.
+ */
+const LEAD_BARS = 150;
+
 /** Read a theme colour from CSS rather than duplicating the palette here. */
 function cssColor(name: string, alpha = 1): string {
   if (typeof window === 'undefined') return '#888';
@@ -96,7 +121,27 @@ export function AnalysisChart({
     () => leadPlan(analysis.plans)?.direction ?? null,
   );
 
-  const { data: candles, isLoading, error } = useCandles(analysis.symbol, interval);
+  const barSeconds = BAR_SECONDS[interval];
+  const analysedSeconds = Math.floor(new Date(analysedAt).getTime() / 1000);
+  const windowStart = (analysedSeconds - LEAD_BARS * barSeconds) * 1000;
+
+  const {
+    data: candles,
+    isLoading,
+    error,
+  } = useCandles(analysis.symbol, interval, CANDLE_LIMIT, windowStart);
+
+  /**
+   * Does the loaded window run up to the present?
+   *
+   * The window is anchored at the analysis, so for an old one it ends weeks
+   * ago and the live socket has nothing to say about it. Everything live —
+   * the forming bar, the OHLC readout — is gated on this, because today's
+   * price shown over a chart of June is the same lie as the misplaced arrow.
+   */
+  const windowReachesNow =
+    !!candles?.length &&
+    Date.now() / 1000 - candles[candles.length - 1].time < 2 * barSeconds;
 
   const plan = useMemo(
     () => analysis.plans.find((p) => p.direction === direction),
@@ -187,20 +232,29 @@ export function AnalysisChart({
 
     // Where the analysis was taken. Without it the levels read as arbitrary
     // rather than as something computed from the candles to its left.
+    //
+    // The bar it belongs on is the one whose period CONTAINS the analysis, not
+    // whichever bar is closest — closest has no upper bound, so an analysis
+    // outside the loaded range used to snap to the nearest edge of it and put
+    // the arrow on an unrelated candle. If the window does not contain the
+    // moment, no marker: an arrow in the wrong place is worse than none.
     const at = Math.floor(new Date(analysedAt).getTime() / 1000);
-    const nearest = candles.reduce((best, c) =>
-      Math.abs(c.time - at) < Math.abs(best.time - at) ? c : best,
+    const bar = candles.find((c) => at >= c.time && at < c.time + barSeconds);
+    createSeriesMarkers(
+      series,
+      bar
+        ? [
+            {
+              time: bar.time as UTCTimestamp,
+              position: 'aboveBar',
+              color: cssColor('--gold-ink'),
+              shape: 'arrowDown',
+              text: 'analysed',
+            },
+          ]
+        : [],
     );
-    createSeriesMarkers(series, [
-      {
-        time: nearest.time as UTCTimestamp,
-        position: 'aboveBar',
-        color: cssColor('--gold-ink'),
-        shape: 'arrowDown',
-        text: 'analysed',
-      },
-    ]);
-  }, [candles, analysedAt, resolvedTheme, interval, analysis.symbol]);
+  }, [candles, analysedAt, resolvedTheme, interval, analysis.symbol, barSeconds]);
 
   // ── the forming candle ───────────────────────────────────────────────
   // `update` only accepts a time at or after the last bar, so a socket message
@@ -208,10 +262,10 @@ export function AnalysisChart({
   // throwing.
   useEffect(() => {
     const series = seriesRef.current;
-    if (!series || !live || !candles?.length) return;
-    if (live.time < candles[candles.length - 1].time) return;
+    if (!series || !live || !windowReachesNow) return;
+    if (live.time < candles![candles!.length - 1].time) return;
     series.update({ ...live, time: live.time as UTCTimestamp });
-  }, [live, candles]);
+  }, [live, candles, windowReachesNow]);
 
   // ── the analysis, as price lines ─────────────────────────────────────
   useEffect(() => {
@@ -275,7 +329,12 @@ export function AnalysisChart({
     return () => drawn.forEach((line) => series.removePriceLine(line));
   }, [analysis.map, plan, candles, resolvedTheme, interval]);
 
-  const readout = hover ?? (live ? { open: live.open, high: live.high, low: live.low, close: live.close } : null);
+  const liveBar = windowReachesNow ? live : null;
+  const readout =
+    hover ??
+    (liveBar
+      ? { open: liveBar.open, high: liveBar.high, low: liveBar.low, close: liveBar.close }
+      : null);
 
   return (
     <section className="bg-surface border border-border/10 dark:border-border rounded-xl overflow-hidden">
@@ -298,19 +357,22 @@ export function AnalysisChart({
             </div>
           )}
 
+          {/* The socket can be connected while this chart is a window into
+              June. "Live" then names the connection, not what you are looking
+              at, so an old analysis says so instead. */}
           <span
             className={cn(
               'flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase',
-              isLive ? 'text-green' : 'text-text-tertiary',
+              isLive && windowReachesNow ? 'text-green' : 'text-text-tertiary',
             )}
           >
             <span
               className={cn(
                 'w-1.5 h-1.5 rounded-full',
-                isLive ? 'bg-green animate-pulse' : 'bg-text-tertiary',
+                isLive && windowReachesNow ? 'bg-green animate-pulse' : 'bg-text-tertiary',
               )}
             />
-            {isLive ? 'Live' : 'Delayed'}
+            {!windowReachesNow ? 'Historical' : isLive ? 'Live' : 'Delayed'}
           </span>
         </div>
 

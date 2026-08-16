@@ -1,8 +1,13 @@
 /**
  * Exit-style arms, scored on IDENTICAL entries.
  *
- *   npx ts-node test/manual/exits.ts --self-check
- *   npx ts-node test/manual/exits.ts --report test/manual/results/y3-exits.csv
+ *   npx ts-node test/manual/exits.ts --report results/arms.csv --split tune
+ *   npx ts-node test/manual/exits.ts --stress results/arms.csv --split tune
+ *
+ * --split is REQUIRED: tune | holdout | all. There is no default, and
+ * --split holdout prints a banner saying the rows are now spent.
+ *
+ * Correctness lives in exits.spec.ts, under `pnpm test`.
  *
  * The question is the payoff ratio: our losers are bigger than our winners,
  * and no entry filter touches that. So hold the entries fixed and vary only
@@ -23,13 +28,24 @@
  */
 import * as fs from 'fs';
 import { Candle } from '../../src/common/types/candle.types';
-import { scoreLadder } from '../../src/common/replay/plan-replay';
+import {
+  aggregate,
+  ScorablePlan,
+  ScoringConfig,
+  scoreRow,
+  scoreTrade,
+  TradeScore,
+} from '../../src/common/replay/trade-scoring';
 import { blockBootstrap } from './holdout';
 
 export interface ArmSpec {
   name: string;
-  /** Bars allowed before the position is marked to market. */
-  maxBars: number;
+  /**
+   * Bars allowed before the position is marked to market. UNDEFINED means
+   * inherit the base run's `--max-bars`, which is what makes `BASE_check` a
+   * real invariant rather than a copy of the number that happens to match.
+   */
+  maxBars?: number;
   /** Multiplier on each target's DISTANCE FROM ENTRY. null = no fixed targets. */
   targetScale: number | null;
   /** Multiplier on the stop distance. Changes what 1R means for this arm. */
@@ -44,13 +60,53 @@ export interface ArmSpec {
    * different units to each other.
    */
   trailMult?: number;
+  /**
+   * Close when the re-analysis stops supporting the trade, naming WHICH
+   * reading of "no longer supports" to use.
+   *
+   * The signals themselves come from the caller — `backtest-plans.ts` knows
+   * what the map looked like at every bar; this file only knows which one an
+   * arm listens to. An arm whose signal is not supplied behaves exactly like
+   * the base arm, which is what makes it safe to leave in the list when
+   * reporting against an older CSV.
+   */
+  exitOnSignal?: 'zone-gone' | 'no-plan';
 }
 
 export const ARMS: ArmSpec[] = [
+  // The control. Every parameter neutral and `maxBars` inherited, so it IS the
+  // base trade — asserted bit-identical in exits.spec.ts. If it ever diverges,
+  // this file has grown its own model again and no arm number means anything.
+  { name: 'BASE_check', targetScale: 1, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'A_current', maxBars: 480, targetScale: 1, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'B2_wide2x', maxBars: 960, targetScale: 2, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'B3_wide3x', maxBars: 960, targetScale: 3, stopScale: 1, breakevenAfterTarget: 1, trail: false },
   { name: 'D_tight', maxBars: 120, targetScale: 1, stopScale: 0.5, breakevenAfterTarget: 1, trail: false },
+  // Everything else here exits on PRICE. This one exits on the ANALYSIS: same
+  // entries, same stop, same targets as BASE_check — the only difference is
+  // that it closes when a later re-analysis no longer supports the trade.
+  // BASE_check is therefore its exact control; the pair differ in one rule.
+  // The zone the plan was built on is no longer marked anywhere in the map.
+  {
+    name: 'E_zonegone',
+    targetScale: 1,
+    stopScale: 1,
+    breakevenAfterTarget: 1,
+    trail: false,
+    exitOnSignal: 'zone-gone',
+  },
+  // Stricter: the tool would not print this trade at all now. Fires far more
+  // often, and for a reason worth knowing about — price moving INTO the zone
+  // stops it being the nearest one on that side, so a trade going WELL can
+  // trip this. Measured rather than assumed away.
+  {
+    name: 'E_noplan',
+    targetScale: 1,
+    stopScale: 1,
+    breakevenAfterTarget: 1,
+    trail: false,
+    exitOnSignal: 'no-plan',
+  },
   // The trail-distance surface. C_trail_10 is the original arm C.
   ...[0.5, 0.75, 1, 1.5, 2].map((m) => ({
     name: `C_trail_${String(m).replace('.', '').padEnd(2, '0')}`,
@@ -63,278 +119,301 @@ export const ARMS: ArmSpec[] = [
   })),
 ];
 
-export const MAX_ARM_BARS = Math.max(...ARMS.map((a) => a.maxBars));
+/**
+ * The longest hold any arm can ask for. The decision walk reserves
+ * `FILL_BARS + max(MAX_BARS, MAX_ARM_BARS)` bars at the end of the series, so
+ * no arm can read the still-forming candle — the 960-bar arms used to run 864
+ * bars past the base trade's reserve and straight into it.
+ *
+ * Arms with no `maxBars` inherit the base config and are already covered by it.
+ */
+export const MAX_ARM_BARS = Math.max(0, ...ARMS.map((a) => a.maxBars ?? 0));
 
 /**
- * Trailing stop, no fixed target. Ratchets by one initial-risk unit behind
- * the best price seen so far.
+ * Score one filled trade under one arm.
  *
- * The stop is tested BEFORE the bar's extreme updates the trail, matching
- * `scoreLadder`'s convention: OHLC carries no intra-bar ordering, so the
- * pessimistic branch is the only honest one. Letting the same bar first
- * ratchet the stop up and then test it would book gains from an ordering the
- * data does not record.
+ * `forward` is the SAME slice the base trade got — starting at the bar after
+ * the decision bar, not after the fill — because every arm must re-derive the
+ * entry through `scoreTrade` rather than be handed one. This file used to run
+ * its own model: a single full-size fill at `averageEntry`, resolution starting
+ * at `fillIdx + 1`, and targets allowed on the fill bar. All three were fixed
+ * in the base path at CP1, CP3 and CP3.5, and none of the fixes reached here,
+ * so `arms.csv` was comparing exit rules measured under different entry
+ * assumptions.
+ *
+ * An arm is now nothing but a set of PARAMETERS to the shared scorer.
  */
-export function scoreTrailing(
-  post: Candle[],
-  input: {
-    direction: 'long' | 'short';
-    entry: number;
-    riskPerUnit: number;
-    /** Trail distance. Defaults to riskPerUnit, which is the original arm C. */
-    trailDistance?: number;
-  },
-): { r: number; status: string; barsHeld: number } {
-  const long = input.direction === 'long';
-  const { entry, riskPerUnit } = input;
-  // R is always normalised by riskPerUnit, never by the trail — otherwise a
-  // wider trail would silently shrink every reported R and the sweep would
-  // measure the unit change rather than the rule change.
-  const trailDistance = input.trailDistance ?? riskPerUnit;
-  if (riskPerUnit === 0 || post.length === 0) return { r: 0, status: 'TIMEOUT', barsHeld: 0 };
-
-  let stop = long ? entry - riskPerUnit : entry + riskPerUnit;
-  let extreme = entry;
-
-  for (let i = 0; i < post.length; i += 1) {
-    const c = post[i];
-    if (long ? c.low <= stop : c.high >= stop) {
-      return {
-        r: (long ? stop - entry : entry - stop) / riskPerUnit,
-        status: 'STOPPED',
-        barsHeld: i + 1,
-      };
-    }
-    extreme = long ? Math.max(extreme, c.high) : Math.min(extreme, c.low);
-    const trailed = long ? extreme - trailDistance : extreme + trailDistance;
-    // Ratchet only — a trailing stop never loosens.
-    stop = long ? Math.max(stop, trailed) : Math.min(stop, trailed);
-  }
-
-  const last = post[post.length - 1].close;
-  return {
-    r: (long ? last - entry : entry - last) / riskPerUnit,
-    status: 'TIMEOUT',
-    barsHeld: post.length,
-  };
-}
-
-/** Score one filled trade under one arm. `post` must be at least maxBars long. */
 export function scoreArm(
-  post: Candle[],
-  plan: {
-    direction: 'long' | 'short';
-    averageEntry: number;
-    riskPerUnit: number;
-    targets: Array<{ price: number; weightPercent: number }>;
-  },
+  forward: Candle[],
+  plan: ScorablePlan,
   spec: ArmSpec,
-  roundTripPct: number,
-): { r: number; costR: number; netR: number; status: string; barsHeld: number } {
+  base: ScoringConfig,
+  /**
+   * "Has the analysis stopped supporting this trade by bar n of `forward`?",
+   * one function per reading of the question. Supplied per trade by the
+   * caller, and only the one an arm names is consulted. Omitted, an
+   * `exitOnSignal` arm is the base arm.
+   */
+  signals?: Partial<Record<NonNullable<ArmSpec['exitOnSignal']>, (barIndex: number) => boolean>>,
+): TradeScore {
   const long = plan.direction === 'long';
-  const risk = plan.riskPerUnit * spec.stopScale;
-  const stop = long ? plan.averageEntry - risk : plan.averageEntry + risk;
-  const window = post.slice(0, spec.maxBars);
+  const neutralStop = spec.stopScale === 1;
+  const risk = neutralStop ? plan.riskPerUnit : plan.riskPerUnit * spec.stopScale;
 
-  // Explicit branches rather than a `realizedR ?? r` union: the two scorers
-  // name their result differently, and a silent `??` fallback would read 0R
-  // as a real outcome the day one of them changes shape.
-  let r: number;
-  let status: string;
-  let barsHeld: number;
-  if (spec.trail) {
-    const s = scoreTrailing(window, {
-      direction: plan.direction,
-      entry: plan.averageEntry,
-      riskPerUnit: risk,
-      trailDistance: risk * (spec.trailMult ?? 1),
-    });
-    ({ r, status, barsHeld } = s);
-  } else {
-    const s = scoreLadder(window, {
-      direction: plan.direction,
-      averageEntry: plan.averageEntry,
-      stop,
-      riskPerUnit: risk,
-      targets: plan.targets.map((t) => ({
-        // Scale the DISTANCE from entry, keeping the side and the weights.
-        price: plan.averageEntry + (t.price - plan.averageEntry) * (spec.targetScale ?? 1),
-        weightPercent: t.weightPercent,
-      })),
-      breakevenAfterTarget: spec.breakevenAfterTarget,
-    });
-    r = s.realizedR;
-    status = s.status;
-    barsHeld = s.barsHeld;
+  // At 1x the plan's own numbers are passed VERBATIM rather than recomputed.
+  // `averageEntry − (averageEntry − stop)` is not bit-identical to `stop` in
+  // floating point, and the BASE_check invariant has to be exact.
+  const armPlan: ScorablePlan = {
+    ...plan,
+    stop: neutralStop
+      ? plan.stop
+      : long
+        ? plan.averageEntry - risk
+        : plan.averageEntry + risk,
+    riskPerUnit: risk,
+    riskPercent: neutralStop
+      ? plan.riskPercent
+      : plan.averageEntry === 0
+        ? 0
+        : (risk / plan.averageEntry) * 100,
+    targets:
+      spec.targetScale === null
+        ? [] // trailing arms exit on the trail alone
+        : spec.targetScale === 1
+          ? plan.targets
+          : plan.targets.map((t) => ({
+              // Scale the DISTANCE from entry, keeping the side and the weights.
+              price:
+                plan.averageEntry +
+                (t.price - plan.averageEntry) * (spec.targetScale as number),
+              weightPercent: t.weightPercent,
+            })),
+  };
+
+  // Cost is charged against THIS arm's stop distance, via `riskPercent` above.
+  // A halved stop doubles the toll in R, which is why arm D cannot be compared
+  // on R alone.
+  return scoreTrade(forward, armPlan, {
+    ...base,
+    maxBars: spec.maxBars ?? base.maxBars,
+    breakevenAfterTarget: spec.breakevenAfterTarget,
+    // R stays normalised by the arm's initial risk, never by the trail, so a
+    // wider trail cannot silently shrink every reported R.
+    trailDistance: spec.trail ? risk * (spec.trailMult ?? 1) : undefined,
+    exitSignal: spec.exitOnSignal ? signals?.[spec.exitOnSignal] : undefined,
+  });
+}
+
+// The self-check block that lived here is now `exits.spec.ts`, run by `pnpm
+// test` with the rest of the suite. It was checking `scoreTrailing`, which no
+// longer exists — the trail is a parameter to `scoreTrade`.
+
+// ── which rows ──────────────────────────────────────────────────────────
+
+export type Split = 'tune' | 'holdout' | 'all';
+
+/**
+ * Chronological cut, matching `holdout.ts --tune`. Kept as a literal here
+ * rather than imported because `holdout.ts` derives its own from argv at module
+ * load; the two must agree, and `exits.spec.ts` asserts the boundary this
+ * produces on the arms file's span.
+ */
+export const TUNE_FRACTION = 0.7;
+
+export interface Selection<T> {
+  split: Split;
+  rows: T[];
+  /** Span of the SELECTED rows. */
+  from: number;
+  to: number;
+  /** Span of the whole file, and the boundary between the two halves. */
+  spanFrom: number;
+  spanTo: number;
+  cut: number;
+  total: number;
+}
+
+/**
+ * Read the split off argv. There is NO default.
+ *
+ * Both entry points used to slice HOLDOUT silently — `report()` said so only in
+ * its title, `stress()` printed TUNE and HOLDOUT side by side. Either way the
+ * holdout got spent by anyone who typed the command without reading the source.
+ * A run that will not start is the only version of this rule that holds.
+ */
+export function parseSplit(argv: string[]): Split {
+  const i = argv.indexOf('--split');
+  const value = i >= 0 ? argv[i + 1] : undefined;
+  if (!value) {
+    throw new Error(
+      'refusing: --split is required, one of tune | holdout | all.\n' +
+        '  --split tune     the oldest 70% by calendar time. Use this.\n' +
+        '  --split holdout  the newest 30%. One shot, and it is spent afterwards.\n' +
+        '  --split all      both, for a description of the file — never for a decision.\n' +
+        'There is no default, because a silent default is how a holdout gets read by accident.',
+    );
   }
-
-  // Cost is charged against THIS arm's stop distance. A halved stop doubles
-  // the toll in R, which is why arm D cannot be compared on R alone.
-  const riskPercent = (risk / plan.averageEntry) * 100;
-  const costR = riskPercent === 0 ? 0 : roundTripPct / riskPercent;
-  return { r, costR, netR: r - costR, status, barsHeld };
+  if (value !== 'tune' && value !== 'holdout' && value !== 'all') {
+    throw new Error(`unknown --split ${value}; one of tune | holdout | all`);
+  }
+  return value;
 }
 
-// ── self-check ──────────────────────────────────────────────────────────
+/**
+ * Cut a time-sorted set into the requested split.
+ *
+ * `tune` and `holdout` are disjoint and their union is `all` — asserted in
+ * `exits.spec.ts`, because an off-by-one on `<` vs `<=` here would leak a
+ * holdout row into every TUNE number quietly and permanently.
+ */
+export function selectSplit<T extends { time: number }>(
+  all: T[],
+  split: Split,
+): Selection<T> {
+  if (all.length === 0) throw new Error('no rows to split');
+  const sorted = [...all].sort((a, b) => a.time - b.time);
+  const spanFrom = sorted[0].time;
+  const spanTo = sorted[sorted.length - 1].time;
+  const cut = spanFrom + (spanTo - spanFrom) * TUNE_FRACTION;
 
-function selfCheck(): void {
-  const assert = (c: boolean, m: string): void => {
-    if (!c) throw new Error(`self-check FAILED: ${m}`);
+  const rows =
+    split === 'all'
+      ? sorted
+      : split === 'tune'
+        ? sorted.filter((r) => r.time < cut)
+        : sorted.filter((r) => r.time >= cut);
+
+  return {
+    split,
+    rows,
+    from: rows.length ? rows[0].time : NaN,
+    to: rows.length ? rows[rows.length - 1].time : NaN,
+    spanFrom,
+    spanTo,
+    cut,
+    total: sorted.length,
   };
-  const bar = (high: number, low: number, close = (high + low) / 2): Candle =>
-    ({ time: new Date(0), open: close, high, low, close, volume: 0 }) as Candle;
-
-  // ── trailing stop ──
-  // Straight up then a collapse: the ratchet must book the trailed level, not
-  // the original stop and not the peak.
-  const up = [bar(102, 100), bar(104, 102), bar(106, 104), bar(106, 99)];
-  const t1 = scoreTrailing(up, { direction: 'long', entry: 100, riskPerUnit: 2 });
-  // After bar 3 the extreme is 106, so the stop sits at 104. Bar 4 dips to 99.
-  assert(t1.status === 'STOPPED', 'a collapse through the trail stops the trade');
-  assert(Math.abs(t1.r - 2) < 1e-9, `trailed exit at 104 on a 2-unit risk is +2R (got ${t1.r})`);
-  assert(t1.barsHeld === 4, 'it stopped on the fourth bar');
-
-  // Immediate loss: never ratcheted, so the exit is the original stop at -1R.
-  const down = [bar(101, 97)];
-  const t2 = scoreTrailing(down, { direction: 'long', entry: 100, riskPerUnit: 2 });
-  assert(t2.status === 'STOPPED' && Math.abs(t2.r - -1) < 1e-9, 'an untouched trail exits at -1R');
-
-  // The stop is tested BEFORE the same bar's high moves the trail. A bar that
-  // spikes up and then breaks the old stop must count as stopped, not saved.
-  const spike = [bar(120, 97)];
-  const t3 = scoreTrailing(spike, { direction: 'long', entry: 100, riskPerUnit: 2 });
-  assert(t3.status === 'STOPPED', 'a bar cannot ratchet its own stop out of the way');
-
-  // Never loosens: a pullback after a run keeps the higher stop.
-  const wobble = [bar(110, 100), bar(105, 103), bar(105, 100)];
-  const t4 = scoreTrailing(wobble, { direction: 'long', entry: 100, riskPerUnit: 2 });
-  assert(Math.abs(t4.r - 4) < 1e-9, `the ratchet holds at 108 after the peak (got ${t4.r})`);
-
-  // Shorts mirror exactly — the same fixture reflected about the entry, so
-  // it must produce the same +2R the long case did.
-  const t5 = scoreTrailing(
-    [bar(100, 98), bar(98, 96), bar(96, 94), bar(101, 94)],
-    { direction: 'short', entry: 100, riskPerUnit: 2 },
-  );
-  assert(
-    t5.status === 'STOPPED' && Math.abs(t5.r - 2) < 1e-9,
-    `a short trails downward the same way (got ${t5.r})`,
-  );
-
-  // Runs to the end without stopping: marked to market, never assumed a win.
-  const t6 = scoreTrailing([bar(101, 100, 101)], { direction: 'long', entry: 100, riskPerUnit: 2 });
-  assert(t6.status === 'TIMEOUT' && Math.abs(t6.r - 0.5) < 1e-9, 'an open trail marks to market');
-
-  // A wider trail must give the price more room, so it survives a pullback
-  // the 1x trail would have stopped — and R is still measured in initial-risk
-  // units, not trail units.
-  const roomy = scoreTrailing(up, {
-    direction: 'long', entry: 100, riskPerUnit: 2, trailDistance: 4,
-  });
-  // Extreme 106, trail 4 wide -> stop 102. Bar 4 dips to 99, so it stops at 102.
-  assert(Math.abs(roomy.r - 1) < 1e-9, `a 2x trail exits at 102 = +1R (got ${roomy.r})`);
-  assert(roomy.r < t1.r, 'the wider trail gives back more of the move');
-  // The initial stop is NOT widened by the trail parameter.
-  const tight = scoreTrailing([bar(101, 97)], {
-    direction: 'long', entry: 100, riskPerUnit: 2, trailDistance: 8,
-  });
-  assert(
-    tight.status === 'STOPPED' && Math.abs(tight.r - -1) < 1e-9,
-    'a wide trail does not move the initial stop off -1R',
-  );
-
-  // ── target scaling ──
-  // 2x must double the DISTANCE from entry, not the price.
-  const plan = {
-    direction: 'long' as const,
-    averageEntry: 100,
-    riskPerUnit: 2,
-    targets: [{ price: 110, weightPercent: 100 }],
-  };
-  const wide = ARMS.find((a) => a.name === 'B2_wide2x')!;
-  // Reaching 119 must NOT fill a 2x target at 120.
-  const missed = scoreArm([bar(119, 105, 119)], plan, wide, 0.14);
-  assert(missed.status === 'TIMEOUT', 'a 2x target sits at 120, so 119 does not fill it');
-  const hit = scoreArm([bar(121, 105, 121)], plan, wide, 0.14);
-  assert(hit.status === 'ALL_TARGETS', 'and 121 does');
-
-  // ── cost scales with the arm's own stop ──
-  const a = scoreArm([bar(101, 99, 101)], plan, ARMS[0], 0.14);
-  const d = scoreArm([bar(101, 99, 101)], plan, ARMS.find((x) => x.name === 'D_tight')!, 0.14);
-  assert(
-    Math.abs(d.costR - 2 * a.costR) < 1e-9,
-    'halving the stop doubles the toll measured in R',
-  );
-
-  console.log('self-check passed (trailing ratchet, bar ordering, shorts, target scaling, arm cost)');
 }
 
-if (require.main === module && process.argv.includes('--self-check')) {
-  selfCheck();
-  process.exit(0);
+const day = (t: number): string =>
+  Number.isNaN(t) ? '—' : new Date(t).toISOString().slice(0, 10);
+
+/**
+ * The banner every table prints. A number whose rows are unstated is not a
+ * result, so this is not optional and not abbreviated.
+ */
+export function splitHeader<T>(title: string, source: string, sel: Selection<T>): string {
+  const pct = sel.total === 0 ? 0 : (sel.rows.length / sel.total) * 100;
+  const lines = [
+    ``,
+    `${title}`,
+    `source   ${source}`,
+    `file     ${day(sel.spanFrom)} → ${day(sel.spanTo)}  ${sel.total} trades  ` +
+      `(cut at ${day(sel.cut)})`,
+    `SPLIT    ${sel.split.toUpperCase()}  ${day(sel.from)} → ${day(sel.to)}  ` +
+      `${sel.rows.length} trades (${pct.toFixed(0)}%), identical across every arm`,
+  ];
+  if (sel.split === 'holdout') {
+    lines.push(
+      ``,
+      `  ######################################################################`,
+      `  ##  HOLDOUT. These rows are spent the moment this prints.           ##`,
+      `  ##  Every arm you see here has now been selected on. Nothing         ##`,
+      `  ##  measured after this is out-of-sample, and re-running does not    ##`,
+      `  ##  undo it.                                                         ##`,
+      `  ######################################################################`,
+    );
+  }
+  if (sel.split === 'all') {
+    lines.push(
+      ``,
+      `  NOTE: --split all includes the holdout rows. Descriptive only —`,
+      `  no arm may be chosen, tuned or killed on this output.`,
+    );
+  }
+  return lines.join('\n') + '\n';
 }
 
 // ── report ──────────────────────────────────────────────────────────────
 
-function report(path: string): void {
+function report(path: string, split: Split): void {
   const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
   const head = lines.findIndex((l) => !l.startsWith('#'));
   const cols = lines[head].split(',');
-  const rows = lines
+  const all = lines
     .slice(head + 1)
     .map((l) => Object.fromEntries(cols.map((c, i) => [c, l.split(',')[i] ?? ''])))
     .filter((r) => r.tier === 'PLAN')
     .map((r) => ({ time: new Date(r.time).getTime(), cells: r }));
 
-  rows.sort((a, b) => a.time - b.time);
-  const t0 = rows[0].time;
-  const t1 = rows[rows.length - 1].time;
-  const cut = t0 + (t1 - t0) * 0.7;
-  const holdout = rows.filter((r) => r.time >= cut);
-  const day = (t: number): string => new Date(t).toISOString().slice(0, 10);
+  const sel = selectSplit(all, split);
+  // Named for the split, not for a guess about which one. This function used
+  // to hard-code the holdout half and say so only in its title.
+  const rows = sel.rows;
+  console.log(splitHeader('EXIT ARMS — SAME ENTRIES, DIFFERENT EXITS', path, sel));
 
-  console.log(`\nEXIT ARMS — SAME ENTRIES, DIFFERENT EXITS (HOLDOUT ONLY)`);
-  console.log(`source   ${path}`);
-  console.log(`holdout  ${day(cut)} → ${day(t1)}  ${holdout.length} trades, identical across every arm\n`);
+  // One basis, not two. There used to be a "TIMEOUT at 0R" table beside a
+  // marked-to-market one, and picking between them after the fact is how a
+  // long-hold arm gets to choose the convention that suits it. `aggregate`
+  // reports the mark AND the resolved-only figure on the same row, so the
+  // choice is visible instead of offered.
+  const n3 = (x: number): string => (Number.isNaN(x) ? '—' : x.toFixed(3));
+  console.table(
+    ARMS.map((a) => {
+      const scored = rows.map((r) => ({
+        status: r.cells[`${a.name}_status`],
+        netR: Number(r.cells[`${a.name}_netR`]),
+      }));
+      const g = aggregate(scored);
+      const pts = rows.map((r, i) => ({ time: r.time, value: scoreRow(scored[i]) }));
+      const ci = blockBootstrap(pts, 14, 2000, 12345);
+      return {
+        arm: a.name,
+        n: g.n,
+        'win%': `${(g.winRate * 100).toFixed(1)}%`,
+        'avg winner': n3(g.avgWin),
+        'avg loser': n3(g.avgLose),
+        PAYOFF: Number.isNaN(g.payoff) ? '—' : `${g.payoff.toFixed(2)}:1`,
+        expectancy: n3(g.expectancy),
+        '95% CI': `[${ci.lo.toFixed(3)}, ${ci.hi.toFixed(3)}]`,
+        open: g.unresolved,
+        'open meanR': n3(g.unresolvedMeanR),
+        'exp resolved': n3(g.expectancyResolved),
+        gap: n3(g.markingGap),
+        'med bars': median(rows.map((r) => Number(r.cells[`${a.name}_barsHeld`]))).toFixed(0),
+      };
+    }),
+  );
+  console.log('');
 
-  const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-
-  // Two bases, because TIMEOUT rates differ wildly between arms and the basis
-  // decides the answer. Marked-to-market flatters the long-hold arms; 0R is
-  // the conservative convention used everywhere else in this project.
-  for (const [basis, score] of [
-    ['TIMEOUT at 0R (project convention)', (net: number, st: string) => (st === 'TIMEOUT' ? 0 : net)],
-    ['TIMEOUT marked to market', (net: number) => net],
-  ] as Array<[string, (net: number, st: string) => number]>) {
-    console.log(`── basis: ${basis} ──`);
-    console.table(
-      ARMS.map((a) => {
-        const vals = holdout.map((r) =>
-          score(Number(r.cells[`${a.name}_netR`]), r.cells[`${a.name}_status`]),
-        );
-        const pts = holdout.map((r, i) => ({ time: r.time, value: vals[i] }));
-        const w = vals.filter((v) => v > 0);
-        const l = vals.filter((v) => v <= 0);
-        const avgW = mean(w);
-        const avgL = Math.abs(mean(l));
-        const ci = blockBootstrap(pts, 14, 2000, 12345);
-        const timeouts = holdout.filter((r) => r.cells[`${a.name}_status`] === 'TIMEOUT').length;
-        return {
-          arm: a.name,
-          n: vals.length,
-          'win%': `${((w.length / vals.length) * 100).toFixed(1)}%`,
-          'avg winner': avgW.toFixed(3),
-          'avg loser': `-${avgL.toFixed(3)}`,
-          PAYOFF: avgL === 0 ? '—' : `${(avgW / avgL).toFixed(2)}:1`,
-          expectancy: mean(vals).toFixed(3),
-          '95% CI': `[${ci.lo.toFixed(3)}, ${ci.hi.toFixed(3)}]`,
-          'TIMEOUT%': `${((timeouts / vals.length) * 100).toFixed(0)}%`,
-          'med bars': median(holdout.map((r) => Number(r.cells[`${a.name}_barsHeld`]))).toFixed(0),
-        };
-      }),
-    );
-    console.log('');
-  }
+  // ── gross, cost, and the cost stress ────────────────────────────────────
+  // An arm that only clears the toll at exactly the modelled fee is not an
+  // edge, it is a bet on the fee. Each arm pays ITS OWN cost — a halved stop
+  // doubles the toll in R — so this cannot be read off a single mean.
+  console.log('cost sensitivity — each arm at multiples of the 0.14% round trip');
+  console.table(
+    ARMS.map((a) => {
+      const gross = rows.map((r) => Number(r.cells[`${a.name}_r`]));
+      const cost = rows.map((r) => Number(r.cells[`${a.name}_costR`]));
+      const at = (k: number): number =>
+        aggregate(
+          rows.map((r) => ({
+            status: r.cells[`${a.name}_status`],
+            netR: netAt(r as Row, a.name, k),
+          })),
+        ).expectancy;
+      return {
+        arm: a.name,
+        'gross R/trade': n3(avg(gross)),
+        'cost R/trade': n3(avg(cost)),
+        'exp @1x': n3(at(1)),
+        'exp @1.5x': n3(at(1.5)),
+        'exp @2x': n3(at(2)),
+        'survives 1.5x?': at(1.5) > 0 ? 'yes' : 'NO',
+      };
+    }),
+  );
+  console.log('');
 
   console.log('payoff needed to break even at a given win rate:  payoff = (1-p)/p');
   console.log('  at 55% win -> 0.82:1 · at 50% -> 1.00:1 · at 45% -> 1.22:1 · at 40% -> 1.50:1');
@@ -345,11 +424,9 @@ const median = (xs: number[]): number => {
   return s.length ? s[Math.floor(s.length / 2)] : NaN;
 };
 
-if (require.main === module && process.argv.includes('--report')) {
-  const i = process.argv.indexOf('--report');
-  report(process.argv[i + 1]);
-  process.exit(0);
-}
+// The --report entry point lives at the bottom of the file: `report` reads
+// `avg` and `netAt`, which are declared below it, and calling it from here hit
+// their temporal dead zone.
 
 // ── stress: everything that could make arm C not real ───────────────────
 
@@ -384,39 +461,52 @@ function loadRows(path: string): Row[] {
 }
 
 /**
- * netR for one arm at an arbitrary cost multiple.
+ * netR for one arm at a multiple of the base cost model.
  *
- * Re-derived from gross R and the trade's own stop distance rather than read
- * from the stored netR, because the stored figure is fixed at 1x toll. Cost
- * scales with the stop, so a 3x toll is NOT a flat 3x subtraction per trade.
+ * `costR = roundTripPct / riskPercent · filledFraction` is linear in
+ * `roundTripPct`, so scaling THIS ARM'S OWN stored `costR` is both exact and
+ * the only correct way to do it.
+ *
+ * It used to recompute the toll as `roundTripPct / r.riskPercent`, reading the
+ * `riskPercent` COLUMN — which is the base plan's, not the arm's. That charged
+ * `D_tight` (stopScale 0.5) half the toll it actually pays, and charged every
+ * partially-filled trade for size it never acquired. Both errors flattered the
+ * arms against the base, and both grew with the multiple.
  */
-const netAt = (r: Row, arm: string, roundTripPct: number): number => {
-  // Unresolved positions score a flat 0R, the convention `holdout.ts` uses
-  // everywhere: no gain, and no toll for a round trip that never happened.
-  if (r.cells[`${arm}_status`] === 'TIMEOUT') return 0;
-  const cost = r.riskPercent === 0 ? 0 : roundTripPct / r.riskPercent;
-  return Number(r.cells[`${arm}_r`]) - cost;
-};
+export const netAt = (r: Row, arm: string, multiple: number): number =>
+  // Unresolved positions are marked to market and pay their toll like any
+  // other, per `scoreRow`. They used to score a flat 0R here — no gain and no
+  // cost — which silently rewarded whichever arm timed out most.
+  scoreRow({
+    status: r.cells[`${arm}_status`],
+    netR: Number(r.cells[`${arm}_r`]) - Number(r.cells[`${arm}_costR`]) * multiple,
+  });
 
 const avg = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 
 function profileOf(rows: Row[], arm: string, toll: number) {
-  const v = rows.map((r) => netAt(r, arm, toll));
-  const w = v.filter((x) => x > 0);
-  const l = v.filter((x) => x <= 0);
-  const aw = avg(w);
-  const al = Math.abs(avg(l));
+  // Re-derived at `toll`, then handed to the shared aggregate. Nothing here
+  // decides what a trade is worth.
+  const scored = rows.map((r) => ({
+    status: r.cells[`${arm}_status`],
+    netR: netAt(r, arm, toll),
+  }));
+  const g = aggregate(scored);
   const ci = blockBootstrap(
-    rows.map((r, i) => ({ time: r.time, value: v[i] })),
+    rows.map((r, i) => ({ time: r.time, value: scoreRow(scored[i]) })),
     14,
     2000,
     12345,
   );
   return {
-    n: v.length,
-    win: w.length / v.length,
-    payoff: al ? aw / al : NaN,
-    exp: avg(v),
+    n: g.n,
+    win: g.winRate,
+    payoff: g.payoff,
+    exp: g.expectancy,
+    open: g.unresolved,
+    openMeanR: g.unresolvedMeanR,
+    expResolved: g.expectancyResolved,
+    gap: g.markingGap,
     lo: ci.lo,
     hi: ci.hi,
     blocks: ci.blocks,
@@ -427,34 +517,34 @@ const pctS = (x: number): string => `${(x * 100).toFixed(1)}%`;
 const ciS = (p: { lo: number; hi: number }): string =>
   `[${p.lo.toFixed(3)}, ${p.hi.toFixed(3)}]`;
 
-async function stress(path: string): Promise<void> {
-  const all = loadRows(path);
-  const t0 = all[0].time;
-  const t1 = all[all.length - 1].time;
-  const cut = t0 + (t1 - t0) * 0.7;
-  const tune = all.filter((r) => r.time < cut);
-  const hold = all.filter((r) => r.time >= cut);
-  const BASE = 0.14;
-  const day = (t: number): string => new Date(t).toISOString().slice(0, 10);
+async function stress(path: string, split: Split): Promise<void> {
+  const sel = selectSplit(loadRows(path), split);
+  // ONE set of rows for every table below. The first table used to print a
+  // TUNE column beside a HOLDOUT column, which meant reading the holdout was
+  // the default behaviour of the command rather than a decision.
+  const hold = sel.rows;
+  // netAt takes a MULTIPLE of the run's own cost model, not a percentage.
+  // `ROUND_TRIP_PCT` is for labels only — the arithmetic scales each arm's
+  // stored costR, which already carries its stop scale and its filled size.
+  const BASE = 1;
+  const ROUND_TRIP_PCT = 0.14;
 
-  console.log(`\nARM C STRESS TESTS — ${path}`);
-  console.log(
-    `TUNE ${day(t0)}→${day(cut)} ${tune.length} · HOLDOUT ${day(cut)}→${day(t1)} ${hold.length}` +
-      ` · same entries throughout\n`,
-  );
+  console.log(splitHeader(`ARM C STRESS TESTS`, path, sel));
 
   // ── 1. trail distance surface ──
   console.log('1. TRAIL DISTANCE — plateau or spike?');
   console.table(
     TRAILS.map((name) => {
       const h = profileOf(hold, name, BASE);
-      const t = profileOf(tune, name, BASE);
       return {
         trail: `${ARMS.find((a) => a.name === name)!.trailMult}x risk`,
-        'TUNE exp': t.exp.toFixed(3),
-        'HOLDOUT exp': h.exp.toFixed(3),
-        'HOLDOUT payoff': `${h.payoff.toFixed(2)}:1`,
-        'HOLDOUT win%': pctS(h.win),
+        split: sel.split,
+        n: h.n,
+        expectancy: h.exp.toFixed(3),
+        payoff: `${h.payoff.toFixed(2)}:1`,
+        'win%': pctS(h.win),
+        open: h.open,
+        'exp resolved': Number.isNaN(h.expResolved) ? '—' : h.expResolved.toFixed(3),
         '95% CI': ciS(h),
         'clears 0?': h.lo > 0 ? 'YES' : 'no',
       };
@@ -462,7 +552,7 @@ async function stress(path: string): Promise<void> {
   );
 
   // ── 2. per coin and per structure ──
-  console.log(`\n2. CONCENTRATION — is ${C} carried by a few coins or one structure?`);
+  console.log(`\n2. CONCENTRATION (${sel.split}) — is ${C} carried by a few coins or one structure?`);
   const byKey = (rows: Row[], key: (r: Row) => string) => {
     const m = new Map<string, Row[]>();
     for (const r of rows) m.set(key(r), [...(m.get(key(r)) ?? []), r]);
@@ -516,11 +606,13 @@ async function stress(path: string): Promise<void> {
     del: (k: string) => Promise.resolve(store.delete(k)),
   } as never;
   const binance = new BinanceService(cache, new CacheTelemetryService());
-  const need = Math.ceil((t1 - t0) / 43_200_000) + 260;
+  // Warm-up over the WHOLE file's span, not the split's — the 200-bar SMA has
+  // to be running before the first selected trade, whichever split that is.
+  const need = Math.ceil((sel.spanTo - sel.spanFrom) / 43_200_000) + 260;
   const btc = await binance.getCandlesPaged('BTC', '12h', need);
   const series = btcRegimes(btc.map((c) => c.close), btc.map((c) => c.time.getTime()));
 
-  console.log('\n3. BTC BACKDROP — a trailing stop can live on trends and die in chop');
+  console.log(`\n3. BTC BACKDROP (${sel.split}) — a trailing stop can live on trends and die in chop`);
   console.table(
     [...byKey(hold, (r) => regimeAt(series, r.time, 43_200_000)).entries()]
       .sort()
@@ -542,10 +634,10 @@ async function stress(path: string): Promise<void> {
   console.log('\n4. COST STRESS — cost scales with each trade\'s own stop, so this is not a flat subtraction');
   console.table(
     [1, 1.5, 2, 3].map((k) => {
-      const p = profileOf(hold, C, BASE * k);
+      const p = profileOf(hold, C, k);
       return {
-        toll: `${k}x  (${(BASE * k).toFixed(2)}% round trip)`,
-        'mean costR': avg(hold.map((r) => (BASE * k) / r.riskPercent)).toFixed(3),
+        toll: `${k}x  (${(ROUND_TRIP_PCT * k).toFixed(2)}% round trip)`,
+        'mean costR': avg(hold.map((r) => Number(r.cells[`${C}_costR`]) * k)).toFixed(3),
         'win%': pctS(p.win),
         payoff: `${p.payoff.toFixed(2)}:1`,
         expectancy: p.exp.toFixed(3),
@@ -558,8 +650,16 @@ async function stress(path: string): Promise<void> {
 
 if (require.main === module && process.argv.includes('--stress')) {
   const i = process.argv.indexOf('--stress');
-  stress(process.argv[i + 1]).catch((e) => {
+  stress(process.argv[i + 1], parseSplit(process.argv)).catch((e) => {
     console.error(e);
     process.exit(1);
   });
+}
+
+if (require.main === module && process.argv.includes('--report')) {
+  const i = process.argv.indexOf('--report');
+  // parseSplit throws before anything is read, so a missing --split cannot
+  // print a single number.
+  report(process.argv[i + 1], parseSplit(process.argv));
+  process.exit(0);
 }

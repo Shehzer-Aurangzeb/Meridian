@@ -38,6 +38,37 @@ export const ENTRY_WEIGHTS = [20, 40, 40] as const;
 export const TARGET_WEIGHTS = [33, 33, 34] as const;
 
 /**
+ * The ladder, rescaled to however many targets a zone map actually offered.
+ *
+ * The weights are a SPLIT, not a set of absolute sizes: they answer "how do I
+ * divide the position across the exits I have", and with two exits the answer
+ * is 50/50, not 33/33 with a third of the position left holding nothing.
+ *
+ * Taking `TARGET_WEIGHTS.slice(0, n)` unscaled is what produced the stuck
+ * positions: a plan with one target exited 33% of size at that target and the
+ * other 67% had no exit rule at all, so it could never reach ALL_TARGETS and
+ * rode to the end of the hold window — where it was marked to market at
+ * whatever price happened to be there and booked as a large gain. 31% of live
+ * plans (106 of 337) were built this way.
+ *
+ * Proportional, so the relative emphasis of the playbook's split survives:
+ *   3 targets -> 33 / 33 / 34   (already sums to 100 — bit-identical, asserted)
+ *   2 targets -> 50 / 50
+ *   1 target  -> 100
+ *   0 targets -> []             (nothing to divide; no target exit exists)
+ *
+ * Note what this does NOT fix: a plan with zero targets still has no way to
+ * close on profit. That is not a weight bug — there is no exit to weight — and
+ * it is a question about whether such a plan should be printed at all.
+ */
+export function renormaliseTargetWeights(count: number): number[] {
+  const taken = TARGET_WEIGHTS.slice(0, count);
+  const sum = taken.reduce((a, b) => a + b, 0);
+  if (sum === 0) return [];
+  return taken.map((w) => (w * 100) / sum);
+}
+
+/**
  * Stop distance beyond the zone, in ATR multiples.
  *
  * "Stop Loss Price = Support Level − ATR Value" (p17). Anchored to the ZONE,
@@ -80,6 +111,10 @@ export interface TradePlan {
    * zones puts the first exit wherever the next zone happens to be, and in
    * dense structure that is close. A 0.65R first target is not a defect, but
    * it is only acceptable because the later ones carry the blend.
+   *
+   * Now that the weights are renormalised this is a genuine weighted mean.
+   * Before, a one-target plan reported a THIRD of its own target's R, because
+   * the ladder's other two thirds were multiplied by nothing.
    */
   blendedR: number;
   comeBackWhen: string;
@@ -120,12 +155,20 @@ export class TradePlanService {
     const nearestBelow = below.sort((a, b) => b.high - a.high)[0];
     const nearestAbove = above.sort((a, b) => a.low - b.low)[0];
 
+    // A plan with no zone ahead of its entry has no profit exit — its only
+    // reachable outcomes are the stop and the end of the hold window. Across
+    // the 626 backtested trades those were 57 plans at −1.08R resolved, every
+    // resolved one a stop-out, because there was nothing else for them to hit.
+    // "Never exit at random prices" (p14) rules out inventing an R-multiple
+    // target, so the honest answer is not to print the plan.
     const plans: TradePlan[] = [];
-    if (nearestBelow) {
-      plans.push(this.buildPlan(nearestBelow, 'long', spot, atr, zones));
-    }
-    if (nearestAbove) {
-      plans.push(this.buildPlan(nearestAbove, 'short', spot, atr, zones));
+    for (const [zone, direction] of [
+      [nearestBelow, 'long'],
+      [nearestAbove, 'short'],
+    ] as const) {
+      if (!zone) continue;
+      const plan = this.buildPlan(zone, direction, spot, atr, zones);
+      if (plan.targets.length > 0) plans.push(plan);
     }
 
     return plans.sort(
@@ -223,11 +266,15 @@ export class TradePlanService {
       )
       .slice(0, TARGET_WEIGHTS.length);
 
+    // Rescaled to the number of zones actually ahead, so the exits always
+    // account for the whole position rather than a third of it.
+    const weights = renormaliseTargetWeights(ahead.length);
+
     return ahead.map((z, i) => ({
       // Exit at the edge price reaches first — waiting for the far side of a
       // zone to fill is how a target gets missed by a few ticks.
       price: long ? z.low : z.high,
-      weightPercent: TARGET_WEIGHTS[i],
+      weightPercent: weights[i],
       rMultiple:
         riskPerUnit === 0
           ? 0

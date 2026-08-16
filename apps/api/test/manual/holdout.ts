@@ -21,6 +21,7 @@
  */
 import * as fs from 'fs';
 import { makeRng } from './rng';
+import { aggregate, scoreRow } from '../../src/common/replay/trade-scoring';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: string): string => {
@@ -46,8 +47,16 @@ export interface Row {
   netR: number;
 }
 
-/** Unresolved positions score 0R — the conservative basis used throughout. */
-export const scoreOf = (r: Row): number => (r.status === 'TIMEOUT' ? 0 : r.netR);
+/**
+ * How one finished trade counts toward an aggregate.
+ *
+ * Re-exported rather than defined: this used to be a second, independent copy
+ * of the rule, and `backtest-plans.ts` averaged raw `netR` while this file
+ * averaged the same rows with unresolved trades zeroed — two headline
+ * expectancies from identical data. The rule now lives in
+ * `src/common/replay/trade-scoring.ts` and every caller reads it from there.
+ */
+export const scoreOf = (r: Row): number => scoreRow(r);
 
 /** Rows as (time, value) points, which is all the block bootstrap needs. */
 export const scored = (rows: Row[]): Array<{ time: number; value: number }> =>
@@ -134,22 +143,35 @@ export interface Profile {
   payoff: string;
   expectancy: string;
   totalR: string;
+  /** Open positions and their mark. Present on every row, by design. */
+  open: number;
+  openMeanR: string;
+  /** The same expectancy with the open positions dropped instead of marked. */
+  expResolved: string;
+  gap: string;
 }
 
+const n3 = (x: number): string => (Number.isNaN(x) ? '—' : x.toFixed(3));
+
+/**
+ * A display wrapper over the shared `aggregate` — no statistic is computed
+ * here. This file used to own a second copy of the rule, which is how it came
+ * to report −0.1455R against the harness's −0.0178R from the same rows.
+ */
 export function profile(rows: Row[]): Profile {
-  const v = rows.map(scoreOf);
-  const w = v.filter((x) => x > 0);
-  const l = v.filter((x) => x <= 0);
-  const aw = w.length ? mean(w) : 0;
-  const al = l.length ? Math.abs(mean(l)) : 0;
+  const a = aggregate(rows);
   return {
-    n: v.length,
-    winRate: v.length ? `${((w.length / v.length) * 100).toFixed(0)}%` : '—',
-    avgWin: w.length ? mean(w).toFixed(3) : '—',
-    avgLose: l.length ? mean(l).toFixed(3) : '—',
-    payoff: al ? `${(aw / al).toFixed(2)}:1` : '—',
-    expectancy: v.length ? mean(v).toFixed(3) : '—',
-    totalR: v.length ? (mean(v) * v.length).toFixed(1) : '—',
+    n: a.n,
+    winRate: Number.isNaN(a.winRate) ? '—' : `${(a.winRate * 100).toFixed(0)}%`,
+    avgWin: n3(a.avgWin),
+    avgLose: n3(a.avgLose),
+    payoff: Number.isNaN(a.payoff) ? '—' : `${a.payoff.toFixed(2)}:1`,
+    expectancy: n3(a.expectancy),
+    totalR: a.n ? a.totalR.toFixed(1) : '—',
+    open: a.unresolved,
+    openMeanR: n3(a.unresolvedMeanR),
+    expResolved: n3(a.expectancyResolved),
+    gap: n3(a.markingGap),
   };
 }
 
@@ -224,8 +246,21 @@ function selfCheck(): void {
       ...o,
     }) as Row;
 
-  assert(scoreOf(row({ status: 'TIMEOUT', netR: 5 })) === 0, 'unresolved scores 0R');
+  assert(scoreOf(row({ status: 'TIMEOUT', netR: 5 })) === 5, 'unresolved keeps its mark');
   assert(scoreOf(row({ status: 'STOPPED', netR: -1 })) === -1, 'resolved keeps its R');
+
+  // An unresolved winner must not be binned as a loss — the defect that moved
+  // the reported expectancy by 0.13R across 60 of 626 trades.
+  const mixed = [
+    row({ status: 'TIMEOUT', netR: 2 }),
+    row({ status: 'STOPPED', netR: -1 }),
+  ];
+  const p = profile(mixed);
+  assert(p.winRate === '50%', `an unresolved +2R is a win, not a loss (got ${p.winRate})`);
+  assert(p.expectancy === '0.500', `marked to market: (2 − 1)/2 (got ${p.expectancy})`);
+  assert(p.open === 1 && p.openMeanR === '2.000', 'the open position is reported, not hidden');
+  assert(p.expResolved === '-1.000', 'and again with it dropped rather than marked');
+  assert(p.gap === '1.500', 'the gap between the two conventions is stated');
 
   assert(isAligned(row({ direction: 'long', structure: 'HH/HL' })), 'long in an uptrend is aligned');
   assert(isCounter(row({ direction: 'long', structure: 'LH/LL' })), 'long in a downtrend is counter');
@@ -385,6 +420,12 @@ function report(): void {
       payoff: p.payoff,
       expectancy: p.expectancy,
       'total R': p.totalR,
+      // Always visible: the headline marks open positions to market, so the
+      // count, their mark, and the number without them travel beside it.
+      open: p.open,
+      'open meanR': p.openMeanR,
+      'exp resolved': p.expResolved,
+      gap: p.gap,
       'CI low': Number.isFinite(ci.lo) ? ci.lo.toFixed(3) : '—',
       'CI high': Number.isFinite(ci.hi) ? ci.hi.toFixed(3) : '—',
       'crosses 0': !Number.isFinite(ci.lo) ? '—' : ci.lo < 0 && ci.hi > 0 ? 'YES' : 'no',

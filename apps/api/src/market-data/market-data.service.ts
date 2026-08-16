@@ -87,6 +87,66 @@ export class BinanceService {
    * @param interval Candle timeframe
    * @param total    How many candles to end up with
    */
+  /**
+   * Candles FORWARD from a point in time, rather than backward from now.
+   *
+   * `getCandlesPaged` answers "the most recent N", which is the wrong question
+   * for scoring a saved analysis: an analysis taken 40 days ago was being
+   * replayed against the last 30 days, a window its entry was never in. The
+   * fill it recorded became invisible and a fresh one could be manufactured
+   * from a later touch of the same price.
+   *
+   * Returns at most `limit` candles starting at or after `startTime`. Fewer
+   * means the exchange could not serve the window — the caller must treat that
+   * as unscoreable rather than scoring what did arrive.
+   */
+  async getCandlesFrom(
+    symbol: string,
+    interval: TimeInterval,
+    startTime: number,
+    limit: number,
+  ): Promise<Candle[]> {
+    const tradingPair = `${symbol.toUpperCase()}USDT`;
+    const cacheKey = `candles:from:${tradingPair}:${interval}:${startTime}:${limit}`;
+
+    const cached = await this.cacheManager.get<Candle[]>(cacheKey);
+    if (cached) {
+      this.cacheTelemetry.recordHit();
+      return this.deserializeCandles(cached);
+    }
+    this.cacheTelemetry.recordMiss();
+
+    const PAGE = 1000; // Binance hard cap per klines request
+    const byTime = new Map<number, Candle>();
+    let cursor = startTime;
+
+    while (byTime.size < limit) {
+      const page = await this.fetchCandlesFromBinance(
+        tradingPair,
+        interval,
+        Math.min(PAGE, limit - byTime.size),
+        3,
+        undefined,
+        cursor,
+      );
+      if (page.length === 0) break;
+
+      const newest = page[page.length - 1].time.getTime();
+      for (const c of page) byTime.set(c.time.getTime(), c);
+      // No forward progress means we have reached the live edge.
+      if (newest < cursor) break;
+      cursor = newest + 1;
+      await this.sleep(120); // stay well inside the klines weight budget
+    }
+
+    const candles = [...byTime.values()]
+      .sort((a, b) => a.time.getTime() - b.time.getTime())
+      .slice(0, limit);
+
+    await this.cacheManager.set(cacheKey, candles, this.CANDLE_CACHE_TTL);
+    return candles;
+  }
+
   async getCandlesPaged(
     symbol: string,
     interval: TimeInterval,
@@ -259,6 +319,7 @@ export class BinanceService {
     limit: number,
     retries: number = 3,
     endTime?: number,
+    startTime?: number,
   ): Promise<Candle[]> {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -268,6 +329,7 @@ export class BinanceService {
             interval,
             limit,
             ...(endTime !== undefined ? { endTime } : {}),
+            ...(startTime !== undefined ? { startTime } : {}),
           },
           timeout: this.candleTimeout,
         });

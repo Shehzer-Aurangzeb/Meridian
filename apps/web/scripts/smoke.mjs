@@ -145,6 +145,27 @@ if (firstId) {
   console.log('\n  skip  no saved analyses — run POST /api/analyses?symbol=BTC first');
 }
 
+console.log('\ncandles');
+{
+  // The chart anchors its window at the analysis, so the route has to honour
+  // startTime. If it silently ignores it and returns the most recent bars, an
+  // old analysis is charted against the wrong weeks and the "analysed" arrow
+  // lands on an unrelated candle — which is exactly the bug this check exists
+  // to catch, and it is invisible on a chart of anything recent.
+  const start = Date.UTC(2026, 0, 15, 0, 0, 0);
+  const anchored = await call(`/api/candles?symbol=BTC&interval=1h&limit=50&startTime=${start}`);
+  const first = anchored.body?.candles?.[0]?.time;
+  check('candles returns 200', anchored.status === 200, anchored.status);
+  check('startTime is honoured, not ignored', first === start / 1000, {
+    asked: start / 1000,
+    got: first,
+  });
+
+  const recent = await call('/api/candles?symbol=BTC&interval=1h&limit=50');
+  const recentFirst = recent.body?.candles?.[0]?.time;
+  check('without startTime it is still the recent window', recentFirst > start / 1000, recentFirst);
+}
+
 console.log('\nsigning out');
 {
   const logout = await call('/api/auth/logout', { method: 'POST' });

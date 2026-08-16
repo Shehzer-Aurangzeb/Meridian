@@ -1,7 +1,7 @@
 import { CacheModule } from '@nestjs/cache-manager';
 import { HttpException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AnalysesController } from './analyses.controller';
+import { AnalysesController, RESULTS_EPOCH } from './analyses.controller';
 import { AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +46,11 @@ describe('AnalysesController', () => {
       update: jest.fn(),
     },
   };
-  const binance = { getCurrentPrice: jest.fn(), getCandlesPaged: jest.fn() };
+  const binance = {
+  getCurrentPrice: jest.fn(),
+  getCandlesPaged: jest.fn(),
+  getCandlesFrom: jest.fn(),
+};
   const analyzer = { analyze: jest.fn() };
   const persistence = { persistAnalysis: jest.fn() };
   const narrator = { narrate: jest.fn() };
@@ -77,10 +81,13 @@ describe('AnalysesController', () => {
 
   it('bounds the list by a date window and admits when it hit the ceiling', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
-    await controller.list(undefined, undefined, undefined, '30');
+    const asked = await controller.list(undefined, undefined, undefined, '30');
     const { gte } = prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt;
-    const days = (Date.now() - (gte as Date).getTime()) / 86_400_000;
-    expect(days).toBeCloseTo(30, 1);
+    // Thirty days, or the epoch if thirty days reaches back past it — and the
+    // response says which, so a caller cannot total the wrong period.
+    const wanted = Date.now() - 30 * 86_400_000;
+    expect((gte as Date).getTime()).toBe(Math.max(wanted, RESULTS_EPOCH.getTime()));
+    expect(asked.from).toBe((gte as Date).toISOString());
 
     // Exactly `take` rows back means there may be more the caller cannot see —
     // a scoreboard built on a silently truncated list describes a subset.
@@ -101,7 +108,7 @@ describe('AnalysesController', () => {
     expect(binance.getCurrentPrice).not.toHaveBeenCalled();
   });
 
-  it('scores the list from ONE price and candle fetch per coin, not per row', async () => {
+  it('fetches price per COIN but the replay window per ROW', async () => {
     const rows = [
       { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
       { id: 'b', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
@@ -110,20 +117,23 @@ describe('AnalysesController', () => {
     prisma.coordinatorRun.findMany.mockResolvedValue(rows);
     prisma.coordinatorRun.findFirst.mockResolvedValue({ coordinatorPayload: payload });
     binance.getCurrentPrice.mockResolvedValue(100);
-    binance.getCandlesPaged.mockResolvedValue([]);
+    binance.getCandlesFrom.mockResolvedValue([]);
 
     const result = await controller.list(undefined, undefined, 'true');
 
-    // Three rows, two coins — the whole point of batching.
+    // Price is still shared across rows of the same coin — two coins, two calls.
     expect(binance.getCurrentPrice).toHaveBeenCalledTimes(2);
-    expect(binance.getCandlesPaged).toHaveBeenCalledTimes(2);
+    // The replay window cannot be shared: each row is scored from its own
+    // createdAt, so it is one fetch per ROW, not per coin.
+    expect(binance.getCandlesFrom).toHaveBeenCalledTimes(3);
+    expect(binance.getCandlesFrom.mock.calls[0][2]).toBe(0); // startTime = createdAt
 
     const first = result.analyses[0] as { status: { netR: number | null } };
-    // Dated 1970 with no candles: the 24h fill window is long gone, so this is
-    // MISSED rather than still PENDING.
+    // Dated 1970 and Binance returned nothing for that window. It is not MISSED
+    // — we do not know what happened — so it is explicitly unscoreable.
     expect(first.status).toMatchObject({
       direction: 'long',
-      outcome: 'MISSED',
+      outcome: 'UNSCOREABLE',
       targetsHit: 0,
       // The ladder, stop and targets a card draws — projected, not the whole plan.
       plan: { entries: [102, 100, 98], stop: 90, targets: [110] },
@@ -140,11 +150,64 @@ describe('AnalysesController', () => {
     ]);
     prisma.coordinatorRun.findFirst.mockResolvedValue(null);
     binance.getCurrentPrice.mockRejectedValue(new Error('binance down'));
-    binance.getCandlesPaged.mockRejectedValue(new Error('binance down'));
+    binance.getCandlesFrom.mockRejectedValue(new Error('binance down'));
 
     const result = await controller.list(undefined, undefined, 'true');
     expect(result.count).toBe(1);
     expect((result.analyses[0] as { status: unknown }).status).not.toBeUndefined();
+  });
+
+  it('never lists an analysis older than the results epoch', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+
+    await controller.list();
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].where.createdAt.gte).toEqual(
+      RESULTS_EPOCH,
+    );
+
+    // A window wide enough to reach back past the epoch is clamped to it —
+    // pre-fix plans must not re-enter a total that describes the current one.
+    await controller.list(undefined, undefined, undefined, '3650');
+    expect(prisma.coordinatorRun.findMany.mock.calls[1][0].where.createdAt.gte).toEqual(
+      RESULTS_EPOCH,
+    );
+
+    // A narrower window still wins — the epoch is a floor, not an override.
+    // Written against `max` rather than a literal so it keeps testing the rule
+    // after the epoch moves into the past.
+    await controller.list(undefined, undefined, undefined, '1');
+    const narrow = prisma.coordinatorRun.findMany.mock.calls[2][0].where.createdAt.gte;
+    const expected = Math.max(Date.now() - 86_400_000, RESULTS_EPOCH.getTime());
+    expect(Math.abs(narrow.getTime() - expected)).toBeLessThan(1000);
+  });
+
+  it('fetches the replay windows in bounded batches, not one burst', async () => {
+    const rows = Array.from({ length: 20 }, (_, i) => ({
+      id: `r${i}`,
+      symbol: 'BTC',
+      createdAt: new Date(0),
+      coordinatorPayload: payload,
+    }));
+    prisma.coordinatorRun.findMany.mockResolvedValue(rows);
+    prisma.coordinatorRun.findFirst.mockResolvedValue(null);
+    binance.getCurrentPrice.mockResolvedValue(100);
+
+    let live = 0;
+    let peak = 0;
+    binance.getCandlesFrom.mockImplementation(async () => {
+      live += 1;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 1));
+      live -= 1;
+      return [];
+    });
+
+    await controller.list(undefined, undefined, 'true');
+
+    expect(binance.getCandlesFrom).toHaveBeenCalledTimes(20);
+    // 1000 rows is a legal limit, and 1000 simultaneous klines requests is how
+    // an IP gets banned off the exchange.
+    expect(peak).toBeLessThanOrEqual(8);
   });
 
   it('caps and floors the list limit rather than trusting the query', async () => {
@@ -174,16 +237,17 @@ describe('AnalysesController', () => {
       coordinatorPayload: { map: { zones: [{ center: 500 }] } },
     });
     binance.getCurrentPrice.mockResolvedValue(120);
-    binance.getCandlesPaged.mockResolvedValue([]);
+    binance.getCandlesFrom.mockResolvedValue([]);
 
     const res = await controller.detail('run_1');
     // Price is above the long's stop so it is not invalidated, but the newest
     // map kept none of its zones.
     expect(res.freshness).toBe('SUPERSEDED');
     expect(res.currentPrice).toBe(120);
-    // No candles, so no fill — and the fixture is dated 1970, so the fill
-    // window is long gone: the plan was passed by, not still waiting.
-    expect(res.outcomes.map((o) => o.outcome)).toEqual(['MISSED']);
+    // The fixture is dated 1970 and no candles came back for its window. That
+    // is not "passed by" — it is not knowable, and saying MISSED would be the
+    // bug this replaces.
+    expect(res.outcomes.map((o) => o.outcome)).toEqual(['UNSCOREABLE']);
     expect(res.outcomes[0].r).toBeNull();
     // The newest-row lookup must exclude the row being read, or every
     // analysis would be compared against itself and never go stale.
