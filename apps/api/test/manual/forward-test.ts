@@ -85,6 +85,8 @@ const str = (name: string, fallback: string): string => {
 };
 
 const SINCE = str('since', '');
+/** Optional end of the window, so one implementation can be read apart from another. */
+const UNTIL = str('until', '');
 const COOLDOWN_H = num('cooldown', 24);
 // §14h held for 72 bars (1h bars, so 3 days) and closed the rest at market.
 // Matched here or the two are not comparable — and §14h's whole edge over
@@ -99,7 +101,7 @@ const SEED = num('seed', 12345);
 const CSV = str('csv', '');
 
 const CONFIG =
-  `since=${SINCE || 'all'} cooldown=${COOLDOWN_H}h max-hold=${MAX_HOLD_H}h ` +
+  `since=${SINCE || 'all'} until=${UNTIL || 'now'} cooldown=${COOLDOWN_H}h max-hold=${MAX_HOLD_H}h ` +
   `fee=${FEE_PCT}% slip=${SLIP_PCT}% (round trip ${ROUND_TRIP_PCT}%) ` +
   `draws=${DRAWS} seed=${SEED}`;
 
@@ -338,7 +340,14 @@ async function main(): Promise<void> {
   const rows = (await prisma.coordinatorRun.findMany({
     where: {
       errorMessage: null,
-      ...(SINCE ? { createdAt: { gte: new Date(SINCE) } } : {}),
+      ...(SINCE || UNTIL
+        ? {
+            createdAt: {
+              ...(SINCE ? { gte: new Date(SINCE) } : {}),
+              ...(UNTIL ? { lt: new Date(UNTIL) } : {}),
+            },
+          }
+        : {}),
     },
     select: { id: true, symbol: true, createdAt: true, coordinatorPayload: true },
     orderBy: { createdAt: 'asc' },
@@ -417,10 +426,13 @@ async function main(): Promise<void> {
     });
   }
 
-  const days = (now - first.getTime()) / 86_400_000;
+  // The span of the ROWS, not "first row until now" — with --until those are
+  // different, and printing the wrong one labels a 7-day slice as 17 days.
+  const last = analyses[analyses.length - 1].createdAt;
+  const days = (last.getTime() - first.getTime()) / 86_400_000;
   console.log(
     `${analyses.length} analyses · ${coins.length} coins · ` +
-      `${first.toISOString().slice(0, 10)} → ${new Date(now).toISOString().slice(0, 10)} ` +
+      `${first.toISOString().slice(0, 10)} → ${last.toISOString().slice(0, 10)} ` +
       `(${days.toFixed(1)} days)\n`,
   );
 
