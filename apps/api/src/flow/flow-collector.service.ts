@@ -146,11 +146,20 @@ export class FlowCollectorService {
   }
 
   /**
-   * Page through one endpoint from `from` to `to`.
+   * Page through one endpoint back to `from`.
    *
-   * Each request starts where the last one ended. The loop stops when a page
-   * comes back empty, short, or without moving forward — that last check is
-   * what stops an endpoint that ignores `startTime` from looping for ever.
+   * Walks BACKWARDS, moving `endTime` older each request, because the
+   * `/futures/data/` endpoints IGNORE `startTime` — given a limit they return
+   * the newest rows and nothing else. Paging forward therefore reads one page
+   * and stops, which silently captured 20 days of a 30-day window and lost the
+   * rest for good. Walking back from the newest row reaches all of it.
+   *
+   * Klines honour both bounds, so the same walk works for them too and there
+   * is one code path instead of two.
+   *
+   * Stops when a page is empty, when the window is covered, or when a page
+   * fails to move older — that last one is what prevents an endpoint that
+   * clamps `endTime` from looping for ever.
    */
   private async fetchWindow(
     symbol: string,
@@ -159,7 +168,7 @@ export class FlowCollectorService {
     to: number,
   ): Promise<Row[]> {
     const out = new Map<number, number>();
-    let cursor = from;
+    let cursor = to;
 
     for (;;) {
       const res = await axios.get(`${BASE}${spec.path}`, {
@@ -167,8 +176,7 @@ export class FlowCollectorService {
           symbol,
           [spec.intervalParam]: '1h',
           limit: spec.maxRows,
-          startTime: cursor,
-          endTime: to,
+          endTime: cursor,
         },
         timeout: 15_000,
       });
@@ -176,21 +184,24 @@ export class FlowCollectorService {
       const raw = res.data as unknown[];
       if (!Array.isArray(raw) || raw.length === 0) break;
 
-      let newest = cursor;
+      let oldest = cursor;
       for (const item of raw) {
         const row = spec.parse(item);
-        if (!row) continue;
+        if (!row || row.ts < from) continue;
         out.set(row.ts, row.value);
-        if (row.ts > newest) newest = row.ts;
+        if (row.ts < oldest) oldest = row.ts;
       }
 
-      if (newest <= cursor) break;
-      cursor = newest + 1;
+      if (oldest >= cursor) break;
+      if (oldest <= from) break;
+      cursor = oldest - 1;
       if (raw.length < spec.maxRows) break;
       await this.sleep(120);
     }
 
-    return [...out.entries()].map(([ts, value]) => ({ ts, value }));
+    return [...out.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([ts, value]) => ({ ts, value }));
   }
 
   /**

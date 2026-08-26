@@ -63,6 +63,10 @@ describe('parsers', () => {
 describe('FlowCollectorService.collect', () => {
   beforeEach(() => mockedGet.mockReset());
 
+  // Rows must sit inside the requested window or they are correctly discarded.
+  const NOW = 10_000_000_000;
+  const RECENT = NOW - 3_600_000;
+
   const rowsFor = (path: string, times: number[]) =>
     path.includes('premiumIndexKlines')
       ? times.map((t) => [t, '1', '2', '0', '1.5'])
@@ -75,11 +79,11 @@ describe('FlowCollectorService.collect', () => {
 
   it('stores the bare coin, not the trading pair', async () => {
     mockedGet.mockImplementation(async (url: string) => ({
-      data: rowsFor(url, [1_000]),
+      data: rowsFor(url, [RECENT]),
     }));
     const { prisma, written } = fakePrisma();
 
-    await new FlowCollectorService(prisma).collect(['BTC'], 1);
+    await new FlowCollectorService(prisma).collect(['BTC'], 1, NOW);
 
     expect(written.length).toBe(METRICS.length);
     expect(new Set(written.map((w) => w.symbol))).toEqual(new Set(['BTC']));
@@ -87,13 +91,12 @@ describe('FlowCollectorService.collect', () => {
     expect(mockedGet.mock.calls[0][1]?.params.symbol).toBe('BTCUSDT');
   });
 
-  it('stops paging when a full page does not move the cursor forward', async () => {
-    // The failure this guards: an endpoint that ignores startTime and keeps
+  it('stops paging when a full page does not move older', async () => {
+    // The failure this guards: an endpoint that clamps endTime and keeps
     // returning the same newest rows. The page is FULL every time, so the
-    // short-page check never fires and only the cursor check can stop it.
-    // Without that check this loops for ever against Binance.
+    // short-page check never fires and only the "did we move older" check can
+    // stop it. Without that check this loops for ever against Binance.
     const now = 10_000_000_000;
-    // Inside the requested window, or the walk stops before it ever pages.
     mockedGet.mockImplementation(async (url: string) => {
       const size = METRICS.find((m) => url.includes(m.path))!.maxRows;
       const times = Array.from({ length: size }, (_, i) => now - size + i);
@@ -104,18 +107,68 @@ describe('FlowCollectorService.collect', () => {
     const result = await new FlowCollectorService(prisma).collect(['BTC'], 1, now);
 
     expect(result.failed).toEqual({});
-    // Two requests per metric: one that advanced, one that repeated and stopped.
+    // Two requests per metric: one that moved older, one that repeated and stopped.
     expect(mockedGet).toHaveBeenCalledTimes(METRICS.length * 2);
+  });
+
+  it('pages BACKWARDS, because these endpoints ignore startTime', async () => {
+    // The bug this locks down: paging forward from startTime read exactly one
+    // page and stopped, capturing 20 days of a 30-day window and losing the
+    // rest permanently. Only openInterest is exercised so the row maths is
+    // readable; all four share the walk.
+    const now = 10_000_000_000;
+    const spec = METRICS.find((m) => m.metric === 'openInterest')!;
+    const HOUR = 3_600_000;
+    const pages: number[][] = [];
+    mockedGet.mockImplementation(async (url: string, cfg?: { params?: unknown }) => {
+      if (!url.includes(spec.path)) return { data: [] };
+      const end = (cfg!.params as { endTime: number }).endTime;
+      // A full page of hourly rows ending at endTime, like the real endpoint.
+      const times = Array.from({ length: spec.maxRows }, (_, i) => end - (spec.maxRows - 1 - i) * HOUR);
+      pages.push(times);
+      return { data: rowsFor(url, times) };
+    });
+    const { prisma, written } = fakePrisma();
+
+    // Ask for a window two pages deep.
+    const days = (spec.maxRows * 2 * HOUR) / 86_400_000;
+    await new FlowCollectorService(prisma).collect(['BTC'], days, now);
+
+    // It kept going instead of stopping after page one...
+    expect(pages.length).toBeGreaterThan(1);
+    // ...and each page reached strictly further back than the last.
+    expect(Math.min(...pages[1])).toBeLessThan(Math.min(...pages[0]));
+    // The stored rows span more than a single page's worth of hours.
+    const oi = written.filter((w) => w.metric === 'openInterest').map((w) => w.ts.getTime());
+    expect((Math.max(...oi) - Math.min(...oi)) / HOUR).toBeGreaterThan(spec.maxRows);
+  });
+
+  it('does not store rows older than the window asked for', async () => {
+    const now = 10_000_000_000;
+    const spec = METRICS.find((m) => m.metric === 'openInterest')!;
+    const from = now - 86_400_000; // one day
+    mockedGet.mockImplementation(async (url: string) => {
+      if (!url.includes(spec.path)) return { data: [] };
+      // Half inside the window, half far older than it.
+      return { data: rowsFor(url, [now - 3_600_000, from - 10 * 86_400_000]) };
+    });
+    const { prisma, written } = fakePrisma();
+
+    await new FlowCollectorService(prisma).collect(['BTC'], 1, now);
+
+    const oi = written.filter((w) => w.metric === 'openInterest');
+    expect(oi).toHaveLength(1);
+    expect(oi[0].ts.getTime()).toBe(now - 3_600_000);
   });
 
   it('does not let one failing endpoint stop the others', async () => {
     mockedGet.mockImplementation(async (url: string) => {
       if (url.includes('openInterestHist')) throw new Error('HTTP 418');
-      return { data: rowsFor(url, [1_000]) };
+      return { data: rowsFor(url, [RECENT]) };
     });
     const { prisma, written } = fakePrisma();
 
-    const result = await new FlowCollectorService(prisma).collect(['BTC', 'ETH'], 1);
+    const result = await new FlowCollectorService(prisma).collect(['BTC', 'ETH'], 1, NOW);
 
     expect(Object.keys(result.failed).sort()).toEqual([
       'BTC:openInterest',
@@ -127,27 +180,31 @@ describe('FlowCollectorService.collect', () => {
 
   it('reports rows it fetched but already had', async () => {
     mockedGet.mockImplementation(async (url: string) => ({
-      data: rowsFor(url, [1_000, 2_000]),
+      data: rowsFor(url, [RECENT, RECENT + 60_000]),
     }));
     const prisma = {
       flowSample: { createMany: jest.fn(async () => ({ count: 0 })) },
     } as unknown as PrismaService;
 
-    const result = await new FlowCollectorService(prisma).collect(['BTC'], 1);
+    const result = await new FlowCollectorService(prisma).collect(['BTC'], 1, NOW);
 
     expect(result.saved).toBe(0);
     expect(result.duplicates).toBe(2 * METRICS.length);
   });
 
-  it('asks only for the window it was given', async () => {
-    mockedGet.mockImplementation(async (url: string) => ({ data: rowsFor(url, [1_000]) }));
+  it('starts at now and walks back', async () => {
+    const now = 10_000_000_000;
+    mockedGet.mockImplementation(async (url: string) => ({
+      data: rowsFor(url, [now - 3_600_000]),
+    }));
     const { prisma } = fakePrisma();
-    const now = 1_000_000_000;
 
     await new FlowCollectorService(prisma).collect(['BTC'], 7, now);
 
-    const { startTime, endTime } = mockedGet.mock.calls[0][1]!.params;
-    expect(endTime).toBe(now);
-    expect(now - startTime).toBe(7 * 86_400_000);
+    const params = mockedGet.mock.calls[0][1]!.params;
+    expect(params.endTime).toBe(now);
+    // startTime is deliberately NOT sent: these endpoints ignore it, and
+    // sending it invited the forward-paging bug back.
+    expect(params.startTime).toBeUndefined();
   });
 });
