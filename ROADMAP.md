@@ -99,34 +99,78 @@ stop a 1–3 hour hold implies, it is **0.36R per trade** — every trade would
 need to average better than +0.36R before it earned anything at all. Read
 2.3 with that in front of you.
 
-### 2.3 Finer candles — reconsider before starting
+### 2.3 Finer candles — MEASURED, and not needed
 
-**2.2 undercut the reason for this.** Shorter holds mean tighter stops, and a
-tighter stop pays proportionally more of the same fixed toll. At 0.36R per
-trade the arithmetic is close to hopeless, which is exactly what 2.2 was run
-to find out before the work was done rather than after.
+Two things were checked before any of this was built, and both came back
+against doing it.
 
-Two honest options. Either drop the short-hold idea and keep the rebuild only
-if something else needs it, or first find a venue or order type that brings the
-round trip down — a resting limit order pays the maker fee, and the entry legs
-are limits already. Decide that before building anything.
+**The data was never the obstacle.** 1m and 5m klines go back to **2017** for
+BTC and ETH — full history, no retention cliff. And the code already handles
+them: `TimeInterval` includes both, `CANDLE_LIMITS` has entries for both,
+`getCandlesFrom` pages transparently, and `LEVEL_TIMEFRAMES` / `ATR_TIMEFRAME`
+/ `ANALYSIS_TIMEFRAME` are already module constants everything reads from.
+Nothing needs rebuilding. The earlier note in this file saying otherwise was
+wrong.
 
-The original scope, if it goes ahead: pull 1-minute or 5-minute history and
-rebuild the candle layer.
+Volume, for reference: 1m is ~41M candles across ten coins (~41,000 requests);
+5m is ~8.2M (~8,200); 15m is ~2.7M.
 
-Bigger than it sounds. The zone map, the ATR, and every indicator assume 12h,
-4h and 1h bars. Day-long holds are a consequence of that timeframe, not of the
-trading rules. Nothing shorter can be tested until this exists.
+**The one-hour bar was barely lying.** `test/manual/resolution.ts` scores every
+live plan twice, identical except the bar size, and compares. The concern was
+real: a 1h bar records only open, high, low and close, not the ORDER they
+happened in, so when one bar touches both the stop and a target the scorer has
+to guess, and it guesses stop-first because the alternative would flatter every
+result.
 
-### 2.4 Baseline measurement, before any new input
+Run over 310 analyses since 16 Aug, 157 comparable on both clocks:
 
-At the finer resolution, answer one question: **do 1–3 hour holds behave
-differently from what we saw at 1h?**
+    clock                mean netR   total R
+    1h (what we quote)     -0.427     -67.1
+    5m (the truth)         -0.369     -57.9
 
-This is the control. Without it, any later result cannot be separated from the
-timeframe change itself. We already know from the live data that a market
-regime change can flip a directional result completely — so an uncontrolled
-comparison here would prove nothing.
+    error: +0.059R per trade, 9.2R in total
+
+    status changed on 12 of 162 (7%), every one in the same direction:
+      STOPPED     -> PARTIAL       7
+      NO_FILL     -> PARTIAL       3
+      NO_FILL     -> ALL_TARGETS   2
+
+    plus 5 trades that opened on 5m and never on 1h, worth 1.20R
+    zero trades went the other way
+
+**The guess was always pessimistic, never flattering.** No result this project
+has published was inflated by it; a few were understated. That is the reassuring
+direction to be wrong in, and it means the recorded history stands.
+
+By how long the trade lasted, on the fine clock:
+
+    held      n    mean error (R)
+    0-3h     41        0.125
+    3-12h    56        0.022
+    12-24h   28        0.101
+    24h+     32        0.000
+
+The prediction was that the error would concentrate in the shortest holds and
+dominate them. It does lean that way — 0.125R at 0-3h against exactly zero
+past a day — but it is not monotonic and it is not large.
+
+**Verdict: finer bars do not rescue short holds.** The measurement error they
+would fix is 0.059R per trade. The cost gate from 2.2 is 0.36R per trade at the
+0.7% stop a short hold implies. The correction is a sixth of the problem, so
+2.3 stays closed.
+
+**One caveat, and it is the reason not to treat this as settled forever.** The
+0-3h trades measured here are trades that happened to resolve quickly under the
+CURRENT geometry — wide stops, a 72h limit. A strategy actually designed for
+1-3 hour holds would use much tighter stops, putting the stop and the target
+close enough together that the same bar touches both far more often. So 0.125R
+is a floor for such a strategy, not an estimate of it. If short holds are ever
+revisited for a reason that survives the cost arithmetic, re-run this first.
+
+### 2.4 Baseline measurement — not needed while 2.3 stays closed
+
+It existed to separate a new input's effect from the timeframe change. With no
+timeframe change, there is nothing to separate. Revive it if 2.3 reopens.
 
 ### 2.5 Then new inputs, one at a time
 
