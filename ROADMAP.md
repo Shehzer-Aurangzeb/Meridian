@@ -74,26 +74,45 @@ train/test split on the inputs we actually wanted to study, rather than the
 public indicators that turned out to be worthless. Nothing else on this list
 gets harder by waiting. This one does.
 
-### 2.2 Measure real execution cost — half an hour, no code, this week
+### 2.2 Measure real execution cost — DONE, 26 Aug 2026
 
-Find two things: the actual fee tier at the venue we would trade, and the real
-spread on the ten coins at the size actually traded. **This has never been
-done.** Every number in the project rests on a modelled cost.
+**The measured round trip is 0.25%.** It replaces the 0.14% we had been
+modelling, which was a fee plus a guessed slippage taken from a different
+exchange's futures pricing. Now one number, because only the total was
+measured — splitting it into a fee and a spread would be inventing the halves.
 
-What we model now is 0.05% fee plus 0.02% slippage per side, so 0.14% round
-trip (`apps/api/src/analysis-coordinator/outcome.ts:74`).
+Changed in `outcome.ts` (the site and every harness read it from there) and in
+every research CLI's default. The golden set is unaffected: it re-scores each
+trade with the cost frozen into the file, so the baseline could not move.
 
-Why it matters: at a 1–3 hour hold the stop is roughly 0.7% wide, so cost lands
-near **0.20R per trade**. If the true round trip is 0.21% instead of 0.14%,
-short holds are dead by arithmetic before anyone writes code. An external
-review already flagged that spot fees in Canada could be far higher than the
-futures numbers we used (`docs/EXTERNAL_REVIEW_BRIEF.md:271`).
+What it costs on the live record, 16–25 Aug, re-run at the measured number:
 
-**This number gates everything after it.** Do it before 2.3.
+    basis                    was (0.14%)   now (0.25%)
+    open marked to market      -0.180        -0.277
+    closed only                -0.277        -0.379
+    stopped-out trades         -1.120        -1.214
+    total                                    -26.9R over 97 fills
 
-### 2.3 Finer candles
+**This is the number that gates 2.3, and it did not pass.** Cost in R is
+`0.25 / stop%`. At the current ~1.3% stop that is 0.19R per trade. At the ~0.7%
+stop a 1–3 hour hold implies, it is **0.36R per trade** — every trade would
+need to average better than +0.36R before it earned anything at all. Read
+2.3 with that in front of you.
 
-Pull 1-minute or 5-minute history and rebuild the candle layer.
+### 2.3 Finer candles — reconsider before starting
+
+**2.2 undercut the reason for this.** Shorter holds mean tighter stops, and a
+tighter stop pays proportionally more of the same fixed toll. At 0.36R per
+trade the arithmetic is close to hopeless, which is exactly what 2.2 was run
+to find out before the work was done rather than after.
+
+Two honest options. Either drop the short-hold idea and keep the rebuild only
+if something else needs it, or first find a venue or order type that brings the
+round trip down — a resting limit order pays the maker fee, and the entry legs
+are limits already. Decide that before building anything.
+
+The original scope, if it goes ahead: pull 1-minute or 5-minute history and
+rebuild the candle layer.
 
 Bigger than it sounds. The zone map, the ATR, and every indicator assume 12h,
 4h and 1h bars. Day-long holds are a consequence of that timeframe, not of the
@@ -226,14 +245,17 @@ scorer models it correctly.
 
 ### The cost model charges maker and taker the same
 
-`apps/api/src/analysis-coordinator/outcome.ts:74` — one flat 0.05% fee plus
-0.02% slippage per side, applied identically to both.
+`apps/api/src/analysis-coordinator/outcome.ts` — one flat round trip, applied
+identically to every trade.
 
-In reality the entry legs are resting limit orders, which pay the lower maker
-fee, and a stop-out is a market order, which pays taker. Per-order cost is not
-modelled at all, so a three-leg entry is charged as if it were one order.
+2.2 replaced the *size* of that number with a measured 0.25%, but not its
+shape. In reality the entry legs are resting limit orders, which pay the lower
+maker fee, and a stop-out is a market order, which pays taker. Per-order cost
+is not modelled at all, so a three-leg entry is charged as if it were one
+order.
 
-This is the same number 2.2 is meant to replace.
+Parked, but it is now the most valuable of these: 2.3 hinges on whether the
+maker side is genuinely cheaper, and a flat number cannot answer that.
 
 ### Config provenance — load-bearing numbers with a broken citation
 

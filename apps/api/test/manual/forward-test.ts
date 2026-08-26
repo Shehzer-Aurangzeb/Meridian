@@ -55,6 +55,7 @@ import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.ser
 import { AnalysisRecord } from '../../src/analysis-coordinator/analyze.service';
 import {
   costR,
+  DEFAULT_ROUND_TRIP_PCT,
   FILL_WINDOW_HOURS,
   PlanResult,
   scorePlans,
@@ -93,16 +94,15 @@ const COOLDOWN_H = num('cooldown', 24);
 // random flipped sign on this number alone (rule 17), so it is also printed
 // uncapped, and the gap between the two is the finding.
 const MAX_HOLD_H = num('max-hold', 72);
-const FEE_PCT = num('fee', 0.05);
-const SLIP_PCT = num('slip', 0.02);
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+// Measured at the venue, not a fee plus a guess. --round-trip cost-stresses it.
+const ROUND_TRIP_PCT = num('round-trip', DEFAULT_ROUND_TRIP_PCT);
 const DRAWS = num('draws', 20);
 const SEED = num('seed', 12345);
 const CSV = str('csv', '');
 
 const CONFIG =
   `since=${SINCE || 'all'} until=${UNTIL || 'now'} cooldown=${COOLDOWN_H}h max-hold=${MAX_HOLD_H}h ` +
-  `fee=${FEE_PCT}% slip=${SLIP_PCT}% (round trip ${ROUND_TRIP_PCT}%) ` +
+  `round-trip=${ROUND_TRIP_PCT}% ` +
   `draws=${DRAWS} seed=${SEED}`;
 
 interface Row {

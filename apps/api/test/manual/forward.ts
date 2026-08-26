@@ -72,9 +72,7 @@ const SEED = Number(flagVal('seed', '42'));
 
 // Same cost model as backtest.ts: Kraken futures taker + slippage, charged
 // against the risk unit rather than assumed flat.
-const FEE_PCT = 0.05;
-const SLIP_PCT = 0.02;
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+const ROUND_TRIP_PCT = 0.25; // measured at the venue, August 2026
 
 // ── pure bits, so the self-check has something to bite on ────────────────
 
@@ -246,7 +244,7 @@ async function main() {
       `random n=${randomEntries.length}`,
   );
   console.log(
-    `cost: ${FEE_PCT}% fee + ${SLIP_PCT}% slip per side = ${ROUND_TRIP_PCT.toFixed(3)}% round trip,\n` +
+    `cost: ${ROUND_TRIP_PCT.toFixed(3)}% round trip, measured,\n` +
       `      charged against each entry's ATR — median ${(() => {
         const s = signalEntries.map((e) => e.costR).sort((a, b) => a - b);
         return s[Math.floor(s.length / 2)].toFixed(3);

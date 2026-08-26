@@ -107,7 +107,7 @@ export default function HistoryPage() {
       )}
 
       <Disclaimer
-        text={`Paper outcomes replayed from 1h candles — nothing here was traded. R is net of a 0.14% round trip, the §14h cost model. ${
+        text={`Paper outcomes replayed from 1h candles — nothing here was traded. R is net of a 0.25% round trip, measured at the venue. ${
           livePricesConnected ? 'Prices are live.' : 'Live prices unavailable; showing the price each analysis was scored against.'
         }`}
       />

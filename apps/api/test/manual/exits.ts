@@ -527,7 +527,7 @@ async function stress(path: string, split: Split): Promise<void> {
   // `ROUND_TRIP_PCT` is for labels only — the arithmetic scales each arm's
   // stored costR, which already carries its stop scale and its filled size.
   const BASE = 1;
-  const ROUND_TRIP_PCT = 0.14;
+  const ROUND_TRIP_PCT = 0.25;
 
   console.log(splitHeader(`ARM C STRESS TESTS`, path, sel));
 
