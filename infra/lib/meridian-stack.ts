@@ -174,6 +174,35 @@ export class MeridianStack extends Stack {
       ],
     });
 
+    // ── The flow collector ──────────────────────────────────────────────
+    // Once a day, at an hour the analysis schedule does not use so the two
+    // never share a cold start.
+    //
+    // Binance keeps roughly 30 days of open interest, taker volume and the
+    // long/short ratio. A day that falls off the end is gone permanently, so
+    // unlike the analysis schedule this one IS worth retrying — a failed run
+    // cannot be made up by the next one.
+    //
+    // It asks for the whole 30 days every time, not just yesterday. Re-reading
+    // what we already hold costs nothing (the rows are keyed and skipped on
+    // insert) and means a run missed for any reason repairs itself.
+    //
+    // ponytail: ~70 requests for ten coins, comfortably inside the function's
+    // 120s timeout. Chunk the symbol list across several events if the coin
+    // list ever grows enough to threaten that.
+    new events.Rule(this, 'FlowCollectionSchedule', {
+      description: `Save futures flow for ${SCHEDULED_SYMBOLS.length} coins daily`,
+      schedule: events.Schedule.cron({ minute: '30', hour: '3' }),
+      targets: [
+        new targets.LambdaFunction(api, {
+          event: events.RuleTargetInput.fromObject({
+            collect: { symbols: SCHEDULED_SYMBOLS, days: 30 },
+          }),
+          retryAttempts: 2,
+        }),
+      ],
+    });
+
     // ── CI deploy role ──────────────────────────────────────────────────
     // GitHub Actions assumes this role using an OIDC token it signs for each
     // job. No AWS access keys exist in the repository, so there is nothing to

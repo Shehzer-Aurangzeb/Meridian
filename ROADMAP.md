@@ -50,9 +50,19 @@ Spending weeks to make a losing number more precise is not worth it.
 
 ## 2. What comes next, in order
 
-### 2.1 Forward data collector — start immediately
+### 2.1 Forward data collector — BUILT, not yet deployed
 
-The only item with a deadline.
+**Status, 26 Aug 2026.** Written and tested. It starts collecting on the first
+deploy to `main`, and not before. Merging is the deploy.
+
+- `FlowSample` table, keyed on (symbol, metric, ts) so re-runs insert nothing new
+- `FlowCollectorService` — all four endpoints, verified against live Binance
+- Daily EventBridge rule at 03:30 UTC, asking for 30 days every time so a
+  missed run repairs itself
+- Nine tests, including the paging guard that stops a misbehaving endpoint
+  looping for ever
+
+Everything below is why it exists. The only item with a deadline.
 
 Binance keeps roughly **30 days** of open interest, taker buy/sell volume,
 long/short account ratio, and premium index. Every day we do not collect is a
