@@ -88,9 +88,9 @@ const BARS = num('bars', 600);
 const FILL_BARS = num('fill-bars', 24);
 const MAX_BARS = num('max-bars', 72);
 const COOLDOWN = num('cooldown', 24);
-const FEE_PCT = num('fee', 0.05);
-const SLIP_PCT = num('slip', 0.02);
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+// Stored per trade in the frozen file, so an existing set keeps the cost it
+// was built with and a default change here cannot silently move the baseline.
+const ROUND_TRIP_PCT = num('round-trip', 0.25);
 const BREAKEVEN = num('breakeven', 1);
 const STATES: ZoneState[] = ['ACTIONABLE'];
 const OUT = str('out', 'test/manual/results/golden-set.json');

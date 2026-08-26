@@ -97,10 +97,9 @@ const MAX_BARS = flag('max-bars', 48); // give up after N bars
 // Cost model. At long holds the stop is wide and fees are a rounding error;
 // at 20-minute holds the stop is tiny and the SAME fee can exceed 0.3R.
 // So cost is derived per-trade from the actual stop distance rather than
-// assumed flat. Defaults: Kraken futures taker 0.05%/side + 0.02% slippage.
-const FEE_PCT = flag('fee', 0.05); // per side, %
-const SLIP_PCT = flag('slip', 0.02); // per side, %
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+// assumed flat. Default is the round trip MEASURED at the venue in August
+// 2026, replacing a fee plus a guessed slippage from another exchange.
+const ROUND_TRIP_PCT = flag('round-trip', 0.25);
 const FLAT_COST = flag('cost', -1); // override with a flat R cost if > 0
 const FOLDS = flag('folds', 0); // >0 splits the window into N sequential folds
 // The coordinator no longer gates, so the harness owns its signal definition.
@@ -477,7 +476,7 @@ async function main() {
   console.log(
     FLAT_COST > 0
       ? `cost: flat ${FLAT_COST}R/trade`
-      : `cost: ${FEE_PCT}% fee + ${SLIP_PCT}% slip per side = ${ROUND_TRIP_PCT.toFixed(3)}% round trip, charged against each trade's stop distance`,
+      : `cost: ${ROUND_TRIP_PCT.toFixed(3)}% round trip, measured, charged against each trade's stop distance`,
   );
   console.log(
     `\n${signals} signals → ${trades.length} traded ` +

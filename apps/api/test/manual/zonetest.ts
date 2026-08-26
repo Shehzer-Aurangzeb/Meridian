@@ -95,9 +95,7 @@ const SR_LOOKBACK = SR_DEFAULTS.LOOKBACK_CANDLES; // 100
 const MAX_BARS = 48; // trade life AND zone arm window
 
 // Cost model — identical to backtest.ts so results are comparable.
-const FEE_PCT = 0.05;
-const SLIP_PCT = 0.02;
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+const ROUND_TRIP_PCT = 0.25; // measured at the venue, August 2026
 
 // ── args ────────────────────────────────────────────────────────────────
 const [, , coinArg, tfArg, ...rest] = process.argv;

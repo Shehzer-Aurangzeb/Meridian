@@ -66,11 +66,18 @@ export const MAX_HOLD_HOURS = 72;
 export const OUTCOME_WINDOW_HOURS = FILL_WINDOW_HOURS + MAX_HOLD_HOURS;
 
 /**
- * Cost of opening and closing, as a % of position value: 0.05% fee plus 0.02%
- * slippage, each way. Kept here so the site and the backtest price trades the
- * same.
+ * Cost of opening and closing once, as a % of position value.
+ *
+ * MEASURED at the venue, August 2026 — fee tier and real spread on the ten
+ * coins at the size actually traded. It replaces 0.14%, which was a fee plus a
+ * guessed slippage taken from a different exchange's futures pricing.
+ *
+ * Deliberately one number rather than a fee and a spread added together: only
+ * the total was measured, and splitting it would be inventing the halves.
+ *
+ * Kept here so the site and the backtest price trades identically.
  */
-export const DEFAULT_ROUND_TRIP_PCT = 2 * (0.05 + 0.02);
+export const DEFAULT_ROUND_TRIP_PCT = 0.25;
 
 /** The same cost expressed in R. A tighter stop pays proportionally more. */
 export function costR(riskPercent: number, roundTripPct = DEFAULT_ROUND_TRIP_PCT): number {

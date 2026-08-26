@@ -64,3 +64,23 @@ model CoordinatorRun {
   @@index([strategyRoute, createdAt])
   @@index([aiAction, createdAt])
 }
+
+/// One number from Binance's futures-flow endpoints, at one moment, for one coin.
+///
+/// Deliberately narrow. All four sources return the same thing — a timestamp
+/// and a number — so one table with a `metric` label beats four typed tables
+/// that would need joining back together for every study.
+///
+/// The key is (symbol, metric, ts), so re-collecting the same window inserts
+/// nothing new. That is what lets the collector overlap its windows and heal
+/// its own gaps without bookkeeping.
+model FlowSample {
+  symbol String
+  /// openInterest | longShortRatio | takerBuySellRatio | premium
+  metric String
+  ts     DateTime
+  value  Float
+
+  @@id([symbol, metric, ts])
+  @@index([metric, ts])
+}

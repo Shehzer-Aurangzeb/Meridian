@@ -133,9 +133,8 @@ const MAX_BARS = num('max-bars', 72); // give up on an open position
  */
 const RESIGNAL_BARS = num('resignal-bars', 8);
 const COOLDOWN = num('cooldown', 24); // bars after a close before re-entering
-const FEE_PCT = num('fee', 0.05); // per side, %
-const SLIP_PCT = num('slip', 0.02); // per side, %
-const ROUND_TRIP_PCT = 2 * (FEE_PCT + SLIP_PCT);
+// Measured at the venue, not a fee plus a guess. --round-trip cost-stresses it.
+const ROUND_TRIP_PCT = num('round-trip', 0.25);
 // 1 = playbook (stop to breakeven after TP1), 0 = never move the stop.
 const BREAKEVEN = num('breakeven', 1);
 const STATES = str('states', 'ACTIONABLE')
@@ -173,7 +172,7 @@ const SCORING: ScoringConfig = {
 const CONFIG =
   `coins=${COINS.join('/')} bars=${BARS} step=${STEP} states=${STATES.join('+')} ` +
   `fill-bars=${FILL_BARS} max-bars=${MAX_BARS} cooldown=${COOLDOWN} ` +
-  `fee=${FEE_PCT}% slip=${SLIP_PCT}% (round trip ${ROUND_TRIP_PCT}%) breakeven-after=${BREAKEVEN}` +
+  `round-trip=${ROUND_TRIP_PCT}% breakeven-after=${BREAKEVEN}` +
   `${RANDOM ? ` random-control seed=${SEED}` : ''}`;
 
 /**

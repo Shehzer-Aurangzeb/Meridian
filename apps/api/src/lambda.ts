@@ -11,15 +11,16 @@ import { AppModule } from './app.module';
 import { configureApp, docsEnabled } from './configure-app';
 import { AnalyzeService } from './analysis-coordinator/analyze.service';
 import { CoordinatorPersistenceService } from './analysis-coordinator/coordinator-persistence.service';
+import { FlowCollectorService, type CollectResult } from './flow/flow-collector.service';
 import { loadSecrets } from './load-secrets';
 
 /**
  * Where AWS starts the app. There is no server and no port: AWS runs this
  * function, and whatever it returns is the response.
  *
- * Two different things trigger it — a web request, and the timer that runs
- * the scheduled analyses — and they arrive in different shapes, so the first
- * job is working out which one this is.
+ * Three different things trigger it — a web request, the timer that runs the
+ * scheduled analyses, and the timer that saves the flow data — and they arrive
+ * in different shapes, so the first job is working out which one this is.
  *
  * The app itself is built OUTSIDE the function on purpose. AWS reuses the
  * same container for several minutes, and anything out here runs once per
@@ -34,11 +35,24 @@ interface ScheduledEvent {
   scheduled: { symbols: string[] };
 }
 
+/** The daily flow collection. Same idea, different shape. */
+interface CollectEvent {
+  collect: { symbols: string[]; days?: number };
+}
+
 function isScheduled(event: unknown): event is ScheduledEvent {
   return (
     typeof event === 'object' &&
     event !== null &&
     Array.isArray((event as ScheduledEvent).scheduled?.symbols)
+  );
+}
+
+function isCollect(event: unknown): event is CollectEvent {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    Array.isArray((event as CollectEvent).collect?.symbols)
   );
 }
 
@@ -95,13 +109,32 @@ async function runScheduled(event: ScheduledEvent): Promise<{
   return { saved, failed };
 }
 
+/**
+ * The daily flow collection. Separate from the analysis schedule because it is
+ * a different job on a different clock: this one is racing Binance's 30-day
+ * retention, and losing a day of it cannot be undone later.
+ */
+async function runCollect(event: CollectEvent): Promise<CollectResult> {
+  const app = await getApp();
+  const collector = app.get(FlowCollectorService);
+  return collector.collect(event.collect.symbols, event.collect.days);
+}
+
 export const handler = async (
-  event: APIGatewayProxyEventV2 | ScheduledEvent,
+  event: APIGatewayProxyEventV2 | ScheduledEvent | CollectEvent,
   context: Context,
   callback: Parameters<Handler>[2],
-): Promise<APIGatewayProxyResultV2 | { saved: string[]; failed: Record<string, string> }> => {
+): Promise<
+  | APIGatewayProxyResultV2
+  | { saved: string[]; failed: Record<string, string> }
+  | CollectResult
+> => {
   if (isScheduled(event)) {
     return runScheduled(event);
+  }
+
+  if (isCollect(event)) {
+    return runCollect(event);
   }
 
   if (!cachedHttp) {
