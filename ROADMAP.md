@@ -183,6 +183,9 @@ got built, and why it did not survive.
 
 ### 2.6 Optional — audit the zone map
 
+**Planned in `ZONE_AUDIT.md`.** Five measurements, four confirmed findings, and
+the rules for running it. Not started.
+
 `SupportResistanceService` and `LevelMapService` were never examined by either
 audit, and they decide where every entry, stop and target goes. Two smells,
 both confirmed in the code:
