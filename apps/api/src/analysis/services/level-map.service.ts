@@ -15,14 +15,21 @@ import { SupportResistanceService } from './support-resistance.service';
 import { IndicatorsService } from '../../indicators/indicators.service';
 
 /**
- * The chart timeframes levels are marked on, slowest first. Slower charts
- * carry the stronger levels, so all three are used and each says where its
- * levels came from.
+ * The chart timeframes levels are marked on, SLOWEST FIRST. Slower charts
+ * carry the stronger levels, and each mark says which chart it came from.
+ *
+ * The order is load-bearing twice over: `buildFrom` reads spot off the LAST
+ * entry (the fastest chart), and the marks are laid down in this order, which
+ * decides which one wins a tie inside the greedy grouping walk.
  */
 export const LEVEL_TIMEFRAMES: Timeframe[] = [
+  TIMEFRAMES.WEEKLY,
+  TIMEFRAMES.DAILY,
   TIMEFRAMES.TWELVE_HOUR,
   TIMEFRAMES.FOUR_HOUR,
   TIMEFRAMES.ONE_HOUR,
+  TIMEFRAMES.THIRTY_MIN,
+  TIMEFRAMES.FIFTEEN_MIN,
 ];
 
 /**

@@ -11,7 +11,7 @@
  * timeframe nobody chose deliberately is a correctness problem rather than a
  * convenience. All four are printed below:
  *
- *   levels    12h / 4h / 1h     LEVEL_TIMEFRAMES
+ *   levels    1w..15m           LEVEL_TIMEFRAMES
  *   fib       12h               FIB_ANCHOR_TIMEFRAME
  *   atr       4h                ATR_TIMEFRAME
  *   regime    12h               ANALYSIS_TIMEFRAME

@@ -12,6 +12,7 @@ export const TIMEFRAMES = {
   // Lower Timeframes (LTF) - Entry signals
   FOUR_HOUR: '4h',
   ONE_HOUR: '1h',
+  THIRTY_MIN: '30m',
   FIFTEEN_MIN: '15m',
   FIVE_MIN: '5m',
   ONE_MIN: '1m',
@@ -48,11 +49,14 @@ export type TradeType = keyof typeof ANALYSIS_TIMEFRAMES;
  * More candles for lower timeframes to capture enough history
  */
 export const CANDLE_LIMITS: Record<Timeframe, number> = {
-  [TIMEFRAMES.WEEKLY]: 52, // ~1 year
+  // 120 not 52: the replay guards skip any bar where a chart has under 50
+  // candles, and 52 leaves no room for that. Weekly klines go back to 2017.
+  [TIMEFRAMES.WEEKLY]: 120, // ~2.3 years
   [TIMEFRAMES.DAILY]: 100, // ~3 months
   [TIMEFRAMES.TWELVE_HOUR]: 120, // ~2 months
   [TIMEFRAMES.FOUR_HOUR]: 150, // ~25 days
   [TIMEFRAMES.ONE_HOUR]: 200, // ~8 days
+  [TIMEFRAMES.THIRTY_MIN]: 200, // ~4 days
   [TIMEFRAMES.FIFTEEN_MIN]: 200, // ~2 days
   [TIMEFRAMES.FIVE_MIN]: 200, // ~17 hours
   [TIMEFRAMES.ONE_MIN]: 200, // ~3 hours
