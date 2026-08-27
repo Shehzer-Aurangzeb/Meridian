@@ -64,6 +64,34 @@ const SEED = num('seed', 12345);
 const N_FLOOR = num('n-floor', 5000);
 /** Points of lift over the coin's own base rate that count as a signal. */
 const LIFT_BAR = num('lift', 5);
+/**
+ * Ten equal-count buckets per input per coin, instead of edges chosen up front.
+ *
+ * V1 was reported DEAD at +4.0pt with everything above +5% pooled into one
+ * bucket of 39,022 observations. Re-cut on deciles its top decile reads +8.2pt.
+ * The edges were picked before the distributions were known, which is a
+ * resolution problem and not a data one. DECILE_AB.md.
+ */
+const DECILES = args.includes('--deciles');
+/**
+ * Effective observations a cell needs before a verdict, in the block-bootstrap
+ * sense below — NOT raw bars.
+ *
+ * Pinned after DECILE_AB.md was committed and before any run: the pre-registration
+ * fixed the CI rule and the effective-n definition but left the floor open. 1,000
+ * is the order of magnitude the audit's V1 cell implies (n=13,476, CI width 5.4pt
+ * -> SE 1.38pt -> n_eff ~ 1,300). It is close to redundant, because a cell whose
+ * interval already excludes the bar has by definition been measured precisely
+ * enough; it is here to stop a wild interval sneaking through.
+ */
+const NEFF_FLOOR = num('neff-floor', 1000);
+/** Resamples per cell, and the block width. ~19 months of TUNE is ~42 blocks. */
+const B_RESAMPLES = num('resamples', 2000);
+const BLOCK_MS = num('block-days', 14) * 24 * 3_600_000;
+/** Shuffled controls per input. One shuffle is an anecdote about a seed. */
+const SHUFFLES = num('shuffles', 3);
+/** How far a recovered plant may sit from its planted strength. */
+const PLANT_TOL = num('plant-tol', 0.5);
 /** Oldest share of each coin's bars that may be looked at. */
 const TUNE_SHARE = 0.7;
 const HORIZONS = [4, 12, 24] as const;
@@ -78,6 +106,9 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+// Math.min(...xs) throws on ~10^5 arguments, and every array here is that size.
+const minOf = (xs: number[]) => xs.reduce((a, b) => (b < a ? b : a), Infinity);
+const maxOf = (xs: number[]) => xs.reduce((a, b) => (b > a ? b : a), -Infinity);
 
 /**
  * A timestamped value from a non-price series, stamped with when it became
@@ -235,6 +266,27 @@ function volumeDelta({ candles }: Bundle, i: number): number {
   return (up - down) / total;
 }
 
+const DD_LOOKBACK = 500; // the same window as the volume node, deliberately
+
+/**
+ * The control that matters more than the shuffle.
+ *
+ * Signed percent change from the close 500 bars ago to this close. No volume in
+ * it, no flow, no node — just "how far has price come". V1's entire effect
+ * reproduces from this input (+4.2 / +6.9 / +8.0 against V1's +5.4 / +8.5 /
+ * +9.6), so the volume machinery was contributing nothing and the finding was
+ * post-drawdown mean reversion wearing a volume costume.
+ *
+ * Every candidate cell that clears the bar is printed next to this one. Without
+ * that comparison the project rediscovers mean reversion once per input class.
+ */
+function drawdown({ candles }: Bundle, i: number): number {
+  const from = i - DD_LOOKBACK;
+  if (from < 0) return NaN;
+  const then = candles[from].close;
+  return then > 0 ? ((candles[i].close - then) / then) * 100 : NaN;
+}
+
 const FUND_CHANGE_SETTLEMENTS = 3; // 24h at an 8h cadence
 const EXTREMITY_SETTLEMENTS = 30; // ~10 days
 
@@ -297,7 +349,7 @@ function fundingExtremity(b: Bundle, i: number): number {
 interface Input {
   key: string;
   label: string;
-  group: 'volume' | 'flow';
+  group: 'volume' | 'flow' | 'control';
   compute: (b: Bundle, i: number) => number;
   edges: number[];
   unit: string;
@@ -368,6 +420,14 @@ const INPUTS: Input[] = [
     edges: [-4, -2, -1, 0, 1, 2, 4],
     unit: 'x',
   },
+  {
+    key: 'dd',
+    label: 'DD. drawdown baseline — trailing 500-bar return, no volume in it (CONTROL)',
+    group: 'control',
+    compute: drawdown,
+    edges: [-40, -25, -15, -7, 0, 7, 15, 25, 40],
+    unit: '%',
+  },
 ];
 
 function bucketOf(value: number, edges: number[]): number {
@@ -394,6 +454,8 @@ interface Obs {
    * against the pooled average.
    */
   base: number[];
+  /** When the decision bar closed — the block bootstrap resamples on this. */
+  t: number;
 }
 
 /** Paged fetch of the futures flow series, both stamped with PUBLICATION time. */
@@ -469,9 +531,10 @@ async function fetchPremium(pair: string, sinceMs: number): Promise<Pub[]> {
 async function main(): Promise<void> {
   const wanted = INPUTS.filter(
     (x) =>
-      args.includes('--all') ||
       args.includes(`--${x.key}`) ||
-      args.includes(`--${x.group}`),
+      // The drawdown control is never a candidate: it does not carry a verdict
+      // and it does not count against the multiple-comparison budget.
+      ((args.includes('--all') || args.includes(`--${x.group}`)) && x.group !== 'control'),
   );
   if (wanted.length === 0) {
     console.log(
@@ -488,7 +551,12 @@ async function main(): Promise<void> {
     `DIRECTIONAL INPUT PROBE — VOLUME_AB.md / FUNDING_AB.md\n` +
       `coins=${COINS.join(',')} bars=${BARS} horizons=${HORIZONS.join('/')}h ` +
       `tune=oldest ${TUNE_SHARE * 100}% seed=${SEED}\n` +
-      `criteria: lift >= ${LIFT_BAR}pt over the coin's own base rate, n >= ${N_FLOOR}\n`,
+      (DECILES
+        ? `criteria: a cell is DEAD only when its ${f(95, 0)}% CI excludes ${LIFT_BAR}pt of lift; ` +
+          `CLEARS when the CI excludes it the other way and n_eff >= ${NEFF_FLOOR}\n` +
+          `deciles: 10 equal-count buckets per input PER COIN, cut from TUNE only\n` +
+          `CI: ${B_RESAMPLES} resamples of ${BLOCK_MS / 86_400_000}-day calendar blocks, all coins inside a block\n`
+        : `criteria: lift >= ${LIFT_BAR}pt over the coin's own base rate, n >= ${N_FLOOR}\n`),
   );
 
   const bundles = new Map<string, Bundle>();
@@ -565,6 +633,11 @@ async function main(): Promise<void> {
     console.log(`${coin.padEnd(8)} ${b.map((x) => `${f(x, 1)}%`.padEnd(8)).join(' ')}`);
   }
 
+  if (DECILES) {
+    runDeciles(wanted, bundles, base);
+    return;
+  }
+
   const rng = makeRng(SEED);
 
   for (const input of wanted) {
@@ -584,7 +657,7 @@ async function main(): Promise<void> {
           i + h < c.length ? ((c[i + h].close - c[i].close) / c[i].close) * 100 : NaN,
         );
         if (fwd.every((x) => !Number.isFinite(x))) continue;
-        obs.push({ coin, raw, bucket: bucketOf(raw, input.edges), fwd, base: bs });
+        obs.push({ coin, raw, bucket: bucketOf(raw, input.edges), fwd, base: bs, t: closeOf(c, i) });
       }
     }
 
@@ -685,6 +758,650 @@ function report(obs: Obs[], input: Input, isControl: boolean): Hit[] {
       : `\n    no bucket reached ${LIFT_BAR}pt of lift at any horizon`,
   );
   return isControl ? [] : hits;
+}
+
+// ── decile bucketing ────────────────────────────────────────────────────
+//
+// The earlier runs used FIXED edges chosen from what an input means. That is
+// honest about lookahead and blind to where the mass actually sits: V1 put
+// everything above +5% into one bucket of 39,022 observations and reported the
+// average of a wide tail as though it were a cell. The tail had a result in it.
+//
+// Deciles are cut PER COIN and from TUNE ONLY. Per coin, because a pooled
+// decile is mostly whichever coin is most volatile. From TUNE only, because a
+// percentile of the whole sample is computed from bars in the future of the one
+// being labelled — the same leak the fixed edges existed to avoid, and a
+// sharper one here since the edges are now derived from the data itself.
+//
+// The boundaries are printed with every run so that a holdout spend applies
+// THESE numbers rather than re-deriving percentiles over there.
+
+const DECILE_QS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+
+/** The 9 cut points of a coin's own TUNE distribution. Sorted input copy. */
+export function decileEdges(values: number[]): number[] {
+  const s = [...values].sort((a, b) => a - b);
+  if (s.length === 0) return [];
+  return DECILE_QS.map((q) => s[Math.min(s.length - 1, Math.floor(q * s.length))]);
+}
+
+const decileLabel = (b: number): string => `D${b + 1}`;
+
+// ── the block bootstrap ─────────────────────────────────────────────────
+//
+// Every CI and every effective n in this file comes from here.
+//
+// A block is 14 calendar days and is drawn with EVERY coin's observations
+// inside it. Ten crypto majors over one window are not ten independent
+// samples — they move together — and resampling coins or bars independently
+// would quietly claim otherwise. Same reasoning as the month blocks in
+// bootstrap.ts.
+//
+// ~19 months of TUNE is about 42 blocks. That is the real sample size behind
+// every interval printed below, and it is why they are wide: 140,000
+// observations of an 8-hourly series, sampled hourly, across ten correlated
+// coins, is not 140,000 pieces of evidence. The whole point of the re-run is
+// that a cell should say how precisely it is measured, not just what it
+// measured.
+
+/** One draw sequence, reused across every cell of a report (common random
+ *  numbers) — so two cells' intervals are comparable and it costs one pass. */
+function blockDraws(nBlocks: number, rng: () => number): Int32Array {
+  const draws = new Int32Array(B_RESAMPLES * nBlocks);
+  for (let b = 0; b < B_RESAMPLES; b++) {
+    for (let k = 0; k < nBlocks; k++) {
+      draws[b * nBlocks + k] = Math.floor(rng() * nBlocks);
+    }
+  }
+  return draws;
+}
+
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return NaN;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))));
+  return sorted[i];
+}
+
+interface Cell {
+  bucket: number;
+  hi: number;
+  /** Observations with a finite forward return at this horizon. */
+  n: number;
+  /**
+   * The binomial sample size that would produce the spread the block bootstrap
+   * actually shows: p(1-p) / SE^2. On an i.i.d. cell it lands near raw n. On
+   * funding — an 8h series sampled hourly, then clustered in time — it should
+   * land far below it, which is the thing raw n cannot see.
+   */
+  nEff: number;
+  up: number;
+  expected: number;
+  lift: number;
+  ciLo: number;
+  ciHi: number;
+  meanFwd: number;
+  medFwd: number;
+  rawLo: number;
+  rawHi: number;
+  /** CLEARS = the interval excludes the bar. DEAD = the interval excludes it
+   *  on the other side, i.e. this cell is measured and it is flat. */
+  verdict: 'DEAD' | 'UNPROVEN' | 'CLEARS';
+}
+
+/**
+ * Every cell of one input: lift, interval, effective n, verdict.
+ *
+ * `blockOf` maps an observation to its calendar block. Blocks with nothing in
+ * a given cell contribute zero when drawn — which is exactly right: a cell
+ * whose observations sit in six blocks should be told it has six blocks of
+ * evidence, not forty-two.
+ */
+function cellsOf(obs: Obs[], nBuckets: number, rng: () => number): Cell[] {
+  if (obs.length === 0) return [];
+  const t0 = minOf(obs.map((o) => o.t));
+  const nBlocks = Math.floor((maxOf(obs.map((o) => o.t)) - t0) / BLOCK_MS) + 1;
+  const draws = blockDraws(nBlocks, rng);
+
+  const out: Cell[] = [];
+  for (let b = 0; b < nBuckets; b++) {
+    const inB = obs.filter((o) => o.bucket === b);
+    if (inB.length === 0) continue;
+    const raws = inB.map((o) => o.raw);
+
+    HORIZONS.forEach((_h, hi) => {
+      const rows = inB.filter((o) => Number.isFinite(o.fwd[hi]));
+      if (rows.length === 0) return;
+      const v = rows.map((o) => o.fwd[hi]);
+      const up = pctOf(v.filter((x) => x > 0).length, v.length);
+      const expected = mean(rows.map((o) => o.base[hi]));
+
+      const bUp = new Float64Array(nBlocks);
+      const bN = new Float64Array(nBlocks);
+      const bBase = new Float64Array(nBlocks);
+      for (const o of rows) {
+        const k = Math.floor((o.t - t0) / BLOCK_MS);
+        bN[k] += 1;
+        bBase[k] += o.base[hi];
+        if (o.fwd[hi] > 0) bUp[k] += 1;
+      }
+
+      const lifts: number[] = [];
+      let sp = 0;
+      let sp2 = 0;
+      let m = 0;
+      for (let r = 0; r < B_RESAMPLES; r++) {
+        let u = 0;
+        let n = 0;
+        let bs = 0;
+        const off = r * nBlocks;
+        for (let k = 0; k < nBlocks; k++) {
+          const j = draws[off + k];
+          u += bUp[j];
+          n += bN[j];
+          bs += bBase[j];
+        }
+        if (n === 0) continue;
+        const p = u / n;
+        lifts.push(100 * p - bs / n);
+        sp += p;
+        sp2 += p * p;
+        m += 1;
+      }
+      lifts.sort((a, b2) => a - b2);
+      const varP = m > 1 ? Math.max(0, sp2 / m - (sp / m) ** 2) : NaN;
+      const pHat = up / 100;
+      const nEff = varP > 0 ? (pHat * (1 - pHat)) / varP : NaN;
+      const ciLo = quantile(lifts, 0.025);
+      const ciHi = quantile(lifts, 0.975);
+
+      // Number.isFinite, not !(nEff < floor): an unmeasurable cell must fail
+      // the floor, and NaN fails every comparison including the one that
+      // would have let it through.
+      const clears =
+        (ciLo >= LIFT_BAR || ciHi <= -LIFT_BAR) && Number.isFinite(nEff) && nEff >= NEFF_FLOOR;
+      const dead = ciLo > -LIFT_BAR && ciHi < LIFT_BAR;
+
+      out.push({
+        bucket: b,
+        hi,
+        n: v.length,
+        nEff,
+        up,
+        expected,
+        lift: up - expected,
+        ciLo,
+        ciHi,
+        meanFwd: mean(v),
+        medFwd: median(v),
+        rawLo: minOf(raws),
+        rawHi: maxOf(raws),
+        verdict: clears ? 'CLEARS' : dead ? 'DEAD' : 'UNPROVEN',
+      });
+    });
+  }
+  return out;
+}
+
+const cellLine = (c: Cell, label: string): string =>
+  `  ${label.padEnd(7)}${`[${f(c.rawLo, 2)}, ${f(c.rawHi, 2)}]`.padEnd(24)}` +
+  `${String(c.n).padEnd(9)}${(Number.isFinite(c.nEff) ? String(Math.round(c.nEff)) : '—').padEnd(9)}` +
+  `${`${f(c.up, 1)}%`.padEnd(8)}${`${f(c.expected, 1)}%`.padEnd(8)}` +
+  `${`${c.lift >= 0 ? '+' : ''}${f(c.lift, 1)}`.padEnd(8)}` +
+  `${`[${c.ciLo >= 0 ? '+' : ''}${f(c.ciLo, 1)}, ${c.ciHi >= 0 ? '+' : ''}${f(c.ciHi, 1)}]`.padEnd(18)}` +
+  `${f(c.meanFwd, 2).padEnd(8)}${c.verdict}`;
+
+function printCells(cells: Cell[], label: (b: number) => string): void {
+  HORIZONS.forEach((h, hi) => {
+    console.log(
+      `\n  +${h}h\n  ${'cell'.padEnd(7)}${'raw range'.padEnd(24)}${'n'.padEnd(9)}` +
+        `${'n_eff'.padEnd(9)}${'up%'.padEnd(8)}${'base'.padEnd(8)}${'lift'.padEnd(8)}` +
+        `${'95% CI'.padEnd(18)}${'mean%'.padEnd(8)}verdict`,
+    );
+    for (const c of cells.filter((x) => x.hi === hi)) console.log(cellLine(c, label(c.bucket)));
+  });
+}
+
+/** Spearman rank correlation of lift against decile index, at one horizon.
+ *  A structural signal strengthens across neighbours; noise spikes alone. */
+function spearman(xs: number[]): number {
+  const n = xs.length;
+  if (n < 3) return NaN;
+  const order = xs.map((v, i) => [v, i] as const).sort((a, b) => a[0] - b[0]);
+  const rank = new Array<number>(n);
+  order.forEach(([, i], r) => (rank[i] = r + 1));
+  const idx = Array.from({ length: n }, (_, i) => i + 1);
+  const mx = mean(idx);
+  const my = mean(rank);
+  let num = 0;
+  let dx = 0;
+  let dy = 0;
+  for (let i = 0; i < n; i++) {
+    num += (idx[i] - mx) * (rank[i] - my);
+    dx += (idx[i] - mx) ** 2;
+    dy += (rank[i] - my) ** 2;
+  }
+  return dx > 0 && dy > 0 ? num / Math.sqrt(dx * dy) : NaN;
+}
+
+// ── the decile run ──────────────────────────────────────────────────────
+
+/** Every observation an input produces, unbucketed. */
+function buildObs(input: Input, bundles: Map<string, Bundle>, base: Map<string, number[]>): Obs[] {
+  const obs: Obs[] = [];
+  for (const [coin, bundle] of bundles) {
+    const c = bundle.candles;
+    const bs = base.get(coin) as number[];
+    for (let i = 0; i < c.length; i++) {
+      const raw = input.compute(bundle, i);
+      if (!Number.isFinite(raw)) continue;
+      const fwd = HORIZONS.map((h) =>
+        i + h < c.length ? ((c[i + h].close - c[i].close) / c[i].close) * 100 : NaN,
+      );
+      if (fwd.every((x) => !Number.isFinite(x))) continue;
+      obs.push({ coin, raw, bucket: -1, fwd, base: bs, t: closeOf(c, i) });
+    }
+  }
+  return obs;
+}
+
+/** Cut each coin's own distribution into ten, and label every observation.
+ *  Returns the boundaries so they can be printed and reused on holdout. */
+function assignDeciles(obs: Obs[]): Map<string, number[]> {
+  const byCoin = new Map<string, number[]>();
+  for (const o of obs) {
+    const xs = byCoin.get(o.coin) ?? [];
+    xs.push(o.raw);
+    byCoin.set(o.coin, xs);
+  }
+  const edges = new Map<string, number[]>();
+  for (const [coin, xs] of byCoin) edges.set(coin, decileEdges(xs));
+  for (const o of obs) o.bucket = bucketOf(o.raw, edges.get(o.coin) as number[]);
+  return edges;
+}
+
+/**
+ * Forward returns reshuffled WITHIN each coin.
+ *
+ * Within, not across: shuffling the pooled set also shuffles which coin's base
+ * rate an observation is judged against, so the control was measuring a second
+ * thing (worth up to 0.56pt) on top of the one it was for. Deciles stay put,
+ * outcomes move, and every cell must land on its own base rate.
+ */
+function shuffleWithinCoin(obs: Obs[], rng: () => number): Obs[] {
+  const idxByCoin = new Map<string, number[]>();
+  obs.forEach((o, i) => {
+    const xs = idxByCoin.get(o.coin) ?? [];
+    xs.push(i);
+    idxByCoin.set(o.coin, xs);
+  });
+  const out = obs.map((o) => ({ ...o }));
+  for (const idx of idxByCoin.values()) {
+    const pool = idx.map((i) => obs[i].fwd);
+    for (let k = pool.length - 1; k > 0; k--) {
+      const j = Math.floor(rng() * (k + 1));
+      [pool[k], pool[j]] = [pool[j], pool[k]];
+    }
+    idx.forEach((i, k) => (out[i].fwd = pool[k]));
+  }
+  return out;
+}
+
+/**
+ * A positive control for DECILE bucketing.
+ *
+ * The plants that validated fixed edges do not validate this: the boundaries
+ * are now derived from the data, so the cutting code is part of what is being
+ * trusted. Each plant takes the real bars — real forward returns, real
+ * timestamps, so the block bootstrap sees real time structure — and gives every
+ * observation a synthetic value chosen so that a KNOWN lift lands in a KNOWN
+ * decile at a KNOWN horizon.
+ *
+ * Construction, per coin: take the target decile's worth of observations, of
+ * which exactly (base + lift)% are ones that went up, drawn at random from the
+ * up and down pools. Give those the top (or bottom) tenth of the value range
+ * and everyone else the rest. The decile cutter then has to find them.
+ *
+ * If a plant does not come back at its planted strength, no other number in
+ * this run means anything.
+ */
+interface Plant { key: string; decile: number; hi: number; lift: number }
+const PLANTS: Plant[] = [
+  { key: 'P5', decile: 9, hi: 2, lift: 8 },
+  { key: 'P6', decile: 9, hi: 1, lift: 5 },
+  { key: 'P7', decile: 9, hi: 0, lift: 2 },
+  { key: 'P8', decile: 0, hi: 1, lift: -5 },
+];
+
+function plantedObs(
+  plant: Plant,
+  bundles: Map<string, Bundle>,
+  base: Map<string, number[]>,
+  rng: () => number,
+): Obs[] {
+  const obs: Obs[] = [];
+  const top = plant.decile === 9;
+  for (const [coin, bundle] of bundles) {
+    const c = bundle.candles;
+    const bs = base.get(coin) as number[];
+    const rows: Obs[] = [];
+    for (let i = 0; i < c.length; i++) {
+      const fwd = HORIZONS.map((h) =>
+        i + h < c.length ? ((c[i + h].close - c[i].close) / c[i].close) * 100 : NaN,
+      );
+      if (fwd.every((x) => !Number.isFinite(x))) continue;
+      rows.push({ coin, raw: NaN, bucket: -1, fwd, base: bs, t: closeOf(c, i) });
+    }
+    const eligible = rows.filter((r) => Number.isFinite(r.fwd[plant.hi]));
+    const ups = eligible.filter((r) => r.fwd[plant.hi] > 0);
+    const downs = eligible.filter((r) => !(r.fwd[plant.hi] > 0));
+    const shuffle = (xs: Obs[]): Obs[] => {
+      const a = [...xs];
+      for (let k = a.length - 1; k > 0; k--) {
+        const j = Math.floor(rng() * (k + 1));
+        [a[k], a[j]] = [a[j], a[k]];
+      }
+      return a;
+    };
+    const nD = Math.round(rows.length / 10);
+    const wantUp = Math.min(
+      ups.length,
+      Math.max(0, Math.round((nD * (bs[plant.hi] + plant.lift)) / 100)),
+    );
+    const picked = new Set<Obs>([
+      ...shuffle(ups).slice(0, wantUp),
+      ...shuffle(downs).slice(0, Math.max(0, nD - wantUp)),
+    ]);
+    for (const r of rows) {
+      const inPlant = picked.has(r);
+      // Planted rows occupy the outer tenth of the range, so the decile cutter
+      // — not this function — is what has to put them in the target decile.
+      r.raw = top
+        ? (inPlant ? 0.9 + 0.1 * rng() : 0.9 * rng())
+        : (inPlant ? 0.1 * rng() : 0.1 + 0.9 * rng());
+      obs.push(r);
+    }
+  }
+  return obs;
+}
+
+function runPlants(
+  bundles: Map<string, Bundle>,
+  base: Map<string, number[]>,
+  rng: () => number,
+): boolean {
+  console.log(
+    `\n${'='.repeat(96)}\nPOSITIVE CONTROL UNDER DECILES — DECILE_AB.md\n` +
+      `A planted lift must come back at its planted strength (tolerance ${f(PLANT_TOL, 1)}pt).\n`,
+  );
+  console.log(
+    `  ${'plant'.padEnd(7)}${'decile'.padEnd(8)}${'horizon'.padEnd(9)}${'planted'.padEnd(9)}` +
+      `${'recovered'.padEnd(11)}${'n'.padEnd(9)}${'n_eff'.padEnd(9)}${'95% CI'.padEnd(18)}result`,
+  );
+  let allOk = true;
+  for (const plant of PLANTS) {
+    const obs = plantedObs(plant, bundles, base, rng);
+    assignDeciles(obs);
+    const cells = cellsOf(obs, 10, makeRng(SEED));
+    const cell = cells.find((c) => c.bucket === plant.decile && c.hi === plant.hi);
+    if (!cell) {
+      console.log(`  ${plant.key} — NO CELL`);
+      allOk = false;
+      continue;
+    }
+    const ok = Math.abs(cell.lift - plant.lift) <= PLANT_TOL;
+    allOk = allOk && ok;
+    console.log(
+      `  ${plant.key.padEnd(7)}${decileLabel(plant.decile).padEnd(8)}` +
+        `${`+${HORIZONS[plant.hi]}h`.padEnd(9)}` +
+        `${`${plant.lift >= 0 ? '+' : ''}${f(plant.lift, 1)}`.padEnd(9)}` +
+        `${`${cell.lift >= 0 ? '+' : ''}${f(cell.lift, 1)}`.padEnd(11)}` +
+        `${String(cell.n).padEnd(9)}${String(Math.round(cell.nEff)).padEnd(9)}` +
+        `${`[${f(cell.ciLo, 1)}, ${f(cell.ciHi, 1)}]`.padEnd(18)}${ok ? 'OK' : 'FAILED'}`,
+    );
+  }
+  console.log(
+    allOk
+      ? '\n  positive control PASSED — the decile cutter recovers what is planted in it'
+      : '\n  positive control FAILED — nothing else in this run counts',
+  );
+  return allOk;
+}
+
+/** The four extra questions asked of a cell that clears the bar. */
+interface Forensics {
+  perCoin: string[];
+  coinsSameSign: number;
+  perPeriod: number[];
+  periodsSameSign: number;
+  rho: number;
+  lifts: number[];
+  monotone: boolean;
+  dd: Cell | undefined;
+  ddBest: Cell | undefined;
+  beatsDd: boolean;
+  /** How this cell's bars are spread across the drawdown control's deciles. */
+  ddSpread: number[];
+  /** The same cell with every bar that is ALSO in a drawdown extreme removed. */
+  residual: Cell | undefined;
+  residualN: number;
+}
+
+function forensicsOf(
+  cell: Cell,
+  obs: Obs[],
+  cells: Cell[],
+  base: Map<string, number[]>,
+  ddCells: Cell[],
+  ddBucketAt: Map<string, number>,
+): Forensics {
+  const inB = obs.filter((o) => o.bucket === cell.bucket && Number.isFinite(o.fwd[cell.hi]));
+
+  const coins = [...new Set(obs.map((o) => o.coin))];
+  const perCoin: string[] = [];
+  let coinsSameSign = 0;
+  for (const coin of coins) {
+    const v = inB.filter((o) => o.coin === coin).map((o) => o.fwd[cell.hi]);
+    if (v.length === 0) {
+      perCoin.push(`${coin} —`);
+      continue;
+    }
+    const lift = pctOf(v.filter((x) => x > 0).length, v.length) - (base.get(coin) as number[])[cell.hi];
+    if (Math.sign(lift) === Math.sign(cell.lift)) coinsSameSign += 1;
+    perCoin.push(`${coin} ${lift >= 0 ? '+' : ''}${f(lift, 1)}`);
+  }
+
+  // Three equal spans of calendar time, not three equal counts: a signal that
+  // only exists in 2025 is a 2025 phenomenon, and equal counts would hide that.
+  const ts = obs.map((o) => o.t);
+  const t0 = minOf(ts);
+  const span = (maxOf(ts) - t0) / 3;
+  const perPeriod = [0, 1, 2].map((p) => {
+    const v = inB.filter((o) => Math.min(2, Math.floor((o.t - t0) / span)) === p);
+    if (v.length === 0) return NaN;
+    const up = pctOf(v.filter((o) => o.fwd[cell.hi] > 0).length, v.length);
+    return up - mean(v.map((o) => o.base[cell.hi]));
+  });
+  const periodsSameSign = perPeriod.filter((x) => Math.sign(x) === Math.sign(cell.lift)).length;
+
+  const lifts = Array.from({ length: 10 }, (_, b) => {
+    const c = cells.find((x) => x.bucket === b && x.hi === cell.hi);
+    return c ? c.lift : NaN;
+  });
+  const rho = spearman(lifts.map((x) => (Number.isFinite(x) ? x : 0)));
+  // Structural means the gradient runs across the whole range AND the clearing
+  // cell sits at the end of it. One decile spiking in the middle is noise.
+  const atEnd = cell.bucket === 0 || cell.bucket === 9;
+  const monotone = atEnd && Math.abs(rho) >= 0.7;
+
+  const dd = ddCells.find((c) => c.bucket === cell.bucket && c.hi === cell.hi);
+  const ddBest = ddCells
+    .filter((c) => c.hi === cell.hi)
+    .sort((a, b) => Math.abs(b.lift) - Math.abs(a.lift))[0];
+  const beatsDd = dd ? Math.abs(cell.lift) > Math.abs(dd.lift) : true;
+
+  // Same decile + same horizon is the comparison the pre-registration asked
+  // for, and on its own it is too weak: it only rules out the drawdown control
+  // producing the effect AT THE SAME PLACE IN ITS OWN RANGE. The question that
+  // actually matters is whether these are the SAME BARS. V1's top decile is
+  // "the heavy-volume price is far above spot", which is another way of saying
+  // price has fallen away from where it traded — so it can be a drawdown in a
+  // volume costume even when the two inputs' deciles do not line up.
+  //
+  // So: print where this cell's bars sit in the control's deciles, then remove
+  // every bar that is also in a drawdown extreme and re-measure what is left.
+  const ddSpread = new Array<number>(10).fill(0);
+  for (const o of inB) {
+    const d = ddBucketAt.get(`${o.coin}|${o.t}`);
+    if (d !== undefined) ddSpread[d] += 1;
+  }
+  const kept = obs.filter((o) => {
+    const d = ddBucketAt.get(`${o.coin}|${o.t}`);
+    return d !== undefined && d > 1;
+  });
+  const residual = cellsOf(kept, 10, makeRng(SEED)).find(
+    (c) => c.bucket === cell.bucket && c.hi === cell.hi,
+  );
+  const residualN = kept.filter((o) => o.bucket === cell.bucket).length;
+
+  return {
+    perCoin, coinsSameSign, perPeriod, periodsSameSign, rho, lifts, monotone,
+    dd, ddBest, beatsDd, ddSpread, residual, residualN,
+  };
+}
+
+function printBoundaries(edges: Map<string, number[]>, obs: Obs[], unit: string): void {
+  console.log(
+    `\n  decile boundaries — each coin's OWN TUNE percentiles (apply THESE to holdout)\n` +
+      `  ${'coin'.padEnd(6)}${DECILE_QS.map((q) => `p${Math.round(q * 100)}`.padEnd(10)).join('')}`,
+  );
+  for (const [coin, e] of edges) {
+    console.log(`  ${coin.padEnd(6)}${e.map((x) => f(x, 3).padEnd(10)).join('')}${unit}`);
+  }
+  const counts = Array.from({ length: 10 }, (_, b) => obs.filter((o) => o.bucket === b).length);
+  console.log(
+    `  counts: ${counts
+      .map((n, b) => `${decileLabel(b)} ${n} (${f(pctOf(n, obs.length), 1)}%)`)
+      .join('  ')}`,
+  );
+}
+
+function runDeciles(
+  wanted: Input[],
+  bundles: Map<string, Bundle>,
+  base: Map<string, number[]>,
+): void {
+  const candidates = wanted.filter((x) => x.group !== 'control');
+
+  if (!args.includes('--no-plants')) {
+    const ok = runPlants(bundles, base, makeRng(SEED));
+    if (!ok && !args.includes('--force')) {
+      console.log('\nstopping: a failed positive control invalidates everything downstream.');
+      return;
+    }
+  }
+
+  // The drawdown baseline runs FIRST, because every candidate cell that clears
+  // has to be shown next to it. V1's whole effect reproduced from this input
+  // with no volume in it at all; without the comparison the project keeps
+  // rediscovering post-drawdown mean reversion in a new costume.
+  const ddInput = INPUTS.find((x) => x.key === 'dd') as Input;
+  const ddObs = buildObs(ddInput, bundles, base);
+  const ddEdges = assignDeciles(ddObs);
+  const ddCells = cellsOf(ddObs, 10, makeRng(SEED));
+  // Which drawdown decile each bar sits in, so a clearing cell can be asked
+  // whether it is made of the same bars rather than merely a different number.
+  const ddBucketAt = new Map<string, number>(ddObs.map((o) => [`${o.coin}|${o.t}`, o.bucket]));
+  console.log(`\n${'='.repeat(96)}\nCONTROL — ${ddInput.label}`);
+  printBoundaries(ddEdges, ddObs, ddInput.unit);
+  printCells(ddCells, decileLabel);
+
+  const verdicts: string[] = [];
+  let clearingCells = 0;
+  let candidateCells = 0;
+  const shuffleClears: number[] = [];
+  let shuffleWorst = 0;
+
+  for (const input of candidates) {
+    console.log(`\n${'='.repeat(96)}\n${input.label}`);
+    const obs = buildObs(input, bundles, base);
+    const edges = assignDeciles(obs);
+    printBoundaries(edges, obs, input.unit);
+
+    const cells = cellsOf(obs, 10, makeRng(SEED));
+    printCells(cells, decileLabel);
+    candidateCells += cells.length;
+
+    const clears = cells.filter((c) => c.verdict === 'CLEARS');
+    clearingCells += clears.length;
+    let live = false;
+
+    for (const cell of clears) {
+      const fx = forensicsOf(cell, obs, cells, base, ddCells, ddBucketAt);
+      const isLive =
+        fx.coinsSameSign >= 6 && fx.periodsSameSign === 3 && fx.beatsDd && fx.monotone;
+      live = live || isLive;
+      console.log(
+        `\n  — ${decileLabel(cell.bucket)} @+${HORIZONS[cell.hi]}h clears: ` +
+          `${cell.lift >= 0 ? '+' : ''}${f(cell.lift, 1)}pt CI [${f(cell.ciLo, 1)}, ${f(cell.ciHi, 1)}] ` +
+          `n=${cell.n} n_eff=${Math.round(cell.nEff)} —\n` +
+          `    lift by decile: ${fx.lifts.map((x) => `${x >= 0 ? '+' : ''}${f(x, 1)}`).join(' ')}\n` +
+          `    monotone: rho=${f(fx.rho, 2)} at an end=${cell.bucket === 0 || cell.bucket === 9} -> ${fx.monotone ? 'YES' : 'NO'}\n` +
+          `    per-coin: ${fx.perCoin.join('  ')}\n` +
+          `      same sign on ${fx.coinsSameSign}/${bundles.size} (LIVE needs 6+)\n` +
+          `    per-period: ${fx.perPeriod.map((x) => `${x >= 0 ? '+' : ''}${f(x, 1)}`).join('  ')}` +
+          ` -> ${fx.periodsSameSign}/3 same sign (LIVE needs 3)\n` +
+          `    drawdown baseline, same decile+horizon: ` +
+          `${fx.dd ? `${fx.dd.lift >= 0 ? '+' : ''}${f(fx.dd.lift, 1)}pt CI [${f(fx.dd.ciLo, 1)}, ${f(fx.dd.ciHi, 1)}] n=${fx.dd.n}` : '—'}` +
+          `  ·  its best cell at +${HORIZONS[cell.hi]}h: ` +
+          `${fx.ddBest ? `${decileLabel(fx.ddBest.bucket)} ${fx.ddBest.lift >= 0 ? '+' : ''}${f(fx.ddBest.lift, 1)}pt` : '—'}\n` +
+          `      beats the baseline: ${fx.beatsDd ? 'YES' : 'NO'}\n` +
+          `    same bars? this cell's spread across the drawdown control's deciles:\n` +
+          `      ${fx.ddSpread.map((n, b) => `${decileLabel(b)} ${f(pctOf(n, cell.n), 1)}%`).join('  ')}\n` +
+          `    with drawdown D1-D2 bars removed: ` +
+          `${fx.residual ? `${fx.residual.lift >= 0 ? '+' : ''}${f(fx.residual.lift, 1)}pt CI [${f(fx.residual.ciLo, 1)}, ${f(fx.residual.ciHi, 1)}] ` +
+            `n=${fx.residual.n} n_eff=${Math.round(fx.residual.nEff)} -> ${fx.residual.verdict}` : '— (nothing left)'}\n` +
+          `    => ${isLive ? 'LIVE' : 'UNPROVEN (a criterion above failed)'}`,
+      );
+    }
+
+    const allDead = cells.every((c) => c.verdict === 'DEAD');
+    const verdict = live ? 'LIVE' : allDead ? 'DEAD' : 'UNPROVEN';
+    verdicts.push(`${input.key.padEnd(11)}${verdict}`);
+    console.log(
+      `\n  VERDICT ${input.key}: ${verdict} ` +
+        `(${cells.filter((c) => c.verdict === 'DEAD').length}/${cells.length} cells measured flat, ` +
+        `${clears.length} clear the ${LIFT_BAR}pt bar)`,
+    );
+
+    // ── shuffled control ────────────────────────────────────────────────
+    // A true null with this input's exact n, decile structure and block
+    // structure. It is the honest answer to "how many cells clear by chance",
+    // because the nominal figure assumes independence this data does not have.
+    const sh: string[] = [];
+    for (let s = 0; s < SHUFFLES; s++) {
+      const shuffled = shuffleWithinCoin(obs, makeRng(SEED + 1000 * (s + 1)));
+      const sc = cellsOf(shuffled, 10, makeRng(SEED));
+      const cl = sc.filter((c) => c.verdict === 'CLEARS').length;
+      const worst = maxOf(sc.map((c) => Math.abs(c.lift)));
+      shuffleClears.push(cl);
+      shuffleWorst = Math.max(shuffleWorst, worst);
+      sh.push(`seed ${SEED + 1000 * (s + 1)}: ${cl} cells clear, largest |lift| ${f(worst, 1)}pt`);
+    }
+    console.log(`  shuffled control (within coin, ${SHUFFLES} seeds): ${sh.join(' · ')}`);
+  }
+
+  console.log(`\n${'='.repeat(96)}\nSUMMARY`);
+  for (const v of verdicts) console.log(`  ${v}`);
+  console.log(
+    `\n  cells clearing the ${LIFT_BAR}pt bar: ${clearingCells} of ${candidateCells} candidate cells\n` +
+      `  shuffled controls over the same cells: ${shuffleClears.join(', ')} ` +
+      `(total ${shuffleClears.reduce((a, b) => a + b, 0)} across ${shuffleClears.length} runs), ` +
+      `largest |lift| under shuffle ${f(shuffleWorst, 1)}pt\n` +
+      `  nominal reference: a 95% interval on a null sitting exactly at the bar clears ` +
+      `2.5% of the time = ${f(0.025 * candidateCells, 1)} cells. The shuffle is the better ` +
+      `number; the nominal one assumes an independence this data does not have.\n` +
+      `  the drawdown baseline is excluded from both counts — it is a control, not a candidate.`,
+  );
 }
 
 // ── self-check ──────────────────────────────────────────────────────────
@@ -812,13 +1529,97 @@ function selfCheck(): void {
     'balanced volume -> delta 0');
   ok(relativeVolume(only(run(RELVOL_WINDOW + 1, true)), RELVOL_WINDOW) === 1, 'flat volume -> relvol 1');
 
+  // 7. DECILE CUTTING — equal counts, and cut per coin rather than pooled.
+  const flat = Array.from({ length: 1000 }, (_, i) => i);
+  const e10 = decileEdges(flat);
+  ok(e10.length === 9, 'nine cut points');
+  ok(e10[0] === 100 && e10[4] === 500 && e10[8] === 900, `cuts land on percentiles: ${e10.join(',')}`);
+  const dCounts = new Array(10).fill(0);
+  for (const v of flat) dCounts[bucketOf(v, e10)] += 1;
+  ok(dCounts.every((c) => c === 100), `each decile holds a tenth: ${dCounts.join(',')}`);
+
+  // Per coin, because a pooled cut is mostly whichever coin has the widest
+  // range: BIG's values are 10x SMALL's, and both must still fill all ten.
+  const twoCoins: Obs[] = [];
+  for (let i = 0; i < 1000; i++) {
+    for (const [coin, scale] of [['SMALL', 1], ['BIG', 10]] as const) {
+      twoCoins.push({ coin, raw: i * scale, bucket: -1, fwd: [1, 1, 1], base: [50, 50, 50], t: T0 + i * 3_600_000 });
+    }
+  }
+  assignDeciles(twoCoins);
+  for (const coin of ['SMALL', 'BIG']) {
+    const c = new Array(10).fill(0);
+    for (const o of twoCoins.filter((x) => x.coin === coin)) c[o.bucket] += 1;
+    ok(c.every((x) => x === 100), `${coin} fills every decile of its own scale: ${c.join(',')}`);
+  }
+
+  ok(Math.abs(spearman([1, 2, 3, 4, 5]) - 1) < 1e-9, 'spearman: rising is +1');
+  ok(Math.abs(spearman([5, 4, 3, 2, 1]) + 1) < 1e-9, 'spearman: falling is -1');
+  ok(quantile([1, 2, 3, 4, 5], 0.5) === 3, 'quantile: median');
+
+  // 8. THE POSITIVE CONTROL, OFFLINE. A known lift is planted in a known
+  //    decile of synthetic bars, and the decile cutter plus the block
+  //    bootstrap have to find it. This is the check that would fail if the
+  //    percentile cutting, the pooling or the base-rate subtraction were
+  //    wrong — and no result from a live run counts if it does.
+  const rngSC = makeRng(4242);
+  const synth = new Map<string, Bundle>();
+  const synthBase = new Map<string, number[]>();
+  for (const coin of ['AAA', 'BBB', 'CCC']) {
+    const cs: Candle[] = [];
+    let px = 100;
+    for (let i = 0; i < 4000; i++) {
+      px *= 1 + (rngSC() - 0.5) * 0.02;
+      cs.push({ time: new Date(T0 + i * 3_600_000), open: px, high: px * 1.001, low: px * 0.999, close: px, volume: 1000 });
+    }
+    synth.set(coin, { candles: cs, funding: [], premium: [] });
+    const ups = HORIZONS.map(() => 0);
+    const tot = HORIZONS.map(() => 0);
+    for (let i = 0; i < cs.length; i++) {
+      HORIZONS.forEach((h, hi) => {
+        if (i + h >= cs.length) return;
+        tot[hi] += 1;
+        if (cs[i + h].close > cs[i].close) ups[hi] += 1;
+      });
+    }
+    synthBase.set(coin, HORIZONS.map((_x, hi) => pctOf(ups[hi], tot[hi])));
+  }
+  for (const plant of PLANTS) {
+    const pObs = plantedObs(plant, synth, synthBase, makeRng(7));
+    assignDeciles(pObs);
+    const pCells = cellsOf(pObs, 10, makeRng(7));
+    const hit = pCells.find((c) => c.bucket === plant.decile && c.hi === plant.hi) as Cell;
+    ok(hit !== undefined, `${plant.key}: the planted decile exists`);
+    ok(
+      Math.abs(hit.lift - plant.lift) <= PLANT_TOL,
+      `${plant.key}: planted ${plant.lift}pt, recovered ${f(hit.lift, 2)}pt`,
+    );
+    // and the deciles NOT planted in must stay flat, or the plant leaked
+    const mid = pCells.find((c) => c.bucket === 4 && c.hi === plant.hi) as Cell;
+    ok(Math.abs(mid.lift) < 3, `${plant.key}: D5 stays flat (${f(mid.lift, 2)}pt) — the plant did not leak`);
+  }
+
+  // 9. Effective n must be BELOW raw n on overlapping forward returns. This is
+  //    the whole reason the CIs are block-bootstrapped: neighbouring hourly
+  //    bars share most of a 24h forward window, so raw n overstates evidence.
+  const overlapObs = plantedObs(PLANTS[0], synth, synthBase, makeRng(9));
+  assignDeciles(overlapObs);
+  const overlapCell = cellsOf(overlapObs, 10, makeRng(9)).find(
+    (c) => c.bucket === 9 && c.hi === 2,
+  ) as Cell;
+  ok(
+    overlapCell.nEff < overlapCell.n,
+    `effective n (${f(overlapCell.nEff, 0)}) must be under raw n (${overlapCell.n})`,
+  );
+
   ok(median([3, 1, 2]) === 2, 'median odd');
   ok(median([4, 1, 2, 3]) === 2.5, 'median even');
   ok(Number.isNaN(median([])), 'empty median is NaN');
 
   console.log(
-    'self-check passed (lookahead invariant on all 8 inputs, 2 peeking cheats both ' +
-      'detected, publication lag, nthBefore, bucket totality, volume semantics, median)',
+    'self-check passed (lookahead invariant on all 9 inputs, 2 peeking cheats both ' +
+      'detected, publication lag, nthBefore, bucket totality, volume semantics, median, ' +
+      'decile cutting per coin, 4 planted signals recovered offline, effective n < raw n)',
   );
 }
 
