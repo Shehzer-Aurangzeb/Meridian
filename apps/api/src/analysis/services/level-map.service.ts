@@ -7,9 +7,16 @@ import {
   TIMEFRAMES,
 } from '../../common/constants/timeframes';
 import {
+  SR_DEFAULTS,
+  TIER_ATR_TIMEFRAME,
+  CLUSTER_ATR_FRACTION,
+  tierOf,
+} from '../interfaces/support-resistance.types';
+import {
   ConfluenceZone,
   FibLevel,
   MarkedLevel,
+  ZoneTier,
 } from '../interfaces/support-resistance.types';
 import { SupportResistanceService } from './support-resistance.service';
 import { IndicatorsService } from '../../indicators/indicators.service';
@@ -58,6 +65,10 @@ export interface LevelMap {
   /** Recent volatility, used to set stop distance. */
   atr: number;
   atrTimeframe: Timeframe;
+  /** The stop's risk unit per tier, so a weekly zone is not stopped on 4h noise. */
+  atrByTier: Record<ZoneTier, number>;
+  /** The clustering band actually used on each chart, as a percent. */
+  thresholdByTimeframe: Array<{ timeframe: Timeframe; thresholdPercent: number }>;
   marks: MarkedLevel[];
   zones: ConfluenceZone[];
   /** How many S/R levels each timeframe contributed. */
@@ -124,7 +135,12 @@ export class LevelMapService {
 
     // Deliberately the last closing price, not the live ticker: every number
     // in the map must come from the same data, or distances cannot be checked.
-    const lowest = LEVEL_TIMEFRAMES[LEVEL_TIMEFRAMES.length - 1];
+    //
+    // Taken from the series HANDED IN rather than from LEVEL_TIMEFRAMES, so a
+    // caller running a subset of charts gets that subset's fastest close. The
+    // list is slowest-first by contract; see LEVEL_TIMEFRAMES above.
+    const lowest = series[series.length - 1]?.timeframe;
+    if (!lowest) throw new Error(`No series for ${symbol}; cannot build a level map`);
     const lowestCandles = byTimeframe.get(lowest) ?? [];
     if (lowestCandles.length === 0) {
       throw new Error(`No candles for ${symbol} ${lowest}; cannot build a level map`);
@@ -141,15 +157,37 @@ export class LevelMapService {
       ? this.supportResistanceService.fibLevels(swings.low, swings.high)
       : [];
 
+    // ── ATR per chart, which sets both the stop and the clustering band ──
+    const atrByTimeframe = new Map<Timeframe, number>();
+    for (const { timeframe, candles } of series) {
+      atrByTimeframe.set(
+        timeframe,
+        this.indicatorsService.buildContext(symbol, timeframe, candles).atr,
+      );
+    }
+
     // ── S/R per timeframe ───────────────────────────────────────────────
     const perTimeframe: LevelMap['perTimeframe'] = [];
+    const thresholdByTimeframe: LevelMap['thresholdByTimeframe'] = [];
     const marks: MarkedLevel[] = [];
 
     for (const { timeframe, candles } of series) {
+      // The band scales to this chart's own volatility. Falls back to the flat
+      // constant only if ATR could not be computed, so a missing indicator
+      // degrades to the old behaviour rather than to a zero-width band that
+      // would silently cluster nothing.
+      const chartAtr = atrByTimeframe.get(timeframe);
+      const thresholdPercent =
+        chartAtr && spot > 0
+          ? (chartAtr / spot) * 100 * CLUSTER_ATR_FRACTION
+          : SR_DEFAULTS.CLUSTER_THRESHOLD;
+      thresholdByTimeframe.push({ timeframe, thresholdPercent });
+
       const levels = this.supportResistanceService.levelsFromCandles(
         candles,
         timeframe,
         spot,
+        { clusterThreshold: thresholdPercent },
       );
       perTimeframe.push({ timeframe, levels: levels.length });
 
@@ -162,6 +200,7 @@ export class LevelMapService {
           // same chart would count as two independent sources.
           source: `${timeframe} ${level.type}`,
           touchCount: level.touchCount,
+          tier: tierOf(timeframe),
         });
       }
     }
@@ -171,6 +210,7 @@ export class LevelMapService {
         price: level.price,
         type: level.type,
         source: `${level.ratio} Fib (${FIB_ANCHOR_TIMEFRAME})`,
+        tier: tierOf(FIB_ANCHOR_TIMEFRAME),
       });
     }
 
@@ -181,6 +221,15 @@ export class LevelMapService {
       ATR_TIMEFRAME,
       atrCandles,
     ).atr;
+
+    // One risk unit per tier. A tier whose chart is not in this run falls back
+    // to the flat ATR so a subset run (--charts) still produces usable stops.
+    const atrByTier = Object.fromEntries(
+      (Object.keys(TIER_ATR_TIMEFRAME) as ZoneTier[]).map((tr) => [
+        tr,
+        atrByTimeframe.get(TIER_ATR_TIMEFRAME[tr]) ?? atr,
+      ]),
+    ) as Record<ZoneTier, number>;
 
     this.logger.debug(
       `${symbol}: ${marks.length} marks across ${LEVEL_TIMEFRAMES.join('/')} ` +
@@ -194,6 +243,8 @@ export class LevelMapService {
       fib,
       atr,
       atrTimeframe: ATR_TIMEFRAME,
+      atrByTier,
+      thresholdByTimeframe,
       marks,
       zones,
       perTimeframe,

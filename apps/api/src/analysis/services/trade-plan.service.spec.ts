@@ -1,4 +1,4 @@
-import { ConfluenceZone } from '../interfaces/support-resistance.types';
+import { ConfluenceZone, ZoneTier } from '../interfaces/support-resistance.types';
 import {
   ENTRY_WEIGHTS,
   STOP_ATR_MULTIPLE,
@@ -12,6 +12,9 @@ const zone = (
   low: number,
   high: number,
   sources: string[] = ['a', 'b'],
+  // HTF by default: only HTF zones are tradeable or targetable, so a fixture
+  // built at any other tier would produce no plan at all.
+  tier: ZoneTier = 'HTF',
 ): ConfluenceZone => ({
   low,
   high,
@@ -20,12 +23,14 @@ const zone = (
   sources,
   spanPercent: ((high - low) / ((high + low) / 2)) * 100,
   distancePercent: 0,
+  tier,
 });
 
 describe('TradePlanService', () => {
   const service = new TradePlanService();
   const spot = 30_000;
   const atr = 300;
+  const atrByTier = { HTF: atr, MID: atr, LTF: atr };
 
   /**
    * The plan's GEOMETRY, built from the zone this direction would trade.
@@ -88,7 +93,7 @@ describe('TradePlanService', () => {
       const plans = service.buildPlans(
         [zone(29_000, 29_100), zone(31_000, 31_100)],
         spot,
-        atr,
+        atrByTier,
       );
 
       expect(plans.map((p) => p.direction).sort()).toEqual(['long', 'short']);
@@ -96,7 +101,7 @@ describe('TradePlanService', () => {
 
     it('skips a zone price is already inside — no clean edge to anchor to', () => {
       const straddling = zone(29_900, 30_100); // spot 30,000 sits within
-      expect(service.buildPlans([straddling], spot, atr)).toEqual([]);
+      expect(service.buildPlans([straddling], spot, atrByTier)).toEqual([]);
     });
 
     it('mirrors the entry ladder for a short', () => {
@@ -213,14 +218,14 @@ describe('TradePlanService', () => {
       // One zone below spot and nothing above it: the long can only reach its
       // stop or the end of the hold window. 57 of the 626 backtested trades
       // were this shape and resolved at −1.08R, every resolved one a stop-out.
-      expect(service.buildPlans([zone(29_000, 29_100)], spot, atr)).toEqual([]);
+      expect(service.buildPlans([zone(29_000, 29_100)], spot, atrByTier)).toEqual([]);
 
       // Give it somewhere to go and it is printed again — the rule is about
       // the missing exit, not about single-zone maps.
       const withTarget = service.buildPlans(
         [zone(29_000, 29_100), zone(31_000, 31_100)],
         spot,
-        atr,
+        atrByTier,
       );
       expect(withTarget.map((p) => p.direction).sort()).toEqual(['long', 'short']);
       expect(withTarget.every((p) => p.targets.length > 0)).toBe(true);
@@ -229,10 +234,7 @@ describe('TradePlanService', () => {
 
   it('names the invalidation price in every come-back instruction', () => {
     const plans = service.buildPlans(
-      [zone(29_000, 29_100), zone(31_000, 31_100)],
-      spot,
-      atr,
-    );
+      [zone(29_000, 29_100), zone(31_000, 31_100)], spot, atrByTier);
 
     for (const plan of plans) {
       expect(plan.comeBackWhen).toContain(plan.stop.toFixed(2));
@@ -281,12 +283,13 @@ describe('buildPlans — exit weights account for the whole position', () => {
     sources: ['12h support', '0.5 Fib (12h)'],
     spanPercent: ((high - low) / ((low + high) / 2)) * 100,
     distancePercent: 0,
+    tier: 'HTF',
   });
 
   const planFor = (aheadCount: number) => {
     const zones = [zone(96, 100), zone(104, 105), zone(109, 110), zone(114, 115)];
     const svc = new TradePlanService();
-    const [longPlan] = svc.buildPlans(zones.slice(0, aheadCount + 1), 102, 3.4);
+    const [longPlan] = svc.buildPlans(zones.slice(0, aheadCount + 1), 102, { HTF: 3.4, MID: 3.4, LTF: 3.4 });
     return longPlan;
   };
 
@@ -323,7 +326,7 @@ describe('buildPlans — exit weights account for the whole position', () => {
   it('mirrors for a short', () => {
     const zones = [zone(104, 108), zone(96, 100)];
     const svc = new TradePlanService();
-    const shortPlan = svc.buildPlans(zones, 102, 3.4).find((x) => x.direction === 'short');
+    const shortPlan = svc.buildPlans(zones, 102, { HTF: 3.4, MID: 3.4, LTF: 3.4 }).find((x) => x.direction === 'short');
     expect(shortPlan?.targets).toHaveLength(1);
     expect(shortPlan?.targets[0].weightPercent).toBe(100);
   });

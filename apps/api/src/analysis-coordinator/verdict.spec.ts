@@ -14,6 +14,7 @@ const zone = (over: Partial<TradePlan['zone']> = {}): TradePlan['zone'] => ({
   center: 64200,
   type: 'support',
   sources: ['1h support', '4h support', '0.5 Fib (12h)'],
+  tier: 'HTF' as const,
   spanPercent: 0.62,
   distancePercent: -0.8,
   ...over,
@@ -27,6 +28,7 @@ const plan = (over: Partial<TradePlan> = {}): TradePlan => ({
   entries: [{ price: 64200, weightPercent: 100 }],
   averageEntry: 64200,
   stop: 63700,
+  stopAtrTimeframe: '12h' as const,
   riskPercent: 0.78,
   riskPerUnit: 500,
   targets: [

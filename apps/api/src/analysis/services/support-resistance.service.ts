@@ -10,6 +10,8 @@ import {
   ConfluenceZone,
   SRDetectionOptions,
   SR_DEFAULTS,
+  ZoneTier,
+  TIER_ORDER,
 } from '../interfaces/support-resistance.types';
 
 @Injectable()
@@ -395,6 +397,9 @@ export class SupportResistanceService {
         const high = Math.max(...prices);
         const center = prices.reduce((a, b) => a + b, 0) / prices.length;
         const sources = [...new Set(g.map((m) => m.source))];
+        // The slowest contributor decides the zone. TIER_ORDER is slowest
+        // first, so the lowest index present wins.
+        const tier = TIER_ORDER.find((tr) => g.some((m) => m.tier === tr)) as ZoneTier;
 
         // Type is POSITIONAL, not historical. A zone below spot is where a
         // long is placed and a zone above is where a short is; that is what
@@ -411,6 +416,7 @@ export class SupportResistanceService {
           sources,
           spanPercent: center === 0 ? 0 : ((high - low) / center) * 100,
           distancePercent: ((center - currentPrice) / currentPrice) * 100,
+          tier,
         };
       })
       .filter((z) => z.sources.length >= minSources)

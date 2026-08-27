@@ -98,7 +98,7 @@ export class AnalyzeService {
     //
     // TODO: whether plans SHOULD be filtered by market type is untested.
     const map = await this.levelMapService.build(coin);
-    const plans = this.tradePlanService.buildPlans(map.zones, map.spot, map.atr);
+    const plans = this.tradePlanService.buildPlans(map.zones, map.spot, map.atrByTier);
 
     // The checklist confirms a trade, so it has to be told which side it is
     // confirming. Run once for each direction a plan was built for.
