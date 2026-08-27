@@ -118,3 +118,131 @@ on the same material.
 
 **If something is LIVE:** do not build a strategy on it. Run it to holdout first,
 once. Then build.
+
+---
+
+# Results — 27 Aug 2026
+
+```
+npx ts-node --transpile-only test/manual/volsignal.ts --flow --bars 20000
+npx ts-node --transpile-only test/manual/volsignal.ts --delta --bars 20000   # regression
+npx ts-node --transpile-only test/manual/volsignal.ts --self-check
+```
+
+10/10 coins covered, none dropped. 13,999 TUNE bars each,
+**2024-05-16 → 2025-12-20**, 3,000 funding settlements and 20,000 premium
+klines per coin. Seed 12345. Holdout untouched.
+
+## Verdict: all four DEAD
+
+**No bucket reached 5 points of lift with n ≥ 5,000, in any input, at any
+horizon.**
+
+| input | largest lift at n ≥ 5,000 | best tail (small n) | verdict |
+|---|---|---|---|
+| F1 funding rate | +1.8pt (`[-0.01,0)%` @+12h, n=20,676) | −24.7pt on n=200 | **DEAD** |
+| F2 funding change | +1.9pt (`[-0.01,-0.003)pt` @+24h, n=22,972) | −4.5pt on n=979 | **DEAD** |
+| F3 premium index | +1.8pt (`[-0.09,-0.07)%` @+12h, n=8,849) | +4.8pt on n=826 | **DEAD** |
+| F4 funding extremity | +3.7pt (`[-4,-2)x` @+12h, n=3,212)* | −15.1pt on n=568 | **DEAD** |
+
+\* also under the floor; the largest F4 lift at n ≥ 5,000 is +2.6pt.
+
+Six cells cleared 5pt of lift and **every one was UNPROVEN** — n between 200 and
+1,036, against a 5,000 floor:
+
+```
+F1 [-inf, -0.03)%  @+12h:  +5.5pt on n=1036
+F1 [0.05, +inf)%   @+4h:   -6.0pt on n=200
+F1 [0.05, +inf)%   @+12h: -24.7pt on n=200 · mean fwd -1.18% · median -1.58%
+F1 [0.05, +inf)%   @+24h: -15.2pt on n=200
+F4 [4, +inf)x      @+12h: -15.1pt on n=568 · mean fwd -0.28%
+F4 [4, +inf)x      @+24h: -13.7pt on n=560 · mean fwd -0.79%
+```
+
+## The shuffled control is clean, and it earns its keep twice
+
+**Zero cells over 5pt of lift, at any n.** Largest deviation +3.7pt.
+
+The second thing it shows is more useful: its largest deviations land in exactly
+the smallest buckets —
+
+```
+F1 [-inf,-0.03)  n=1036   +3.7pt
+F1 [-inf,-0.03)  n=1036   +2.8pt
+F2 [0.03,+inf)   n=979    +2.8pt
+F1 [0.05,+inf)   n=200    -2.7pt
+```
+
+Randomly-assigned labels swing a 200-to-1,000-observation bucket by ±3–4 points
+on their own. That is direct evidence, from this run, that the small-n cells
+above are not to be read.
+
+## Monotonicity — real, and still not enough
+
+This is the honest complication and it is worth stating plainly rather than
+burying under the DEAD verdict.
+
+**F1 is monotone across its whole range**, lift at +4h by bucket:
+
+```
++3.8  +1.5  +0.9  +0.6  -0.7  -0.7  -0.8  -6.0
+```
+
+Negative funding → mildly more upside; positive funding → mildly more downside;
+extreme positive funding → sharply more downside. That is textbook
+mean-reversion against crowded positioning, and it has the shape a structural
+signal is supposed to have — unlike the volume-delta gradient, which vanished
+when n grew.
+
+**F4 shows the same shape**, lift at +24h: `+0.9 +3.3 +2.4 +0.6 +1.0 -1.6 -0.4 -13.7`.
+
+**But in every bucket large enough to trust, the lift is 1–3 points**, and the
+bar was 5. The large numbers live only where n is small. So the criterion is not
+met and the verdict is DEAD, not "nearly".
+
+## The prediction, scored
+
+**F1 and F3 DEAD — correct.** F3 (premium) is the flattest input in the whole
+study: nothing beyond ±1.8pt at any trustworthy n.
+
+**F2 DEAD — correct**, and it was the flattest of the three funding variants at
+large n despite being named the dark horse.
+
+**F4 "will show something and it will be the wrong thing" — half right.** It did
+show something. But it is *not* a pure magnitude signal: in `[4,+inf)x` at +12h
+the hit rate (37.0%) and the mean forward return (−0.28%) and the median
+(−0.40%) all point the same way, down. Where it appears, it appears directional.
+It simply appears only at n=568.
+
+The same is true of F1's top bucket, more strongly: 25.5% up, mean −1.18%,
+median −1.58%. Direction and magnitude agree.
+
+## The n floor is still too generous, for a reason the floor cannot see
+
+**Funding is an 8-hour series sampled once an hour, so every observation is
+duplicated eight times by construction.** The 200 bars in F1's top bucket are at
+most 25 distinct settlements, and high-funding episodes cluster — so the
+effective count is likely under ten independent events, not 200.
+
+Premium is hourly and does not have this problem. Funding and extremity do.
+
+**Recorded as a methodology finding: for any input published on a slower clock
+than the decision bar, the n floor must count publications, not bars.** A floor
+of 5,000 bars on an 8h input is a floor of 625 settlements, and on a clustered
+input far less than that. This is a stronger reason to distrust the tails than
+"small n", and it was not in the pre-registration.
+
+## What this closes
+
+**Price-derived and publicly-visible-flow inputs are both closed.** Thirteen
+tests now — nine of price shape and volume, four of funding and premium — and
+nothing has cleared its pre-registered bar.
+
+The one thing worth carrying forward is not a signal, it is a shape: funding
+mean-reversion is monotone and it points the same way in hit rate, mean and
+median. It fails on effective sample size, not on direction. If the collector's
+inputs (open interest, taker buy/sell, long/short ratio) ever show the same
+shape with real n behind it, that is where to look — and those need ~12 months
+of accumulation.
+
+Until then the honest position is that **no tested input predicts direction**.
