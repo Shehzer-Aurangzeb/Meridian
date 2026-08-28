@@ -689,6 +689,70 @@ starts timing out, the fix is `DEFAULT_BACKFILL_DAYS`, not the period.** Thirty
 days of overlap exists so a missed run self-heals; at 5m that is far more
 overlap than the self-heal needs.
 
+### WHERE THE ARCHIVE LIVES: locally. Production stays collect-only.
+
+**Decided 28 Aug 2026 on two measurements, not on preference.**
+
+**1. It does not fit.** Neon enforces a hard storage quota, readable from the
+database itself:
+
+```
+psql "$DATABASE_URL" -c "SELECT setting FROM pg_settings WHERE name='neon.max_cluster_size';"
+-> 512   (MB)
+```
+
+Production was 15 MB before any of this. A 200-file probe put 217,868 rows in
+and took it to 65 MB — about **230 bytes per row**, so the full 28.4M rows
+project to **roughly 6.5 GB against a 512 MB cap, 12.8x over**. The import would
+have died around 1.9M rows, some 7% in. Worse than dying: a Neon project that
+exceeds `max_cluster_size` goes **read-only**, which stops the collector — and
+the collector is the one thing that must not stop, because Binance deletes these
+endpoints after about 30 days and a missed window is gone for good.
+
+**2. Nothing in production reads it.** `FlowSample` is WRITE-ONLY there:
+`FlowCollectorService.store` calls `createMany` and that is the only production
+code touching the table. No controller queries it (auth, risk-management,
+analyses and health are the four, and none mention it), no raw SQL touches it
+(`$queryRaw` appears once, as `SELECT 1` in the health check), the web app has
+zero references, and the Lambda's only flow entrypoint is `collector.collect`.
+The sole reader anywhere is `scripts/flow-verify.ts`, which is a local tool.
+
+So five years of history in Neon would cost 6.5 GB to serve nobody.
+
+### What that means operationally
+
+- **The archive lives in the LOCAL database** (`.env.local`,
+  `postgresql://…@localhost:5433/meridian_db`, the `meridian-postgres` Docker
+  container on the `infra_postgres_data` volume). 28,413,765 rows, 4.8 GB.
+  Every experiment — `volsignal.ts`, `backtest-plans.ts`, the decile harness —
+  already runs locally, which is where the data now is.
+- **Production keeps collecting forward, unchanged.** The collector writes the
+  same six metrics to Neon on its schedule. At ~230 bytes/row and 5-minute
+  density for three of them, that is roughly 1 MB per coin per month — about
+  120 MB/year for ten coins against the 512 MB cap. **That is a real ceiling,
+  not a comfortable one: roughly three years, less if metrics are added.** When
+  it approaches, drain Neon into local and truncate rather than upgrading.
+- **The two databases are not replicas and must not be confused.** Local holds
+  archive + whatever it has been given; Neon holds the live forward collection
+  only. They share a schema and a convention, so a row from either is directly
+  comparable — that was the point of the shift rule.
+- **To rebuild the local archive from nothing** (the downloaded files are NOT in
+  git, and `test/manual/results/` is ignored):
+
+  ```
+  # 1. fetch, ~203 MB, ~15 min, verifies every .zip against its .CHECKSUM
+  #    (the fetch script lives with the probe artefacts, not in the repo)
+  # 2. docker start meridian-postgres && npx prisma migrate deploy
+  # 3. npx ts-node --transpile-only scripts/flow-import.ts --dir <archive>
+  # 4. npx ts-node --transpile-only scripts/flow-verify.ts --live <live.json.gz>
+  ```
+  Step 3 takes about 42 minutes and is idempotent; step 4 must print 60 PASS.
+
+**If production ever does need to read this table**, the fix is not a bigger
+plan. It is `metric` interned to a small int — the primary key is 2.4 GB of the
+4.8 GB largely because a ~19-character string is stored 28 million times. That is
+a real inefficiency worth fixing on its own merits, and it is not done.
+
 ### Known unknowns — recorded, not resolved
 
 - **Point-in-time is unestablished.** Historical files have been rewritten years
