@@ -887,8 +887,45 @@ async function main(): Promise<void> {
       summarise('  random long', control.filter((t) => t.direction === 'long')),
       summarise('  random short', control.filter((t) => t.direction === 'short')),
     ]);
+    // ── edge over random, both conventions, always together ─────────────
+    //
+    // RESOLVED-ONLY is the primary metric. Both pre-registrations define it
+    // that way — "mean net R per trade minus its own random control, resolved
+    // trades only" — and both then quoted the MARKED number as the headline,
+    // because that is the only one this line printed. The gap is not academic:
+    // the hierarchical arm carried 22% open trades and a 0.168R marking gap.
+    //
+    // Both are printed, from the same `aggregate` the tables above use, so no
+    // caller can select a convention after seeing the result. That is the same
+    // fix CP4 made inside the scorer, applied to the number on top of it.
+    const ap = aggregate(plan);
+    const ac = aggregate(control);
+    const line = (
+      name: string,
+      value: number,
+      pv: number,
+      cv: number,
+    ): string =>
+      `  ${name.padEnd(24)} ${value >= 0 ? ' ' : ''}${value.toFixed(3)}R` +
+      `   = plan ${pv.toFixed(3)} - random ${cv.toFixed(3)}`;
+
+    console.log('\nedge over random');
     console.log(
-      `\nedge over random: ${(mean(plan.map((t) => t.netR)) - mean(control.map((t) => t.netR))).toFixed(3)}R/trade`,
+      line(
+        'resolved-only (PRIMARY)',
+        ap.expectancyResolved - ac.expectancyResolved,
+        ap.expectancyResolved,
+        ac.expectancyResolved,
+      ),
+    );
+    console.log(line('marked', ap.expectancy - ac.expectancy, ap.expectancy, ac.expectancy));
+    console.log(
+      `  ${'open (unresolved)'.padEnd(24)} plan ${ap.unresolved}/${ap.n}` +
+        `   random ${ac.unresolved}/${ac.n}`,
+    );
+    console.log(
+      `  ${'marking gap'.padEnd(24)} plan ${ap.markingGap.toFixed(3)}` +
+        `   random ${ac.markingGap.toFixed(3)}`,
     );
   }
 
