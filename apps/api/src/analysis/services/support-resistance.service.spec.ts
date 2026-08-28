@@ -1,7 +1,6 @@
 import { BinanceService } from '../../market-data/market-data.service';
 import { Candle } from '../../common/types/candle.types';
 import { SupportResistanceService } from './support-resistance.service';
-import { ZoneTier } from '../interfaces/support-resistance.types';
 
 /**
  * Checks the levels stay put as price moves.
@@ -108,12 +107,8 @@ describe('SupportResistanceService — confluence zones', () => {
   const service = new SupportResistanceService();
   const spot = 30_000;
 
-  const mark = (
-    price: number,
-    source: string,
-    type: 'support' | 'resistance' = 'support',
-    tier: ZoneTier = 'MID',
-  ) => ({ price, source, type, tier });
+  const mark = (price: number, source: string, type: 'support' | 'resistance' = 'support') =>
+    ({ price, source, type });
 
   it('groups marks that agree and names every contributor', () => {
     const zones = service.findConfluenceZones(

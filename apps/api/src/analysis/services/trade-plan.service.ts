@@ -1,10 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  ConfluenceZone,
-  ZoneTier,
-  TIER_ATR_TIMEFRAME,
-} from '../interfaces/support-resistance.types';
-import { Timeframe } from '../../common/constants/timeframes';
+import { ConfluenceZone } from '../interfaces/support-resistance.types';
 
 /**
  * How close price is to a zone. A statement about distance only — it says
@@ -54,20 +49,6 @@ export function renormaliseTargetWeights(count: number): number[] {
  */
 export const STOP_ATR_MULTIPLE = 1.0;
 
-/**
- * Which tier may be entered, and which tier may be a target.
- *
- * HTF only, both. A 15-minute level is where price paused for an hour; nobody
- * trading a 12-hour setup takes profit there. Pooling every chart's levels into
- * one price cluster is what made seven charts measure worse than three
- * (CHARTS_AB.md): more zones put the next zone closer, so targets moved in
- * while the stop stayed put and planned R fell 2.26 -> 1.73.
- *
- * MID and LTF zones are still built and still shown. They corroborate; they do
- * not create a trade and they are never sold into.
- */
-export const TRADEABLE_TIER: ZoneTier = 'HTF';
-
 export interface PlanEntry {
   price: number;
   weightPercent: number;
@@ -93,8 +74,6 @@ export interface TradePlan {
   riskPercent: number;
   /** What 1R is worth in price: the gap from average entry to stop. */
   riskPerUnit: number;
-  /** Which chart's ATR set the stop. Follows the zone's tier, not a fixed chart. */
-  stopAtrTimeframe: Timeframe;
   targets: PlanTarget[];
   /**
    * Average reward across all the targets, weighted by how much is sold at
@@ -123,26 +102,10 @@ export class TradePlanService {
   buildPlans(
     zones: ConfluenceZone[],
     spot: number,
-    atrByTier: Record<ZoneTier, number>,
+    atr: number,
   ): TradePlan[] {
-    // Data predating tiers fails the filter below silently and returns no
-    // plans at all — which reads as "the market offered nothing", not as
-    // "these zones are the wrong shape". The golden set did exactly this:
-    // 35/35 trades became NO_PLAN and nothing errored. Fail loudly instead.
-    if (zones.length > 0 && zones.every((z) => z.tier === undefined)) {
-      throw new Error(
-        'ConfluenceZone.tier is missing on every zone. This is stale data from ' +
-          'before tiering, not an absence of setups — rebuild it rather than ' +
-          'reading the empty result as a verdict.',
-      );
-    }
-
-    // Entries come from HTF zones only. `zones` still carries every tier,
-    // because buildTargets needs the same filtered view and the caller should
-    // not have to know the rule.
-    const tradeable = zones.filter((z) => z.tier === TRADEABLE_TIER);
-    const below = tradeable.filter((z) => z.high < spot);
-    const above = tradeable.filter((z) => z.low > spot);
+    const below = zones.filter((z) => z.high < spot);
+    const above = zones.filter((z) => z.low > spot);
 
     // Zones the price is already sitting inside are skipped: there is nothing
     // to wait for and no clean edge to put a stop behind.
@@ -159,7 +122,7 @@ export class TradePlanService {
       [nearestAbove, 'short'],
     ] as const) {
       if (!zone) continue;
-      const plan = this.buildPlan(zone, direction, spot, atrByTier[zone.tier], zones);
+      const plan = this.buildPlan(zone, direction, spot, atr, zones);
       if (plan.targets.length > 0) plans.push(plan);
     }
 
@@ -176,9 +139,6 @@ export class TradePlanService {
     atr: number,
     allZones: ConfluenceZone[],
   ): TradePlan {
-    // Which chart's volatility priced this stop. Recorded on the plan so a CSV
-    // reader can see that a weekly zone was not stopped on 4h noise.
-    const stopAtrTimeframe = TIER_ATR_TIMEFRAME[zone.tier];
     const long = direction === 'long';
 
     // Near edge = the side price reaches first: the top of a zone below, the
@@ -227,7 +187,6 @@ export class TradePlanService {
       stop,
       riskPercent,
       riskPerUnit,
-      stopAtrTimeframe,
       targets,
       blendedR:
         targets.reduce((s2, t) => s2 + t.rMultiple * t.weightPercent, 0) / 100,
@@ -255,10 +214,6 @@ export class TradePlanService {
   ): PlanTarget[] {
     const ahead = allZones
       .filter((z) => z !== entryZone)
-      // HTF only. This is the rule the whole hierarchy rests on: a target at a
-      // 15m level is what pulled planned R from 2.26 to 1.73 when every chart
-      // was pooled.
-      .filter((z) => z.tier === TRADEABLE_TIER)
       .filter((z) => (long ? z.center > averageEntry : z.center < averageEntry))
       .sort((a, b) =>
         long ? a.center - b.center : b.center - a.center,

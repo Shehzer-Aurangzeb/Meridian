@@ -31,8 +31,6 @@ import {
   ConfluenceZone,
   MarkedLevel,
   SR_DEFAULTS,
-  ZoneTier,
-  TIER_ORDER,
 } from '../../src/analysis/interfaces/support-resistance.types';
 import { CANDLE_LIMITS } from '../../src/common/constants/timeframes';
 import { TimeInterval } from '../../src/common/types/candle.types';
@@ -173,7 +171,6 @@ function group(marks: MarkedLevel[], currentPrice: number, dir: 'up' | 'down'): 
       const high = Math.max(...prices);
       const center = prices.reduce((a, b) => a + b, 0) / prices.length;
       const sources = [...new Set(g.map((m) => m.source))];
-      const tier = TIER_ORDER.find((tr) => g.some((m) => m.tier === tr)) as ZoneTier;
       const type = center < currentPrice ? ('support' as const) : ('resistance' as const);
       return {
         low,
@@ -183,7 +180,6 @@ function group(marks: MarkedLevel[], currentPrice: number, dir: 'up' | 'down'): 
         sources,
         spanPercent: center === 0 ? 0 : ((high - low) / center) * 100,
         distancePercent: ((center - currentPrice) / currentPrice) * 100,
-        tier,
       };
     })
     .filter((z) => z.sources.length >= MIN_SOURCES)
@@ -405,8 +401,7 @@ function selfCheck(): void {
     if (!c) throw new Error(`self-check FAILED: ${m}`);
   };
   const sr = new SupportResistanceService();
-  const mark = (price: number, source: string, tier: ZoneTier = 'HTF'): MarkedLevel =>
-    ({ price, type: 'support', source, tier });
+  const mark = (price: number, source: string): MarkedLevel => ({ price, type: 'support', source });
 
   const marks = [
     mark(100.0, '12h support'), mark(100.3, '4h support'), mark(100.6, '1h support'),
@@ -439,7 +434,7 @@ function selfCheck(): void {
 
   const zone: ConfluenceZone = {
     low: 100, high: 101, center: 100.5, type: 'support',
-    sources: ['a', 'b'], spanPercent: 1, distancePercent: -4, tier: 'HTF',
+    sources: ['a', 'b'], spanPercent: 1, distancePercent: -4,
   };
   ok(drift(zone, [], 2).vanished, 'empty perturbed set should be vanished');
   ok(drift(zone, [{ ...zone, center: 110 }], 2).vanished, '9.5 on a 2.0 risk unit is >1R');
