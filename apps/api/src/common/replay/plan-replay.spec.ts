@@ -31,6 +31,19 @@ describe('completedAsOf — the look-ahead guard', () => {
     const got = completedAsOf(candles, HOUR, 4 * HOUR, 2);
     expect(got.map((c) => c.low)).toEqual([2, 3]);
   });
+
+  it('throws on a malformed duration instead of returning nothing', () => {
+    // The whole point: `time + NaN <= asOf` is false for every candle, so a
+    // missing duration used to return [] — indistinguishable from a quiet
+    // market, and the shape of four separate bugs in this codebase.
+    const candles = [0, 1, 2].map((i) => bar(i * HOUR, i, i));
+    expect(completedAsOf(candles, HOUR, 3 * HOUR, 10)).toHaveLength(3);
+
+    expect(() => completedAsOf(candles, NaN, 3 * HOUR, 10)).toThrow(/durationMs/);
+    expect(() => completedAsOf(candles, 0, 3 * HOUR, 10)).toThrow(/durationMs/);
+    expect(() => completedAsOf(candles, HOUR, NaN, 10)).toThrow(/asOfMs/);
+    expect(() => completedAsOf(candles, HOUR, 3 * HOUR, 0)).toThrow(/limit/);
+  });
 });
 
 describe('scoreLadder', () => {

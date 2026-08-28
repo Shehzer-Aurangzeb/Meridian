@@ -11,7 +11,13 @@ dist/
 *.db
 *.db-journal
 temp/
-test/manual/results/
+# Bulk result CSVs — regenerable, and some are tens of megabytes.
+test/manual/results/*
+# ...except the golden set and its archives. It is the instrument that detects
+# scoring drift, and an instrument that exists on one laptop is not one. A
+# directory-level ignore cannot be undone by a later negation, which is why
+# this is `results/*` rather than `results/`.
+!test/manual/results/golden-set*.json
 
 # CLI run log (JSONL)
 logs/

@@ -204,6 +204,25 @@ function main(): void {
   );
   console.log(`trades with a changed status: ${movedStatus}/${doc.trades.length}`);
   console.log(`trades with a changed netR:   ${movedR}/${doc.trades.length}\n`);
+
+  // NO_PLAN is the instrument failing, not a result. It means the stored zones
+  // no longer build a plan, so that member scores nothing and can never move
+  // again — a dead row in a table of 35 reads exactly like a live one. Five
+  // members sat dead for twelve days that way. Name them.
+  const dead = doc.trades.filter((t) => scoreOne(t).status === 'NO_PLAN');
+  if (dead.length > 0) {
+    console.log(
+      `NO_PLAN on ${dead.length}/${doc.trades.length} — these fixtures no longer build a\n` +
+        `plan and are measuring nothing. Rebuild the set; do NOT re-freeze them as NO_PLAN.`,
+    );
+    for (const t of dead) console.log(`  ${t.id}`);
+    console.log('');
+  }
+
+  // Exit code, so this is a check and not a log. Anything that moved is either
+  // drift to explain or a change to re-freeze — both need a human, and a green
+  // exit is the one thing that must not happen silently.
+  if (movedStatus > 0 || movedR > 0 || dead.length > 0) process.exitCode = 1;
 }
 
 main();
