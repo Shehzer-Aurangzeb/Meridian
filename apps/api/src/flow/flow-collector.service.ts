@@ -29,6 +29,16 @@ interface MetricSpec {
   path: string;
   /** These endpoints spell the same idea two different ways. */
   intervalParam: 'period' | 'interval';
+  /**
+   * The bucket width to ask for. Was hard-coded to 1h for every metric.
+   *
+   * It has to be per-metric because the endpoints are not all the same KIND of
+   * number. Open interest and the long/short ratios are SNAPSHOTS: measured
+   * 27 Aug against the live API, `1h[T]` equals `5m[T]` to the bit, so the
+   * width only changes how often you sample. `takerlongshortRatio` is a FLOW
+   * AGGREGATE over the bucket, and the two widths disagree by up to 37%.
+   */
+  period: '1h' | '5m';
   /** Most rows an endpoint will return at once, measured by flow-probe.ts. */
   maxRows: number;
   /** Binance keeps this one for years, so a missed day is not a lost day. */
@@ -58,10 +68,25 @@ const fromField =
   };
 
 export const METRICS: MetricSpec[] = [
+  // ── the two snapshots, at 5m ────────────────────────────────────────────
+  //
+  // 5m, not 1h, so these continue the archive at ITS density. The archive ends
+  // 2026-08-28; collecting hourly from there would drop both series to a
+  // twelfth of their resolution exactly at the join, which is a seam in the
+  // sampling rate sitting where a seam is least welcome.
+  //
+  // There is no convention risk in the change and no second series to keep:
+  // these are SNAPSHOTS, and `1h[T]` is bit-identical to `5m[T]` (verified
+  // against the live API, 27 Aug). The hourly series is therefore a strict
+  // subset of the 5-minute one — every hourly row is the 5m row on the hour —
+  // so fetching 1h as well would cost a second call chain per symbol to
+  // re-collect rows we already have. Dropped. Contrast the taker pair below,
+  // which are two genuinely different numbers and are both kept.
   {
     metric: 'openInterest',
     path: '/futures/data/openInterestHist',
     intervalParam: 'period',
+    period: '5m',
     maxRows: 500,
     parse: fromField('sumOpenInterest'),
   },
@@ -69,13 +94,39 @@ export const METRICS: MetricSpec[] = [
     metric: 'longShortRatio',
     path: '/futures/data/globalLongShortAccountRatio',
     intervalParam: 'period',
+    period: '5m',
     maxRows: 500,
     parse: fromField('longShortRatio'),
   },
+  // ── the taker ratio, twice, because it is TWO DIFFERENT NUMBERS ─────────
+  //
+  // Binance's 1h taker ratio is not the average of its twelve 5m ratios.
+  // Measured 27 Aug over 41 hours of BTCUSDT: mean-of-ratios is 13.9% off at
+  // the median and 67.3% at worst. Only sum(buyVol)/sum(sellVol) reconstructs
+  // it (0.059% median) and the bulk archive does not publish the volumes.
+  //
+  // So neither series can be derived from the other and merging them under one
+  // name would put a silent discontinuity at the archive/collector boundary —
+  // a seam that manufactures a signal. Both are collected, both are named for
+  // the window they aggregate over, and nothing downstream has to infer which.
   {
-    metric: 'takerBuySellRatio',
+    // The one the archive gives us back to 2021-12-01. Continues unbroken from
+    // where the archive ends, which is why the collector now asks for it.
+    metric: 'takerBuySellRatio5m',
     path: '/futures/data/takerlongshortRatio',
     intervalParam: 'period',
+    period: '5m',
+    maxRows: 500,
+    parse: fromField('buySellRatio'),
+  },
+  {
+    // Binance's own hourly statistic. Not reconstructable from the 5m rows, so
+    // it is kept rather than dropped — the two weeks already collected under
+    // the old name `takerBuySellRatio` are these.
+    metric: 'takerBuySellRatio1h',
+    path: '/futures/data/takerlongshortRatio',
+    intervalParam: 'period',
+    period: '1h',
     maxRows: 500,
     parse: fromField('buySellRatio'),
   },
@@ -86,6 +137,7 @@ export const METRICS: MetricSpec[] = [
     metric: 'premium',
     path: '/fapi/v1/premiumIndexKlines',
     intervalParam: 'interval',
+    period: '1h',
     maxRows: 1500,
     longHistory: true,
     parse: (raw: unknown): Row | null => {
@@ -96,6 +148,58 @@ export const METRICS: MetricSpec[] = [
       return Number.isFinite(ts) && Number.isFinite(value) ? { ts, value } : null;
     },
   },
+];
+
+/**
+ * How a row in Binance's bulk archive maps onto a `FlowSample` row.
+ *
+ * `https://data.binance.vision/data/futures/um/daily/metrics/<PAIR>/` publishes
+ * these six columns at 5-minute resolution from 2021-12-01 (BTC 2020-09-01).
+ * This table is the ONLY place the archive-to-live convention is written down.
+ * The importer reads it; nothing downstream needs to know the archive exists.
+ *
+ * ─── shiftBars, and why it is not zero ──────────────────────────────────
+ * The archive stamps a SNAPSHOT with the START of the window it opens. The
+ * live API stamps the same value with the moment it PUBLISHES it, one bar
+ * later. So `archive[T] === live[T + 5min]` for the five snapshot columns, and
+ * reading an archive row as known-at-its-own-timestamp is a five-minute
+ * LOOK-AHEAD that throws nothing and shows up as a signal.
+ *
+ * `sum_taker_long_short_vol_ratio` is a flow measured OVER the window and is
+ * already stamped at the end in both, so it alone shifts by zero.
+ *
+ * Measured 28 Aug 2026 over the whole ~29-day live retention overlap: ten
+ * coins, 8,285 rows each, 82,850 comparisons PER COLUMN, every shift of -1/0/+1
+ * scored. The winning shift below is unanimous — no coin and no day disagrees.
+ * Relative difference at that shift:
+ *
+ *   sum_open_interest                 median 0.0e+0  max 0.0e+0   (bit-exact)
+ *   sum_open_interest_value           median 0.0e+0  max 0.0e+0   (bit-exact)
+ *   count_long_short_ratio            median 1.1e-4  max 2.8e-4
+ *   count_toptrader_long_short_ratio  median 1.2e-4  max 3.2e-4
+ *   sum_toptrader_long_short_ratio    median 1.4e-5  max 5.6e-5
+ *   sum_taker_long_short_vol_ratio    median 1.2e-4  max 7.6e-3
+ *
+ * The non-zero residuals are the live API serving 4 decimal places against the
+ * archive's 8. Open interest, which live serves in full, matches to the bit.
+ */
+export const ARCHIVE_BAR_MS = 300_000;
+
+export const ARCHIVE_METRICS: Array<{
+  /** Column in the archive CSV. */
+  column: string;
+  /** `FlowSample.metric` it becomes. */
+  metric: string;
+  /** Bars to add to the archive timestamp to reach the live convention. */
+  shiftBars: 0 | 1;
+}> = [
+  { column: 'sum_open_interest', metric: 'openInterest', shiftBars: 1 },
+  { column: 'sum_open_interest_value', metric: 'openInterestValue', shiftBars: 1 },
+  { column: 'count_long_short_ratio', metric: 'longShortRatio', shiftBars: 1 },
+  { column: 'count_toptrader_long_short_ratio', metric: 'topTraderAccountRatio', shiftBars: 1 },
+  { column: 'sum_toptrader_long_short_ratio', metric: 'topTraderPositionRatio', shiftBars: 1 },
+  // The only zero. See above.
+  { column: 'sum_taker_long_short_vol_ratio', metric: 'takerBuySellRatio5m', shiftBars: 0 },
 ];
 
 export interface CollectResult {
@@ -174,7 +278,7 @@ export class FlowCollectorService {
       const res = await axios.get(`${BASE}${spec.path}`, {
         params: {
           symbol,
-          [spec.intervalParam]: '1h',
+          [spec.intervalParam]: spec.period,
           limit: spec.maxRows,
           endTime: cursor,
         },

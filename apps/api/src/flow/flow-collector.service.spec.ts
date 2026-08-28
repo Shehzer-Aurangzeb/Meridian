@@ -1,5 +1,10 @@
 import axios from 'axios';
-import { FlowCollectorService, METRICS, toPair } from './flow-collector.service';
+import {
+  ARCHIVE_METRICS,
+  FlowCollectorService,
+  METRICS,
+  toPair,
+} from './flow-collector.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 jest.mock('axios');
@@ -38,10 +43,50 @@ describe('parsers', () => {
       ts: 1000,
       value: 1.8,
     });
-    expect(spec('takerBuySellRatio').parse({ timestamp: 1000, buySellRatio: '0.9' })).toEqual({
-      ts: 1000,
-      value: 0.9,
-    });
+    // Both taker specs read the same field off the same endpoint. What makes
+    // them different numbers is the period, asserted below.
+    for (const m of ['takerBuySellRatio5m', 'takerBuySellRatio1h']) {
+      expect(spec(m).parse({ timestamp: 1000, buySellRatio: '0.9' })).toEqual({
+        ts: 1000,
+        value: 0.9,
+      });
+    }
+  });
+
+  it('asks for the right bucket width per metric — the taker pair differs ONLY here', () => {
+    // Binance's 1h taker ratio is not the mean of its twelve 5m ratios (13.9%
+    // off at the median, 67.3% at worst), so these two must stay two metrics
+    // fetched at two periods. A silent collapse to one period would make the
+    // 5m series a duplicate of the 1h one and this is what catches it.
+    expect(spec('takerBuySellRatio5m').period).toBe('5m');
+    expect(spec('takerBuySellRatio1h').period).toBe('1h');
+    // 5m so they continue the archive at its density. Snapshots, so the hourly
+    // series is a strict subset and is not fetched separately.
+    expect(spec('openInterest').period).toBe('5m');
+    expect(spec('longShortRatio').period).toBe('5m');
+    expect(spec('premium').period).toBe('1h');
+    expect(spec('takerBuySellRatio5m').path).toBe(spec('takerBuySellRatio1h').path);
+    // No metric name may repeat: FlowSample is keyed on (symbol, metric, ts).
+    const names = METRICS.map((m) => m.metric);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('maps every archive column to a distinct metric with a stated shift', () => {
+    // The shift rule, measured over 82,850 comparisons per column. If someone
+    // flips a shift the look-ahead is silent, so pin all six.
+    const byCol = Object.fromEntries(ARCHIVE_METRICS.map((m) => [m.column, m]));
+    expect(byCol['sum_open_interest'].shiftBars).toBe(1);
+    expect(byCol['sum_open_interest_value'].shiftBars).toBe(1);
+    expect(byCol['count_long_short_ratio'].shiftBars).toBe(1);
+    expect(byCol['count_toptrader_long_short_ratio'].shiftBars).toBe(1);
+    expect(byCol['sum_toptrader_long_short_ratio'].shiftBars).toBe(1);
+    // The one exception, because it is a flow over the bucket, not a snapshot.
+    expect(byCol['sum_taker_long_short_vol_ratio'].shiftBars).toBe(0);
+
+    const metrics = ARCHIVE_METRICS.map((m) => m.metric);
+    expect(new Set(metrics).size).toBe(metrics.length);
+    // The archive's taker series must land on the 5m name, never the 1h one.
+    expect(byCol['sum_taker_long_short_vol_ratio'].metric).toBe('takerBuySellRatio5m');
   });
 
   it('reads the close out of a kline array', () => {

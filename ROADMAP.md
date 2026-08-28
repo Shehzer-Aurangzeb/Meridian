@@ -590,3 +590,119 @@ edge over random as a primary metric again.
 - **The golden set is in git.** `apps/api/.gitignore` keeps ignoring the bulk
   result CSVs but tracks `golden-set*.json`, so the drift detector and its three
   archives no longer exist only on one laptop.
+
+---
+
+## 8. The flow archive — imported 28 Aug 2026
+
+`https://data.binance.vision/data/futures/um/daily/metrics/<PAIR>/` publishes
+five-minute open interest, long/short and taker data as daily files, free and
+without a key. It removes the twelve-month wait: **2021-12-01 onward for all ten
+coins, BTC from 2020-09-01**, 17,766 files, 203 MB, every checksum verified.
+
+Six columns become six `FlowSample` metrics. The mapping, the timestamp shift
+and the evidence live in ONE place — `ARCHIVE_METRICS` in
+`flow-collector.service.ts`. Nothing downstream needs to know the archive exists.
+
+### The shift, because it is a silent look-ahead
+
+The archive stamps a snapshot with the START of its window; the live API stamps
+it when it PUBLISHES, one bar later. `archive[T] === live[T + 5min]` for the five
+snapshot columns; `sum_taker_long_short_vol_ratio` is a flow measured over the
+window and shifts by zero. Measured over the whole ~29-day live overlap: ten
+coins, 82,850 comparisons per column, unanimous, no coin or day dissenting.
+Reading an archive row as known-at-its-own-timestamp is a five-minute look-ahead
+that throws nothing.
+
+### Two taker metrics, because they are two numbers
+
+`takerBuySellRatio1h` (Binance's hourly aggregate, what the collector has been
+storing) and `takerBuySellRatio5m` (the archive's, and now also collected).
+Neither reconstructs the other: the mean of twelve 5m ratios misses the 1h ratio
+by **13.9% at the median and 67.3% at worst**, and only `sum(buyVol)/sum(sellVol)`
+recovers it, which the archive does not publish.
+
+**A 1h taker feature must never be built by averaging 5m ratios.** If one is
+wanted it has to be defined as something else — the last 5-minute bucket of the
+hour, say — and named so the definition is visible.
+
+### Coverage holes that must not be averaged away
+
+- **2022 is a bad year for four of the six columns.** Blank cells by year:
+  both top-trader columns are **87.2% empty in 2022**, the taker ratio **35.0%**,
+  the global long/short ratio 5.1%. From 2023 on all four are ~0%. Open interest
+  and its USD value have **zero** blanks anywhere in the archive.
+  Overall: topTrader\* 18.0%, taker 7.3%, longShortRatio 1.1%.
+  Blanks are SKIPPED at import, never written as 0 — absence is not a reading —
+  and the import prints the count so the skipping is visible.
+- **167 files hold fewer than 288 buckets.** In the ten-coin window they are the
+  same dates across all ten coins at once (2021-12-04 at 285, 2021-12-15 at 287,
+  2024-02-16 at 163). Binance-side collection outages: real holes in the market
+  record, imported as-is because filling them would be inventing data.
+- **263 files repeat every row**, all BTCUSDT between 2020-09-01 and 2021-05-21,
+  none inside the ten-coin window. Deduped at import.
+- **1,044 files are not in chronological order**, from 2024-04-04, and it is not
+  a clean boundary — 51 dates have both sorted and unsorted files. Sorted
+  unconditionally at import.
+- **Twelve rows are stamped 1-3 seconds late** on the right minute (BNBUSDT and
+  LTCUSDT 2024-04-03, SOLUSDT 2024-04-02, LINKUSDT 2024-04-01). Floored to the
+  5-minute bucket; never match on exact epoch equality.
+
+### The study window starts 2023-01-01 for top-trader and taker
+
+**Not a preference — a constraint that follows from the coverage table above.**
+
+Blank-cell rate by year:
+
+| year | longShortRatio | topTraderAccount | topTraderPosition | taker |
+|---|---|---|---|---|
+| 2021 | 1.8% | 1.8% | 1.8% | 1.8% |
+| **2022** | 5.1% | **87.2%** | **87.2%** | **35.0%** |
+| 2023 | 0.0% | 0.0% | 0.0% | 0.0% |
+| 2024 | 0.0% | 0.0% | 0.0% | 0.0% |
+| 2025 | 0.0% | 0.1% | 0.0% | 0.0% |
+| 2026 | 0.0% | 0.0% | 0.0% | 0.0% |
+
+Coverage is not stationary, and that breaks the thing every experiment here
+depends on. A TUNE/HOLDOUT split straddling 2022 would not compare two PERIODS,
+it would compare two DATASETS: one where the top-trader columns are nine-tenths
+absent and one where they are complete. Any difference between the halves would
+be confounded with the density of the input, and the shuffled control would not
+catch it, because the shuffle preserves the missingness pattern.
+
+**So: any experiment using `topTraderAccountRatio`, `topTraderPositionRatio` or
+`takerBuySellRatio5m` starts at 2023-01-01.** That still leaves **3 years
+8 months, ten coins, 5-minute resolution** — far more than any input this
+project has tested. `openInterest` and `openInterestValue` have zero blanks
+anywhere and are not constrained; `longShortRatio` peaks at 5.1% in 2022 and is
+a judgement call rather than a rule.
+
+### The collector now does about seven times the work per run
+
+Setting the two snapshots to 5m is the right call for the join, but it is not
+free. A 30-day backfill at 5m is 8,640 rows per metric per symbol — 18 pages of
+500 against 2 at hourly. Per run: roughly 570 page requests against about 80
+before, plus the 120 ms politeness sleep between each.
+
+Nothing is broken and nothing was changed for it, but **if the scheduled run
+starts timing out, the fix is `DEFAULT_BACKFILL_DAYS`, not the period.** Thirty
+days of overlap exists so a missed run self-heals; at 5m that is far more
+overlap than the self-heal needs.
+
+### Known unknowns — recorded, not resolved
+
+- **Point-in-time is unestablished.** Historical files have been rewritten years
+  after their dates (the 2020-09-01 BTC file was last modified 2026-03-18). That
+  proves REGENERATION, not restatement, and one session cannot tell them apart
+  without a prior copy. The only evidence is the live overlap, which is clean to
+  the bit on open interest. An ETag + size baseline for six dates spanning
+  2021-2026 is saved with the probe artefacts; re-check it in a month.
+- **Licence is undocumented.** No terms, README or licence file exists anywhere
+  in the bucket, and `https://data.binance.vision/terms` is a 404. The data is
+  public and unauthenticated. Personal research is the assumed use. Recorded,
+  not resolved.
+- **Publication lag is being measured, not guessed.** A 24-hour poller records
+  the newest bar each endpoint will serve, every three minutes, on two coins.
+  One sample is not an embargo rule. The embargo itself is FEATURE
+  CONSTRUCTION, not import — it belongs in the harness beside `completedAsOf`,
+  enforced and tested the same way, and it is not built yet.
