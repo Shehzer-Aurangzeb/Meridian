@@ -3,10 +3,11 @@
 Written 25 Aug 2026.
 
 This file lives at the repo root on purpose. `.gitignore` line 39 ignores any
-directory named `docs/`, which catches both `docs/` and `apps/api/docs/`. The
-older files in `apps/api/docs/` survive only because they were committed before
-that rule existed. Anything new put there would vanish. We have already lost
-provenance once that way, so this is tracked instead.
+directory named `docs/`, and the repo is public, so that rule is deliberate:
+`docs/` holds research logs and a third-party playbook that must not be
+published. The cost is that nothing in `docs/` is backed up by git — including
+`ZONE_AUDIT.md`, which now lives there and carries the question 1 result. This
+file is at the root so that at least the index of the work survives.
 
 Where a number below could be checked against the code or a results file, it
 was, and the location is given. Where it could not, it says so. Nothing here
@@ -50,10 +51,14 @@ Spending weeks to make a losing number more precise is not worth it.
 
 ## 2. What comes next, in order
 
-### 2.1 Forward data collector — BUILT, not yet deployed
+### 2.1 Forward data collector — DEPLOYED 26 Aug 2026, first run pending
 
-**Status, 26 Aug 2026.** Written and tested. It starts collecting on the first
-deploy to `main`, and not before. Merging is the deploy.
+**Status, 27 Aug 2026.** Live on `origin/main` (`abcc8d5`, PR #15, merged
+26 Aug 22:35 UTC). The EventBridge rule fires at 03:30 UTC daily, so the first
+collection is the morning of 27 Aug. Checked against production: the
+`FlowSample` table exists and holds **0 rows** — expected, not a fault, but it
+means the retention clock has not started saving yet. **Verify rows land after
+the first 03:30 run.**
 
 - `FlowSample` table, keyed on (symbol, metric, ts) so re-runs insert nothing new
 - `FlowCollectorService` — all four endpoints, verified against live Binance
@@ -181,7 +186,43 @@ criterion for each**. Test twenty inputs individually and roughly one will look
 significant on noise alone. That is how the original five-condition checklist
 got built, and why it did not survive.
 
-### 2.6 Optional — audit the zone map
+### 2.6 Audit the zone map — question 1 done, null
+
+**Planned in `docs/ZONE_AUDIT.md`; results at the foot of that file.**
+
+**Q1 (are the zones an artefact of grouping order?) — answered 27 Aug, null.**
+`apps/api/test/manual/zonestability.ts`. Over 4,770 zones, a zone centre moves
+**0.006R** at the median when every mark is jittered ±0.05%, and **0.000R** when
+the same marks are grouped top-down instead of bottom-up. The bar was 1.0R. The
+grouping IS order-dependent — 23% of zones shift and the zone count moves ±3% —
+but not by enough to reach any trade built on one.
+
+So the level map is reproducible, and the −0.369R result is not an artefact of
+unstable levels. That was the finding most likely to invalidate everything
+downstream, and it did not.
+
+**Q2 (is the confluence real, or can two marks from one method fake it?) —
+answered 27 Aug, 8%.** `zoneaudit.ts --q2`. Collapsing each source to method +
+chart — `12h support` and `12h resistance` are both `12h swing` — leaves **92%
+of zones still passing** the 2-source rule. The filter is weaker than
+documented, by eight percent.
+
+Of the two mechanisms the plan named, one is common but rarely decisive
+(sup+res pairs appear in 38% of zones, load-bearing in 8%) and the other
+**never fired once** in 4,770 zones (two fib ratios in one zone needs an anchor
+range under ~4%; none was). Re-scoring that 8% is outstanding, not closed — see
+`docs/ZONE_AUDIT.md`.
+
+**Both re-run 27 Aug on seven charts** after `LEVEL_TIMEFRAMES` widened to
+`1w/1d/12h/4h/1h/30m/15m`. Q1 still passes (median 0.000R reverse, 0.005R
+jitter; p90 doubled to 0.082R, still 12× inside the bar). Q2 **improved**:
+inflated share 8% → 5%, and zones resting on 3+ genuinely independent methods
+went 19% → 57%. More charts add real confirmation faster than fake.
+
+Q3–Q5 not started. Q1 was the gate and it passed, so the rest are optional in
+the same way the whole section was. Q5 (parameter sweep) gained a concrete
+target: the 0.5% cluster threshold is intraday-calibrated and applied unchanged
+to the weekly chart, where it yields roughly one mark in fifty.
 
 `SupportResistanceService` and `LevelMapService` were never examined by either
 audit, and they decide where every entry, stop and target goes. Two smells,
@@ -309,18 +350,24 @@ Three constants are picked, not derived, and they drive every result:
 - `SLIP_PCT = 0.02` — `apps/api/test/manual/forward-test.ts:97`
 - `FILL_WINDOW_HOURS = 24` — `apps/api/src/analysis-coordinator/outcome.ts:57`
 
-**The citation problem is worse than reported.** `forward-test.ts` cites "§14h"
-eleven times as the authority for its hold length, its cooldown, and its
-marking convention. There is **no §14h** in `docs/STATE_OF_PLAY.md`. There is a
-§14 — and §14c is a **retraction** of it, stating that §14's configuration "was
-never written down, and cannot be recovered" and its headline number is
-unreproducible (`docs/STATE_OF_PLAY.md:600-616`).
+**Correction, 27 Aug 2026 — the §14h citation is good.** An earlier version of
+this file said there is "no §14h" in `docs/STATE_OF_PLAY.md` and that
+`forward-test.ts` cited a section that did not exist. That was wrong. §14h is at
+`docs/STATE_OF_PLAY.md:1041` — "THE TRADE PLAN ITSELF — flat before costs,
+negative after" — and its Config block at :1058 records
+`fill-bars=24 max-bars=72 cooldown=24` verbatim, which is exactly what
+`forward-test.ts` cites it for. The eleven citations are correct.
 
-`forward-test.ts:36` also cites "STATE_OF_PLAY.md methodology rule 7" for the
-claim that the unit of evidence is the month. Rule 7 in that file is about
-never claiming zero fitted parameters (`STATE_OF_PLAY.md:656`). The file has
-three separate "Methodology rules added" sections, each restarting its
-numbering, so the citation is ambiguous as well as wrong.
+What remains true: §14h *records* those settings, it does not derive them. 72
+bars and a 24-bar cooldown were chosen, and §14h is the log of a run that used
+them, not an argument for them. So the constants above are still picked rather
+than derived — that part of this section stands.
+
+`forward-test.ts:20` does still miscite: it credits "methodology rule 7" for the
+claim that the unit of evidence is the month. That is **rule 8**
+(`docs/STATE_OF_PLAY.md:658`); rule 7 (:657) is about never claiming zero fitted
+parameters. Off by one. The file has three separate "Methodology rules added"
+sections, each restarting its numbering, which is how it happened.
 
 Parked because: the constants are documented here now, which is what a reader
 needs. Re-deriving them belongs to whatever strategy replaces this one.
@@ -361,16 +408,36 @@ and was not re-derived. The mechanism is confirmed
 - **`algoVersion` column.** The scoreboard currently splits old from new
   analyses on a timestamp (16 Aug). A timestamp is a weak proxy for which code
   produced a row. A column plus a migration is the real fix.
-- **Two unmerged research CLIs** — `5b6526e` (live audit) and `e87651c`
-  (`--until` on the forward test). Command-line only; nothing in production
-  reads them.
-- **The `docs/` directory.** Everything in it is untracked and one `rm` from
-  gone, including `STATE_OF_PLAY.md`, `HANDOFF.md` and `EXTERNAL_REVIEW_BRIEF.md`
-  — the three files most of this roadmap's evidence comes from.
-  **Do not delete anything there. Move it somewhere tracked or backed up first.**
-  Note: the brief for this file said seven files were awaiting a decision. There
-  are **fifteen** files plus a PDF in `docs/` today. The list of seven was not
-  recorded anywhere, so it needs redoing.
+- ~~**Two unmerged research CLIs**~~ — `5b6526e` (live audit) and `e87651c`
+  (`--until` on the forward test) both reached `origin/main` in PR #12. Closed.
+- **The `docs/` directory — cleaned 27 Aug 2026.** Was fifteen files plus a PDF;
+  now eight plus the PDF. What went, and why:
+
+  | deleted | reason |
+  |---|---|
+  | `API_INTEGRATION.md` | documented `/analysis-coordinator/coordinate` and `/stream`; those controllers are now `analyses`. Swagger at `/docs` is live and correct. |
+  | `BACKEND_ARCHITECTURE.md` | same mental model as `STATE_OF_PLAY.md` §1–2, three months older |
+  | `DEVELOPMENT_PLAN.md` | May 5 Phase 0 setup plan, executed |
+  | `MERIDIAN_REBUILD_PLAN.md` | two lines different from the tracked `apps/api/docs/REBUILD_PLAN.md` |
+  | `INDICATOR_VALIDATION.md` | a "✅ COMPLETE" test-count listing; the tests are the truth |
+  | `EXTERNAL_REVIEW_BRIEF.md` | self-marked SUPERSEDED, headline number retracted, "do not quote numbers from this file" |
+
+  All seven `apps/api/docs/*.md` were deleted too — every one predates the
+  measurement work and two document a `POST /analysis/complete` endpoint that no
+  longer exists. Those were tracked, so `git revert` brings them back.
+
+  **The `docs/` deletions are not in git.** They are backed up at
+  `~/Downloads/Projects/Personal/Meridian-docs-backup-20260827/`. That backup is
+  the only copy — treat it as such until you are sure nothing is missed.
+
+  **Still do not delete anything in `docs/` without backing it up first.** The
+  nine survivors are there because live code or this file cites them:
+  `STATE_OF_PLAY.md` (8 code files), `HANDOFF.md` (§1 above), `DEPLOYMENT_PLAN.md`
+  (`infra/bin/meridian.ts:12`), `MERIDIAN_BASERATE_PLAN.md` (`baserate.ts:16`),
+  `MERIDIAN_FLOW_PLAN.md` (the collector shipped from it), `STATUS_FOR_REVIEW.md`
+  (§1), `SYSTEMATIC_ANALYST.md` (the product thesis), `FRONTEND_ENGINEERING.md`
+  (rationale for the live History page), and the playbook PDF (source of every
+  parameter).
 
 ---
 
@@ -419,3 +486,107 @@ any strategy, not just this one. All of it verified in place:
   bit. It is the control that proves the arm machinery adds nothing.
 - **21 test suites, ~370 tests.** Static count is 360 `it(` blocks; `.each`
   blocks expand at runtime, which accounts for the rest.
+
+---
+
+## 7. The resolution constraint — added 27 Aug 2026
+
+**This is the durable finding of the session and it gates every comparison made
+from here on.**
+
+### The harness measures correctly
+
+`backtest-plans.ts` had never had a positive control. It has one now. The
+harness was copied to a scratch location with only its import paths changed, and
+edges of known strength were planted into the trade outcomes by exact quota
+(Bresenham-spread, so the realised mean tracks the nominal at any trade count).
+Four plants, planted beside recovered:
+
+| plant | planted (closed form) | recovered | miss |
+|---|---|---|---|
+| strong | +0.1977R (n=177) | +0.1977R | 0.00e+0 |
+| weak | +0.0395R (n=177) | +0.0395R | 0.00e+0 |
+| one arm only | +0.1957R (n=92) | +0.1957R on `C_trail_10`, 0.0000R on `BASE_check` | 0.00e+0 |
+| negative | -0.1073R (n=177) | -0.1073R | 0.00e+0 |
+
+It does not attenuate, lose, or invent an edge, and it does not leak a plant
+across arms. **Cooldown re-phasing does not interfere either**: a one-bar change
+to `barsHeld` redraws 58.2% of the walk (103 of 177 trades, n 177 → 171), and
+recovery stays exact against the new n. Re-phasing breaks comparability BETWEEN
+runs; it does not corrupt the measurement WITHIN one.
+
+### But it cannot resolve anything this project has decided on
+
+A 14-day block bootstrap — `holdout.ts:blockBootstrap`, seed 12345, 2000 draws —
+puts a **95% interval 0.318R wide** on edge over random for a 3-coin, 80-day
+window, straddling zero. Six blocks is a coarse resample base; that is a limit
+of the window, not of the code.
+
+| decision | delta it rested on | vs 0.318R |
+|---|---|---|
+| CHARTS_AB — revert 7 charts | 0.130R | 2.4x inside |
+| HIERARCHY_AB — revert hierarchy | 0.200R | 1.6x inside |
+| pre-registered "better" bar | 0.050R | 6x inside |
+| pre-registered "neutral" band | 0.020R | 16x inside |
+
+**Every decision made so far rested on a delta inside the interval.** None of
+them are wrong — both were reverts, and a revert needs only a failure to clear a
+bar — but they are directional and unreplicated, not measurements.
+
+The instability is not theoretical. The same command run twice roughly two hours
+apart, differing only by the candles that arrived in between, moved the headline
+**+0.108R -> +0.056R on three extra trades** (177 -> 178 strategy, 104 -> 106
+control).
+
+**Any future strategy comparison needs one of: a much longer window, more coins,
+or a metric with a tighter interval than edge-over-random.** Adding an input and
+re-running this rig on 80 days of three coins will not settle anything.
+
+### The random control should not decide anything until it is rebuilt
+
+It carries **0.301R of the 0.318R**: the PLAN arm's own interval is 0.098R wide,
+the RANDOM arm's is 0.301R. It also moved 0.044R on three trades when the window
+shifted by hours.
+
+This retires the "not found / unverified" note in §3 under *Split bleed and the
+random control*. The control's spread is now measured, and it is the dominant
+term.
+
+**The known defect** is at `backtest-plans.ts:721`: `allSignals` is pushed
+BEFORE the `STATES` filter on the next line. So the control samples from every
+plan the walk produced — ACTIONABLE, APPROACHING and FAR — while the strategy
+arm takes ACTIONABLE only. The two arms are drawn from different populations,
+which is not what "same plans, random timing" claims. Fix this before quoting
+edge over random as a primary metric again.
+
+### Also landed this session
+
+- **Edge over random now prints BOTH conventions**, resolved-only (the
+  pre-registered primary) and marked, from the same `aggregate`, with the open
+  count and the marking gap. It printed only the marked figure until now, while
+  both pre-registrations defined the primary as resolved-only.
+- **Five silent degradation-to-null sites fixed** — `completedAsOf` (bad
+  duration returned zero candles), `levelsFromCandles` (zero candles / bad spot),
+  `findConfluenceZones` (bad spot), `fibLevels` (NaN anchor), and
+  `FlowCollectorService.fetchWindow` (a changed API shape read as an empty
+  window). Each now throws instead of returning an empty result.
+- **Five found and deliberately NOT fixed**, recorded so they are not
+  rediscovered as news: `levelsFromCandles` with 1-19 candles still warns and
+  returns `[]` and that warning is invisible under `Logger.overrideLogger(false)`
+  (the weakest remaining spot); `calculateBandWidthSeries` returns `[]` below its
+  period, feeding the regime percentile; `mapAt` returns null below 50 candles
+  and the skipped bars are counted nowhere; `run-log.ts:32` returns `[]` for a
+  missing file; `findFirstFill` / `fibAnchors` / `verdict.ts` nulls are genuine
+  "nothing there".
+- **`partial-weights` retired as a golden-set coverage category.**
+  `renormaliseTargetWeights` always sums to 100 for one or more targets, and
+  `buildPlans` no longer emits a zero-target plan, so `targetWeightSum < 100` is
+  unrepresentable. The only five members that ever satisfied it were the
+  zero-target plans that stopped building. A coverage guard that can never be met
+  throws on every future `--extend`.
+- **`pnpm golden` now exits non-zero** on any changed status, any changed netR,
+  or any `NO_PLAN`, and names the dead fixtures. It always exited 0 before, which
+  is how five dead members survived twelve days.
+- **The golden set is in git.** `apps/api/.gitignore` keeps ignoring the bulk
+  result CSVs but tracks `golden-set*.json`, so the drift detector and its three
+  archives no longer exist only on one laptop.

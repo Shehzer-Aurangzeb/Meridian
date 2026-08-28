@@ -344,15 +344,25 @@ function take(
  * The same three lines `golden-report.ts` runs, which is the point: what the
  * report measures is what the set records.
  */
-function refreeze(t: GoldenTrade): GoldenTrade {
+function refreeze(t: GoldenTrade): GoldenTrade | null {
   const planner = new TradePlanService();
   const candles: Candle[] = t.forward.map((c) => ({ ...c, time: new Date(c.time) }));
   const plans = planner.buildPlans(t.input.zones, t.input.spot, t.input.atr);
   const plan = plans.find((p) => p.direction === t.direction);
-  if (!plan) throw new Error(`${t.id}: its plan no longer builds from the stored zones`);
+  // A member whose plan no longer builds has outlived its inputs — five did,
+  // when `buildPlans` stopped emitting plans with no target. It is not drift
+  // and it cannot be re-frozen: NO_PLAN scores nothing forever. Drop it and
+  // say which, rather than crashing the whole re-freeze or keeping a dead row.
+  if (!plan) {
+    console.log(`  DROPPED ${t.id}: its plan no longer builds from the stored zones`);
+    return null;
+  }
 
   const scored = scoreTrade(candles, plan, t.config);
-  if (!scored.filled) throw new Error(`${t.id}: no longer fills against its stored candles`);
+  if (!scored.filled) {
+    console.log(`  DROPPED ${t.id}: no longer fills against its stored candles`);
+    return null;
+  }
 
   return {
     ...t,
@@ -411,9 +421,16 @@ async function main(): Promise<void> {
   // Categories overlap, so the set is only honest if each is independently
   // covered. Declared before the selection so an extension can REPAIR a
   // shortfall rather than only discover one at the end.
+  //
+  // `partial-weights` (targetWeightSum < 100) is RETIRED, not forgotten. It
+  // guarded the CP2 bug where a 1-target plan sold a third of the position.
+  // `renormaliseTargetWeights` now always sums to 100, and `buildPlans` no
+  // longer emits a zero-target plan at all, so the shape is unrepresentable:
+  // the only five members that ever satisfied it were zero-target plans, and
+  // those are the five that stopped building. A coverage guard that can never
+  // be met throws on every future --extend.
   const coverage: Record<string, (c: Candidate) => boolean> = {
     timeout: (c) => c.frozen.status === 'TIMEOUT',
-    'partial-weights': (c) => c.frozen.targetWeightSum < 100,
     stopped: (c) => c.frozen.status === 'STOPPED' || c.frozen.status === 'PARTIAL',
     'reached-tp1': (c) => c.frozen.targetsHit >= 1,
   };
@@ -431,16 +448,25 @@ async function main(): Promise<void> {
       OUT.replace(/\.json$/, `-superseded-${prior.trades.length}.json`),
       JSON.stringify(prior, null, 2),
     );
+    let dropped = 0;
     for (const t of prior.trades) {
       // Re-scored from the trade's OWN frozen inputs, not by re-finding it in
       // the walk. A checkpoint that changes `barsToFill` shifts every cooldown
       // window after it, so a member can drop out of the live population while
       // remaining a perfectly good test case — its zones, its candles and its
       // config are all in the file. This is what makes the set hermetic.
-      chosen.set(t.id, { ...refreeze(t), _sortKey: 0 });
+      const kept = refreeze(t);
+      if (!kept) {
+        dropped += 1;
+        continue;
+      }
+      chosen.set(t.id, { ...kept, _sortKey: 0 });
       carried += 1;
     }
-    console.log(`  carried ${carried} existing trades, re-frozen at current code`);
+    console.log(
+      `  carried ${carried} existing trades, re-frozen at current code` +
+        (dropped > 0 ? ` (${dropped} dropped, see above)` : ''),
+    );
 
     // Preferred shape first — a partial fill on a 1- or 2-target plan is
     // exactly what C1 mangles — then top up from any partial fill if the
@@ -477,7 +503,6 @@ async function main(): Promise<void> {
     }
   } else {
     take(pool, chosen, (c) => c.frozen.status === 'TIMEOUT', 5);
-    take(pool, chosen, (c) => c.frozen.targetWeightSum < 100, 5);
     take(pool, chosen, (c) => c.frozen.status === 'STOPPED' || c.frozen.status === 'PARTIAL', 5);
     take(pool, chosen, (c) => c.frozen.targetsHit >= 1, 5);
   }

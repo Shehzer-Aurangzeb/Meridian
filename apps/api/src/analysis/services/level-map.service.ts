@@ -15,9 +15,12 @@ import { SupportResistanceService } from './support-resistance.service';
 import { IndicatorsService } from '../../indicators/indicators.service';
 
 /**
- * The chart timeframes levels are marked on, slowest first. Slower charts
- * carry the stronger levels, so all three are used and each says where its
- * levels came from.
+ * The chart timeframes levels are marked on, SLOWEST FIRST. Slower charts
+ * carry the stronger levels, and each mark says which chart it came from.
+ *
+ * The order is load-bearing twice over: `buildFrom` reads spot off the LAST
+ * entry (the fastest chart), and the marks are laid down in this order, which
+ * decides which one wins a tie inside the greedy grouping walk.
  */
 export const LEVEL_TIMEFRAMES: Timeframe[] = [
   TIMEFRAMES.TWELVE_HOUR,
@@ -117,7 +120,12 @@ export class LevelMapService {
 
     // Deliberately the last closing price, not the live ticker: every number
     // in the map must come from the same data, or distances cannot be checked.
-    const lowest = LEVEL_TIMEFRAMES[LEVEL_TIMEFRAMES.length - 1];
+    //
+    // Taken from the series HANDED IN rather than from LEVEL_TIMEFRAMES, so a
+    // caller running a subset of charts gets that subset's fastest close. The
+    // list is slowest-first by contract; see LEVEL_TIMEFRAMES above.
+    const lowest = series[series.length - 1]?.timeframe;
+    if (!lowest) throw new Error(`No series for ${symbol}; cannot build a level map`);
     const lowestCandles = byTimeframe.get(lowest) ?? [];
     if (lowestCandles.length === 0) {
       throw new Error(`No candles for ${symbol} ${lowest}; cannot build a level map`);

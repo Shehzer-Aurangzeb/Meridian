@@ -33,6 +33,23 @@ export class SupportResistanceService {
       maxLevels = SR_DEFAULTS.MAX_LEVELS,
     } = options;
 
+    // No candles and no usable price are MALFORMED INPUT, not a quiet market.
+    // Both used to return an empty level list, which reads downstream as "this
+    // chart offered nothing" and then produces a believable empty map.
+    if (candles.length === 0) {
+      throw new Error(
+        `levelsFromCandles: no candles for ${timeframe}. This is missing data, ` +
+          'not an absence of levels — fetch it rather than reading [] as a result.',
+      );
+    }
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+      throw new Error(
+        `levelsFromCandles: currentPrice must be a positive number, got ${currentPrice}`,
+      );
+    }
+    // Thin-but-real history stays a warning: callers already guard their own
+    // minimum (the replay walk needs 50) and a genuinely young listing is a
+    // market fact, not a bug.
     if (candles.length < 20) {
       this.logger.warn(`Insufficient candles for S/R analysis: ${candles.length}`);
       return [];
@@ -317,6 +334,12 @@ export class SupportResistanceService {
    * out right that way.
    */
   fibLevels(swingLow: number, swingHigh: number): FibLevel[] {
+    // A NaN anchor makes `!(range > 0)` true and returns no levels at all —
+    // "this chart has no Fibonacci structure" rather than "you handed me a
+    // NaN". Separate the two; a genuinely flat range still returns [].
+    if (!Number.isFinite(swingLow) || !Number.isFinite(swingHigh)) {
+      throw new Error(`fibLevels: swing anchors must be numbers, got ${swingLow}/${swingHigh}`);
+    }
     const range = swingHigh - swingLow;
     if (!(range > 0)) return [];
 
@@ -358,6 +381,13 @@ export class SupportResistanceService {
     minSources: number = 2,
     maxSpanPercent: number = SR_DEFAULTS.CLUSTER_THRESHOLD * 2,
   ): ConfluenceZone[] {
+    // A bad spot makes every distancePercent NaN and every zone silently
+    // useless, so it is separated from the honest "no marks" case.
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+      throw new Error(
+        `findConfluenceZones: currentPrice must be a positive number, got ${currentPrice}`,
+      );
+    }
     if (marks.length === 0) return [];
 
     const sorted = [...marks].sort((a, b) => a.price - b.price);

@@ -4,8 +4,20 @@
  * rather than an error, which is how a past result had to be withdrawn.
  */
 import { Candle } from '../types/candle.types';
+import { Timeframe } from '../constants/timeframes';
 
-export const TIMEFRAME_MS: Record<string, number> = {
+/**
+ * Typed against Timeframe, not string, on purpose. A missing entry does not
+ * throw: `completedAsOf` computes `time + undefined` = NaN, every comparison
+ * against NaN is false, and the filter silently returns ZERO candles. That is
+ * exactly the failure this file's header warns about, so the type is what
+ * catches it — adding a timeframe without its duration is a compile error.
+ */
+export const TIMEFRAME_MS: Record<Timeframe, number> = {
+  '1m': 60_000,
+  '5m': 5 * 60_000,
+  '15m': 15 * 60_000,
+  '30m': 30 * 60_000,
   '1h': 3_600_000,
   '4h': 4 * 3_600_000,
   '12h': 12 * 3_600_000,
@@ -26,6 +38,21 @@ export function completedAsOf(
   asOfMs: number,
   limit: number,
 ): Candle[] {
+  // A bad duration does not throw on its own: `time + NaN` is NaN, every
+  // comparison against NaN is false, and the filter returns ZERO candles —
+  // "the market was quiet" rather than "you passed me rubbish". That exact
+  // failure has already cost this project a retracted result, so the
+  // malformed case is separated from the empty one here and thrown.
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new Error(`completedAsOf: durationMs must be a positive number, got ${durationMs}`);
+  }
+  if (!Number.isFinite(asOfMs)) {
+    throw new Error(`completedAsOf: asOfMs must be a number, got ${asOfMs}`);
+  }
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`completedAsOf: limit must be a positive integer, got ${limit}`);
+  }
+
   const done = candles.filter((c) => c.time.getTime() + durationMs <= asOfMs);
   return done.slice(-limit);
 }

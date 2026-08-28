@@ -83,7 +83,7 @@ import {
   ANALYSIS_CANDLE_LIMIT,
 } from '../../src/analysis-coordinator/analysis-coordinator.service';
 import { EntryChecklistResult } from '../../src/analysis/interfaces/checklist.types';
-import { ANALYSIS_TIMEFRAME, CANDLE_LIMITS } from '../../src/common/constants/timeframes';
+import { ANALYSIS_TIMEFRAME, CANDLE_LIMITS, Timeframe } from '../../src/common/constants/timeframes';
 import { Candle, TimeInterval } from '../../src/common/types/candle.types';
 import { completedAsOf, TIMEFRAME_MS } from '../../src/common/replay/plan-replay';
 import { aggregate, ScoringConfig, scoreTrade } from '../../src/common/replay/trade-scoring';
@@ -149,6 +149,28 @@ const EXIT_ARMS = args.includes('--exit-arms');
 // Per-BAR log of level proximity and the next hour's move. Read-only extra
 // output for the touch-volatility study; does not affect any trade.
 const TOUCH_LOG = str('touch-log', '');
+/**
+ * Which charts the level map is built from. Defaults to whatever production
+ * uses; `--charts 12h,4h,1h` runs the old three so the two can be compared with
+ * every other setting identical.
+ *
+ * Order is preserved and must stay slowest-first: `buildFrom` reads spot off
+ * the last entry.
+ */
+const CHARTS: Timeframe[] = LEVEL_TIMEFRAMES.filter((tf) =>
+  str('charts', LEVEL_TIMEFRAMES.join(','))
+    .split(',')
+    .map((c) => c.trim())
+    .includes(tf),
+);
+if (CHARTS.length === 0) throw new Error('--charts matched none of LEVEL_TIMEFRAMES');
+// The walk steps on 1h bars and the stop is priced off ATR_TIMEFRAME. Drop
+// either and the run does not fail — it produces an empty h1 or a NaN ATR and
+// then believable-looking numbers. Fail loudly instead.
+if (!CHARTS.includes('1h')) throw new Error('--charts must include 1h: the walk steps on 1h bars');
+if (!CHARTS.includes(ATR_TIMEFRAME)) {
+  throw new Error(`--charts must include ${ATR_TIMEFRAME}: the stop is priced off its ATR`);
+}
 
 /**
  * The longest hold in play. Without --exit-arms that is just --max-bars; with
@@ -172,7 +194,7 @@ const SCORING: ScoringConfig = {
 const CONFIG =
   `coins=${COINS.join('/')} bars=${BARS} step=${STEP} states=${STATES.join('+')} ` +
   `fill-bars=${FILL_BARS} max-bars=${MAX_BARS} cooldown=${COOLDOWN} ` +
-  `round-trip=${ROUND_TRIP_PCT}% breakeven-after=${BREAKEVEN}` +
+  `round-trip=${ROUND_TRIP_PCT}% breakeven-after=${BREAKEVEN} charts=${CHARTS.join('/')}` +
   `${RANDOM ? ` random-control seed=${SEED}` : ''}`;
 
 /**
@@ -388,6 +410,7 @@ async function runCoin(coin: string): Promise<{
   structureChecks: number;
   structureMismatches: number;
   touches: Array<Record<string, string | number>>;
+  marksByChart: Map<Timeframe, number>;
 }> {
   const binance = new BinanceService(cache, new CacheTelemetryService());
   const indicators = new IndicatorsService();
@@ -410,7 +433,7 @@ async function runCoin(coin: string): Promise<{
   // Each timeframe needs its live window PLUS the replay span, so the oldest
   // decision bar sees exactly as much history as a live call would.
   const series = await Promise.all(
-    LEVEL_TIMEFRAMES.map(async (timeframe) => {
+    CHARTS.map(async (timeframe) => {
       const spanBars = Math.ceil(
         (BARS * TIMEFRAME_MS['1h']) / TIMEFRAME_MS[timeframe],
       );
@@ -468,6 +491,7 @@ async function runCoin(coin: string): Promise<{
 
   const trades: Trade[] = [];
   const touches: Array<Record<string, string | number>> = [];
+  const marksByChart = new Map<Timeframe, number>();
   const allSignals: Record<'long' | 'short', Signal[]> = { long: [], short: [] };
   const cooldownUntil: Record<'long' | 'short', number> = { long: -1, short: -1 };
   let bars = 0;
@@ -593,6 +617,10 @@ async function runCoin(coin: string): Promise<{
     if (!map) continue;
     const plans = planner.buildPlans(map.zones, map.spot, map.atr);
     bars += 1;
+
+    for (const { timeframe, levels } of map.perTimeframe) {
+      marksByChart.set(timeframe, (marksByChart.get(timeframe) ?? 0) + levels);
+    }
 
     if (TOUCH_LOG) {
       // A touch is the bar's own range INTERSECTING a zone band, not a
@@ -742,6 +770,7 @@ async function runCoin(coin: string): Promise<{
     structureChecks,
     structureMismatches,
     touches,
+    marksByChart,
   };
 }
 
@@ -785,13 +814,15 @@ async function main(): Promise<void> {
   console.log(`config  ${CONFIG}\n`);
 
   const all: Trade[] = [];
+  const MARKS = new Map<Timeframe, number>();
 
   const allTouches: Array<Record<string, string | number>> = [];
   for (const coin of COINS) {
     const startedAt = Date.now();
-    const { trades, bars, eligible, noFill, window, structureChecks, structureMismatches, touches } =
+    const { trades, bars, eligible, noFill, window, structureChecks, structureMismatches, touches, marksByChart } =
       await runCoin(coin);
     all.push(...trades);
+    for (const [k, v] of marksByChart) MARKS.set(k, (MARKS.get(k) ?? 0) + v);
     allTouches.push(...touches);
     const plan = trades.filter((t) => t.tier === 'PLAN');
     console.log(
@@ -839,6 +870,14 @@ async function main(): Promise<void> {
   }));
   console.table(byStatus);
 
+  const totalMarks = [...MARKS.values()].reduce((a, b) => a + b, 0);
+  console.log('\nlevels per chart (share of all marks)');
+  console.log(
+    LEVEL_TIMEFRAMES.filter((tf) => MARKS.has(tf))
+      .map((tf) => `  ${tf.padEnd(4)} ${String(MARKS.get(tf)).padStart(7)}  ${((100 * (MARKS.get(tf) ?? 0)) / totalMarks).toFixed(1)}%`)
+      .join('\n'),
+  );
+
   if (RANDOM) {
     const control = all.filter((t) => t.tier === 'RANDOM');
     console.log('\ncontrol — same plans, random timing');
@@ -848,8 +887,45 @@ async function main(): Promise<void> {
       summarise('  random long', control.filter((t) => t.direction === 'long')),
       summarise('  random short', control.filter((t) => t.direction === 'short')),
     ]);
+    // ── edge over random, both conventions, always together ─────────────
+    //
+    // RESOLVED-ONLY is the primary metric. Both pre-registrations define it
+    // that way — "mean net R per trade minus its own random control, resolved
+    // trades only" — and both then quoted the MARKED number as the headline,
+    // because that is the only one this line printed. The gap is not academic:
+    // the hierarchical arm carried 22% open trades and a 0.168R marking gap.
+    //
+    // Both are printed, from the same `aggregate` the tables above use, so no
+    // caller can select a convention after seeing the result. That is the same
+    // fix CP4 made inside the scorer, applied to the number on top of it.
+    const ap = aggregate(plan);
+    const ac = aggregate(control);
+    const line = (
+      name: string,
+      value: number,
+      pv: number,
+      cv: number,
+    ): string =>
+      `  ${name.padEnd(24)} ${value >= 0 ? ' ' : ''}${value.toFixed(3)}R` +
+      `   = plan ${pv.toFixed(3)} - random ${cv.toFixed(3)}`;
+
+    console.log('\nedge over random');
     console.log(
-      `\nedge over random: ${(mean(plan.map((t) => t.netR)) - mean(control.map((t) => t.netR))).toFixed(3)}R/trade`,
+      line(
+        'resolved-only (PRIMARY)',
+        ap.expectancyResolved - ac.expectancyResolved,
+        ap.expectancyResolved,
+        ac.expectancyResolved,
+      ),
+    );
+    console.log(line('marked', ap.expectancy - ac.expectancy, ap.expectancy, ac.expectancy));
+    console.log(
+      `  ${'open (unresolved)'.padEnd(24)} plan ${ap.unresolved}/${ap.n}` +
+        `   random ${ac.unresolved}/${ac.n}`,
+    );
+    console.log(
+      `  ${'marking gap'.padEnd(24)} plan ${ap.markingGap.toFixed(3)}` +
+        `   random ${ac.markingGap.toFixed(3)}`,
     );
   }
 

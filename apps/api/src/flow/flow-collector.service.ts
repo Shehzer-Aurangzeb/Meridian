@@ -185,11 +185,26 @@ export class FlowCollectorService {
       if (!Array.isArray(raw) || raw.length === 0) break;
 
       let oldest = cursor;
+      let malformed = 0;
       for (const item of raw) {
         const row = spec.parse(item);
-        if (!row || row.ts < from) continue;
+        // A row that will not parse is NOT a row outside the window. Lumping
+        // the two together means a changed response shape reads as "the API
+        // returned nothing for this window", which is the exact failure this
+        // codebase has hit four times.
+        if (!row) {
+          malformed += 1;
+          continue;
+        }
+        if (row.ts < from) continue;
         out.set(row.ts, row.value);
         if (row.ts < oldest) oldest = row.ts;
+      }
+      if (malformed === raw.length) {
+        throw new Error(
+          `${spec.metric} ${symbol}: all ${raw.length} rows from ${spec.path} failed to ` +
+            'parse. The response shape changed — this is not an empty window.',
+        );
       }
 
       if (oldest >= cursor) break;
