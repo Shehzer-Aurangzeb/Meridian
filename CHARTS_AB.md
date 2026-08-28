@@ -178,3 +178,49 @@ unchanged 0.5% cluster threshold and an unchanged ATR stop* is wrong, because
 those two constants are what turn extra zones into worse geometry. The per-chart
 threshold idea is untested and this run says nothing about it — but it is now a
 second change on top of a reverted first one, so it starts from three charts.
+
+---
+
+# Appended 27 Aug 2026 — what the instrument can actually resolve
+
+Nothing above is edited. This records what was learned about the harness AFTER
+these numbers were produced, and it changes how they should be quoted.
+
+**The harness measures correctly.** `backtest-plans.ts` had never had a positive
+control. It has one now: the harness was copied to a scratch location with only
+its import paths changed, and edges of known strength were planted into the
+trade outcomes by exact quota. All four recovered to the digit — a strong plant
+(+0.1977R planted, +0.1977R recovered), a weak one at the scale this project
+argues about (+0.0395R planted, +0.0395R recovered), a plant present in the
+trailing arm only (+0.1957R recovered on `C_trail_10` while `BASE_check` stayed
+at exactly 0.0000R), and a negative plant (-0.1073R planted, -0.1073R
+recovered). **Miss on every one: 0.00e+0R.** The harness does not attenuate,
+lose, or invent an edge.
+
+**But it cannot resolve differences of this size.** A 14-day block bootstrap —
+the project's own `holdout.ts:blockBootstrap`, seed 12345, 2000 draws — puts a
+**95% interval 0.318R wide** on edge over random for this window, straddling
+zero. Six blocks over 80 days is a coarse resample base, and that is a limit of
+the window rather than of the code.
+
+**The delta this document rests on is 0.130R — inside that interval**, by a
+factor of 2.4. The pre-registered bars of 0.05R and 0.02R are 6x and 16x inside
+it.
+
+**So this result is directional and unreplicated, not a measurement.** The
+verdict stands: a revert needs only a failure to clear a bar, and the seven-chart
+arm failed to clear it. But 0.130R must not be quoted as though it were
+resolved.
+
+**Nearly all the uncertainty is in the control**, which this document already
+suspected in prose and can now be given a number: the PLAN arm's own interval is
+0.098R wide, the RANDOM arm's is 0.301R. The control is 3x the noise of the thing
+it is controlling.
+
+**The printed metric was MARKED, not resolved-only.** The pre-registration above
+defines the primary metric as "resolved trades only". The code computed
+`mean(plan.netR) - mean(control.netR)` over every trade with TIMEOUTs valued at
+their last close, and printed only that. Fixed 27 Aug: the harness now prints
+both, always, from the same `aggregate`. The historical resolved-only edge for
+these two arms **cannot be recomputed** — the per-arm resolved figures were
+recorded but the controls' were not, and re-running is a different window.

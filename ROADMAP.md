@@ -486,3 +486,107 @@ any strategy, not just this one. All of it verified in place:
   bit. It is the control that proves the arm machinery adds nothing.
 - **21 test suites, ~370 tests.** Static count is 360 `it(` blocks; `.each`
   blocks expand at runtime, which accounts for the rest.
+
+---
+
+## 7. The resolution constraint — added 27 Aug 2026
+
+**This is the durable finding of the session and it gates every comparison made
+from here on.**
+
+### The harness measures correctly
+
+`backtest-plans.ts` had never had a positive control. It has one now. The
+harness was copied to a scratch location with only its import paths changed, and
+edges of known strength were planted into the trade outcomes by exact quota
+(Bresenham-spread, so the realised mean tracks the nominal at any trade count).
+Four plants, planted beside recovered:
+
+| plant | planted (closed form) | recovered | miss |
+|---|---|---|---|
+| strong | +0.1977R (n=177) | +0.1977R | 0.00e+0 |
+| weak | +0.0395R (n=177) | +0.0395R | 0.00e+0 |
+| one arm only | +0.1957R (n=92) | +0.1957R on `C_trail_10`, 0.0000R on `BASE_check` | 0.00e+0 |
+| negative | -0.1073R (n=177) | -0.1073R | 0.00e+0 |
+
+It does not attenuate, lose, or invent an edge, and it does not leak a plant
+across arms. **Cooldown re-phasing does not interfere either**: a one-bar change
+to `barsHeld` redraws 58.2% of the walk (103 of 177 trades, n 177 → 171), and
+recovery stays exact against the new n. Re-phasing breaks comparability BETWEEN
+runs; it does not corrupt the measurement WITHIN one.
+
+### But it cannot resolve anything this project has decided on
+
+A 14-day block bootstrap — `holdout.ts:blockBootstrap`, seed 12345, 2000 draws —
+puts a **95% interval 0.318R wide** on edge over random for a 3-coin, 80-day
+window, straddling zero. Six blocks is a coarse resample base; that is a limit
+of the window, not of the code.
+
+| decision | delta it rested on | vs 0.318R |
+|---|---|---|
+| CHARTS_AB — revert 7 charts | 0.130R | 2.4x inside |
+| HIERARCHY_AB — revert hierarchy | 0.200R | 1.6x inside |
+| pre-registered "better" bar | 0.050R | 6x inside |
+| pre-registered "neutral" band | 0.020R | 16x inside |
+
+**Every decision made so far rested on a delta inside the interval.** None of
+them are wrong — both were reverts, and a revert needs only a failure to clear a
+bar — but they are directional and unreplicated, not measurements.
+
+The instability is not theoretical. The same command run twice roughly two hours
+apart, differing only by the candles that arrived in between, moved the headline
+**+0.108R -> +0.056R on three extra trades** (177 -> 178 strategy, 104 -> 106
+control).
+
+**Any future strategy comparison needs one of: a much longer window, more coins,
+or a metric with a tighter interval than edge-over-random.** Adding an input and
+re-running this rig on 80 days of three coins will not settle anything.
+
+### The random control should not decide anything until it is rebuilt
+
+It carries **0.301R of the 0.318R**: the PLAN arm's own interval is 0.098R wide,
+the RANDOM arm's is 0.301R. It also moved 0.044R on three trades when the window
+shifted by hours.
+
+This retires the "not found / unverified" note in §3 under *Split bleed and the
+random control*. The control's spread is now measured, and it is the dominant
+term.
+
+**The known defect** is at `backtest-plans.ts:721`: `allSignals` is pushed
+BEFORE the `STATES` filter on the next line. So the control samples from every
+plan the walk produced — ACTIONABLE, APPROACHING and FAR — while the strategy
+arm takes ACTIONABLE only. The two arms are drawn from different populations,
+which is not what "same plans, random timing" claims. Fix this before quoting
+edge over random as a primary metric again.
+
+### Also landed this session
+
+- **Edge over random now prints BOTH conventions**, resolved-only (the
+  pre-registered primary) and marked, from the same `aggregate`, with the open
+  count and the marking gap. It printed only the marked figure until now, while
+  both pre-registrations defined the primary as resolved-only.
+- **Five silent degradation-to-null sites fixed** — `completedAsOf` (bad
+  duration returned zero candles), `levelsFromCandles` (zero candles / bad spot),
+  `findConfluenceZones` (bad spot), `fibLevels` (NaN anchor), and
+  `FlowCollectorService.fetchWindow` (a changed API shape read as an empty
+  window). Each now throws instead of returning an empty result.
+- **Five found and deliberately NOT fixed**, recorded so they are not
+  rediscovered as news: `levelsFromCandles` with 1-19 candles still warns and
+  returns `[]` and that warning is invisible under `Logger.overrideLogger(false)`
+  (the weakest remaining spot); `calculateBandWidthSeries` returns `[]` below its
+  period, feeding the regime percentile; `mapAt` returns null below 50 candles
+  and the skipped bars are counted nowhere; `run-log.ts:32` returns `[]` for a
+  missing file; `findFirstFill` / `fibAnchors` / `verdict.ts` nulls are genuine
+  "nothing there".
+- **`partial-weights` retired as a golden-set coverage category.**
+  `renormaliseTargetWeights` always sums to 100 for one or more targets, and
+  `buildPlans` no longer emits a zero-target plan, so `targetWeightSum < 100` is
+  unrepresentable. The only five members that ever satisfied it were the
+  zero-target plans that stopped building. A coverage guard that can never be met
+  throws on every future `--extend`.
+- **`pnpm golden` now exits non-zero** on any changed status, any changed netR,
+  or any `NO_PLAN`, and names the dead fixtures. It always exited 0 before, which
+  is how five dead members survived twelve days.
+- **The golden set is in git.** `apps/api/.gitignore` keeps ignoring the bulk
+  result CSVs but tracks `golden-set*.json`, so the drift detector and its three
+  archives no longer exist only on one laptop.

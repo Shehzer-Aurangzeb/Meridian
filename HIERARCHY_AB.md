@@ -186,3 +186,50 @@ degradation-to-null found this session, after `TIMEFRAME_MS` missing 15m/30m
 and `completedAsOf` returning zero candles on a NaN duration. The pattern is
 the same each time and it is the exact failure mode this project has already
 had to retract a result over.
+
+---
+
+# Appended 27 Aug 2026 — what the instrument can actually resolve
+
+Nothing above is edited. This records what was learned about the harness AFTER
+these numbers were produced, and it changes how they should be quoted.
+
+**The harness measures correctly.** `backtest-plans.ts` had never had a positive
+control. It has one now: the harness was copied to a scratch location with only
+its import paths changed, and edges of known strength were planted into the
+trade outcomes by exact quota. All four recovered to the digit — a strong plant
+(+0.1977R planted, +0.1977R recovered), a weak one at the scale this project
+argues about (+0.0395R planted, +0.0395R recovered), a plant present in the
+trailing arm only (+0.1957R recovered on `C_trail_10` while `BASE_check` stayed
+at exactly 0.0000R), and a negative plant (-0.1073R planted, -0.1073R
+recovered). **Miss on every one: 0.00e+0R.** The harness does not attenuate,
+lose, or invent an edge.
+
+**But it cannot resolve differences of this size.** A 14-day block bootstrap —
+the project's own `holdout.ts:blockBootstrap`, seed 12345, 2000 draws — puts a
+**95% interval 0.318R wide** on edge over random for this window, straddling
+zero. Six blocks over 80 days is a coarse resample base, and that is a limit of
+the window rather than of the code.
+
+**The delta this document rests on is 0.200R — inside that interval** (+0.064R
+for three pooled against -0.136R here). The pre-registered rows at +0.064R and
++0.020R are further inside still.
+
+**So this result is directional and unreplicated, not a measurement.** The
+verdict stands — WORSE, revert — because a revert needs only a failure to clear
+a bar, and this arm failed to clear it by a wide margin in the recorded
+direction. But -0.136R must not be quoted as though it were resolved.
+
+**Nearly all the uncertainty is in the control**, which the "read this with
+heavy care" section above already argued from its trade count and can now be
+given a number: the PLAN arm's own interval is 0.098R wide, the RANDOM arm's is
+0.301R.
+
+**The printed metric was MARKED, not resolved-only.** The pre-registration above
+defines the primary metric as "resolved trades only", and this arm is where that
+matters most: 22% open and a marking gap of 0.168R, double the other arms.
+Fixed 27 Aug: the harness now prints both, always, from the same `aggregate`.
+For this arm the resolved-only edge IS recoverable from the numbers recorded
+above — -0.205R for the strategy against +0.087R for the control is **-0.292R**,
+against the marked -0.136R. Resolved-only makes this arm look **worse**, not
+better, so the WORSE verdict is reinforced rather than weakened.
