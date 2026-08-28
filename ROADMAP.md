@@ -726,12 +726,23 @@ So five years of history in Neon would cost 6.5 GB to serve nobody.
   container on the `infra_postgres_data` volume). 28,413,765 rows, 4.8 GB.
   Every experiment — `volsignal.ts`, `backtest-plans.ts`, the decile harness —
   already runs locally, which is where the data now is.
-- **Production keeps collecting forward, unchanged.** The collector writes the
-  same six metrics to Neon on its schedule. At ~230 bytes/row and 5-minute
-  density for three of them, that is roughly 1 MB per coin per month — about
-  120 MB/year for ten coins against the 512 MB cap. **That is a real ceiling,
-  not a comfortable one: roughly three years, less if metrics are added.** When
-  it approaches, drain Neon into local and truncate rather than upgrading.
+- **Production keeps collecting forward — but the 5m change put it on a clock.**
+  Three metrics now collect at 5m and two at 1h: `288x3 + 24x2 = 912` rows per
+  coin per day, **9,120 rows/day** for ten coins. At the measured 241 bytes/row
+  that is **62.8 MB/month, 764 MB/year** — and from today's ~15 MB it **fills
+  the 512 MB cap in about 7.9 months**.
+
+  Before the 5m change it was 960 rows/day and 80 MB/year: roughly six years of
+  headroom. **The density fix cut the runway from ~6 years to ~8 months.** That
+  is the right trade — the archive join needs 5m and the seam is real — but it
+  is a deadline, not a footnote.
+
+  Two levers when it approaches, in order: **drain Neon into local and truncate**
+  (the archive lives locally anyway, so this is the natural rhythm and costs
+  nothing), or **intern `metric` to a small int**, which the size breakdown says
+  is worth roughly half the bytes. Raising the plan is the third option, not the
+  first. Do NOT reach for `DEFAULT_BACKFILL_DAYS` — a smaller window re-fetches
+  fewer rows but stores exactly the same ones, so it changes nothing here.
 - **The two databases are not replicas and must not be confused.** Local holds
   archive + whatever it has been given; Neon holds the live forward collection
   only. They share a schema and a convention, so a row from either is directly
