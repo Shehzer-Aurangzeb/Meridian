@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatRelative } from '@/lib/format';
-import { bucketOf } from '@/lib/history-buckets';
 import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
 
 /**
@@ -160,7 +159,7 @@ export function AnalysisCard({ entry, livePrice, preEpoch, onOpen }: AnalysisCar
 
   const price = livePrice ?? status.currentPrice;
   const dp = decimalsFor(price || 1);
-  const bucket = bucketOf(status);
+  const bucket = status.bucket;
   const netR = status.netR;
   const drift = status.plan
     ? ((price - status.plan.averageEntry) / status.plan.averageEntry) * 100

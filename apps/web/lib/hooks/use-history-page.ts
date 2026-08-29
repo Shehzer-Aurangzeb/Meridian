@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAnalyses } from '@/lib/hooks/use-analyses';
+import { useAnalysesPages, useAnalysesStats } from '@/lib/hooks/use-analyses';
 import { useLivePrices } from '@/lib/hooks/use-live-prices';
-import { bucketOf, summariseResults, type Bucket } from '@/lib/history-buckets';
+import type { Bucket } from '@/lib/history-buckets';
 import type { AnalysisListItem } from '@/types/analyses';
 import {
   DEFAULT_FILTERS,
@@ -13,48 +13,53 @@ import {
 } from '@/components/features/history/filter-bar';
 
 /**
- * Fetches one window of analyses, then filters and sorts them in the browser.
+ * The history page: rows a page at a time, scoreboard in its own request.
  *
- * The fetch asks for a DATE RANGE rather than a number of rows: a row limit
- * silently drops the oldest ones and makes every total on the page wrong.
- *
- * Filtering by outcome happens here rather than on the server because an
- * outcome is worked out by replaying prices, not stored in a column.
+ * Coin and bucket filters go to the SERVER. Filtering here would only ever see
+ * the pages already loaded, so "no losing trades" would mean "none on page one".
+ * Search stays local — it is a substring match on rows already on screen.
  */
-const FETCH_LIMIT = 1000;
-const PAGE_SIZE = 20;
-
 export function useHistoryPage() {
   const router = useRouter();
   const [filters, setFiltersState] = useState<HistoryFilters>(DEFAULT_FILTERS);
   const [bucket, setBucket] = useState<Bucket | 'all'>('all');
-  const [visible, setVisible] = useState(PAGE_SIZE);
 
-  const { data, isLoading, error } = useAnalyses({
-    limit: FETCH_LIMIT,
-    days: RANGE_DAYS[filters.dateRange],
+  const days = RANGE_DAYS[filters.dateRange];
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useAnalysesPages({
+    days,
     status: true,
+    bucket,
+    symbol: filters.coin === 'all' ? undefined : filters.coin,
   });
 
-  const rows = useMemo(() => data?.analyses ?? [], [data]);
+  // Independent of the rows: the numbers appear without waiting for a page.
+  const stats = useAnalysesStats({ days });
+
+  const rows = useMemo(
+    () => data?.pages.flatMap((p) => p.analyses) ?? [],
+    [data],
+  );
+  const epoch = data?.pages[0]?.epoch ?? stats.data?.epoch;
+
   const coins = useMemo(
     () => Array.from(new Set(rows.map((r) => r.symbol))).sort(),
     [rows],
   );
 
-  // One socket for every coin on the page, regardless of what is filtered —
-  // reconnecting on every filter change would cost more than the idle stream.
+  // One socket for every coin on screen, regardless of filter — reconnecting
+  // on every filter change would cost more than the idle stream.
   const { prices, connected } = useLivePrices(coins);
 
-  const matched = useMemo(() => {
+  const entries = useMemo(() => {
     const search = filters.search.trim().toUpperCase();
-
-    const result = rows.filter((row) => {
-      if (search && !row.symbol.includes(search)) return false;
-      if (filters.coin !== 'all' && row.symbol !== filters.coin) return false;
-      if (bucket !== 'all' && bucketOf(row.status) !== bucket) return false;
-      return true;
-    });
+    const matched = search ? rows.filter((r) => r.symbol.includes(search)) : rows;
 
     // Unscored rows sort last under an R sort — they have no R to rank on.
     const byR = (a: AnalysisListItem, b: AnalysisListItem, dir: 1 | -1) => {
@@ -68,51 +73,46 @@ export function useHistoryPage() {
 
     switch (filters.sort) {
       case 'oldest':
-        return [...result].reverse();
+        return [...matched].reverse();
       case 'best':
-        return [...result].sort((a, b) => byR(a, b, 1));
+        return [...matched].sort((a, b) => byR(a, b, 1));
       case 'worst':
-        return [...result].sort((a, b) => byR(a, b, -1));
+        return [...matched].sort((a, b) => byR(a, b, -1));
       default:
-        return result; // already newest-first from the API
+        return matched; // already newest-first from the API
     }
-  }, [rows, filters, bucket]);
+  }, [rows, filters.search, filters.sort]);
 
-  // The scoreboard describes the FETCHED window, not the current filter — the
-  // funnel is only honest if it counts the analyses that never started too.
-  const summary = useMemo(() => summariseResults(rows, data?.epoch), [rows, data?.epoch]);
-
-  const entries = useMemo(() => matched.slice(0, visible), [matched, visible]);
-  const hasMore = visible < matched.length;
-
-  // Infinite scroll: a sentinel below the last card asks for the next slice.
+  // Infinite scroll: a sentinel below the last card asks for the next page.
   const sentinel = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const node = sentinel.current;
-    if (!node || !hasMore) return;
+    if (!node || !hasNextPage || isFetchingNextPage) return;
     const observer = new IntersectionObserver(
-      ([e]) => e.isIntersecting && setVisible((v) => v + PAGE_SIZE),
+      ([e]) => e.isIntersecting && void fetchNextPage(),
       { rootMargin: '400px' },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMore, matched.length]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, rows.length]);
 
-  const resetView = useCallback(() => setVisible(PAGE_SIZE), []);
+  const resetView = useCallback(() => window.scrollTo({ top: 0 }), []);
 
   return {
-    summary,
-    epoch: data?.epoch,
-    truncated: data?.truncated ?? false,
+    summary: stats.data ?? null,
+    summaryLoading: stats.isLoading,
+    epoch,
     entries,
     coins,
     prices,
     livePricesConnected: connected,
-    totalFiltered: matched.length,
+    /** Rows loaded so far. The scoreboard's `total` is the real count. */
     totalFetched: rows.length,
+    totalFiltered: entries.length,
     filters,
     bucket,
-    hasMore,
+    hasMore: hasNextPage,
+    loadingMore: isFetchingNextPage,
     sentinel,
     isLoading,
     error: error?.message ?? null,

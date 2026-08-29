@@ -94,10 +94,11 @@ async function verify(prisma: PrismaClient, binance: BinanceService): Promise<vo
   /** Disagreements on a plan that is finished. These must be zero. */
   const hard: string[] = [];
   /**
-   * Disagreements on a plan that is still OPEN. An open trade is valued at the
-   * last close the scorer saw, so its R moves whenever the live hour does —
-   * comparing a stored mark against a fresh one is comparing two clocks, not
-   * two computations. Reported separately, never counted as agreement.
+   * Movement on a plan that is still OPEN. NOTHING about an open trade is
+   * fixed: its R is a mark at the last close, its barsHeld grows with every
+   * bar, and a further entry step can still fill. Comparing a stored open
+   * trade against a fresh one compares two clocks, not two computations.
+   * Reported separately, never counted as agreement.
    */
   const marks: string[] = [];
   const byField: Record<string, number> = {};
@@ -166,10 +167,9 @@ async function verify(prisma: PrismaClient, binance: BinanceService): Promise<vo
             const line =
               `${row.id} plan[${k}].${f} (${stored[k].outcome}): ` +
               `stored ${JSON.stringify(stored[k][f])} != scorer ${JSON.stringify(fresh[k][f])}`;
-            // An open trade may legitimately move on r/netR alone. Anything
-            // else about it — its status, its fill, its target count — is as
-            // fixed as a closed trade's and belongs in `hard`.
-            if (open && (f === 'r' || f === 'netR')) {
+            // Only `direction` is fixed on an open trade; everything else is
+            // still being decided.
+            if (open && f !== 'direction') {
               marks.push(line);
             } else {
               byField[f] = (byField[f] ?? 0) + 1;

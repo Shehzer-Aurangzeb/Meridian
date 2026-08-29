@@ -101,10 +101,11 @@ export class BinanceService {
     let cursor = startTime;
 
     while (byTime.size < limit) {
+      const asked = Math.min(PAGE, limit - byTime.size);
       const page = await this.fetchCandlesFromBinance(
         tradingPair,
         interval,
-        Math.min(PAGE, limit - byTime.size),
+        asked,
         3,
         undefined,
         cursor,
@@ -113,6 +114,11 @@ export class BinanceService {
 
       const newest = page[page.length - 1].time.getTime();
       for (const c of page) byTime.set(c.time.getTime(), c);
+      // A short page IS the live edge: klines returns everything it has from
+      // startTime up to the limit. Asking again only ever returned nothing —
+      // one wasted request and a 120ms sleep for every analysis newer than the
+      // window, which is exactly the set the scoring job re-reads.
+      if (page.length < asked) break;
       // No forward progress means we have reached the live edge.
       if (newest < cursor) break;
       cursor = newest + 1;

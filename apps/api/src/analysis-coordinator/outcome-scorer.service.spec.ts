@@ -116,12 +116,42 @@ describe('outcomeColumns', () => {
 describe('OutcomeScorerService', () => {
   const now = new Date('2026-08-20T00:00:00Z').getTime();
 
+  it('refreshOpen never throws — a dead exchange is an old number, not a dead page', async () => {
+    const prisma = {
+      coordinatorRun: { findMany: jest.fn(async () => { throw new Error('db down'); }) },
+    } as unknown as PrismaService;
+    const scorer = new OutcomeScorerService(prisma, {} as unknown as BinanceService);
+    await expect(scorer.refreshOpen()).resolves.toBeNull();
+  });
+
+  it('refreshOpen de-duplicates concurrent readers into one pass', async () => {
+    const { prisma, binance } = fakes([]);
+    const scorer = new OutcomeScorerService(prisma, binance);
+    await Promise.all([scorer.refreshOpen(), scorer.refreshOpen(), scorer.refreshOpen()]);
+    expect((prisma.coordinatorRun.findMany as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
   it('asks only for rows that are unsettled or can still move', async () => {
     const { prisma, binance } = fakes([]);
     await new OutcomeScorerService(prisma, binance).scoreUnresolved({ now });
 
     const where = (prisma.coordinatorRun.findMany as jest.Mock).mock.calls[0][0].where;
-    expect(where.OR).toEqual([{ scoredAt: null }, { outcome: { in: ['PENDING', 'OPEN'] } }]);
+    expect(where.OR).toEqual([
+      { scoredAt: null },
+      { outcome: { in: ['PENDING', 'OPEN', 'UNSCOREABLE'] } },
+    ]);
+  });
+
+  it('only refreshes an open trade once its mark has gone stale', async () => {
+    const { prisma, binance } = fakes([]);
+    await new OutcomeScorerService(prisma, binance).scoreUnresolved({ now, staleAfterMs: 120_000 });
+
+    const where = (prisma.coordinatorRun.findMany as jest.Mock).mock.calls[0][0].where;
+    // Without this every page load re-fetches every open trade.
+    expect(where.OR[1]).toEqual({
+      outcome: { in: ['PENDING', 'OPEN', 'UNSCOREABLE'] },
+      scoredAt: { lt: new Date(now - 120_000) },
+    });
   });
 
   it('REFUSES to re-score a settled terminal row', async () => {
@@ -186,7 +216,7 @@ describe('OutcomeScorerService', () => {
     expect(updateMany[0].data.scoredAt).toEqual(new Date(now));
   });
 
-  it('leaves scoredAt null when the window could not be loaded, so it retries', async () => {
+  it('retries a failed fetch rather than freezing it as a verdict', async () => {
     const { prisma, updates } = fakes([
       {
         id: 'row_1',
@@ -207,11 +237,10 @@ describe('OutcomeScorerService', () => {
 
     expect(res.unscoreable).toBe(1);
     expect(res.scored).toBe(0);
-    // The badge is honest about it...
+    // The badge is honest about it, and UNSCOREABLE is in MOVING, so the next
+    // run past the staleness window picks it up again.
     expect(updates[0].data.outcome).toBe('UNSCOREABLE');
-    // ...but it is NOT settled. A dropped connection is a transport failure,
-    // not a verdict, so the next run tries again instead of freezing it.
-    expect(updates[0].data.scoredAt).toBeNull();
+    expect(isTerminalOutcome('UNSCOREABLE')).toBe(false);
   });
 
   it('scores one result per plan, in plan order', async () => {

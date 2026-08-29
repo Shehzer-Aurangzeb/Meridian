@@ -13,6 +13,7 @@ import { AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { OutcomeScorerService } from './outcome-scorer.service';
 import { AnalysisStatusService } from './analysis-status.service';
+import { AnalysisStatsService } from './analysis-stats.service';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AnalysisStatusService } from './analysis-status.service';
     CoordinatorPersistenceService,
     OutcomeScorerService,
     AnalysisStatusService,
+    AnalysisStatsService,
   ],
   exports: [
     AnalysisCoordinatorService,
@@ -39,6 +41,7 @@ import { AnalysisStatusService } from './analysis-status.service';
     CoordinatorPersistenceService,
     OutcomeScorerService,
     AnalysisStatusService,
+    AnalysisStatsService,
   ],
 })
 export class AnalysisCoordinatorModule {}

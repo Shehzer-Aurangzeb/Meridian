@@ -20,7 +20,13 @@ export const queryKeys = {
         filter.limit ?? null,
         filter.days ?? null,
         filter.status ?? false,
+        filter.bucket ?? 'all',
       ] as const,
+    /** Paged list. A different key from `list` — the cached shape differs. */
+    pages: (filter: AnalysesFilter) =>
+      ['pages' as const, ...queryKeys.analyses.list(filter).slice(1)] as const,
+    stats: (filter: { symbol?: string; days?: number }) =>
+      [...queryKeys.analyses.all, 'stats', filter.symbol ?? null, filter.days ?? null] as const,
     detail: (id: string) => [...queryKeys.analyses.all, 'detail', id] as const,
   },
 

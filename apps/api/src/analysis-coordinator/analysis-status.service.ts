@@ -6,6 +6,7 @@ import { AnalysisRecord } from './analyze.service';
 import { analysisFreshness, Freshness } from './freshness';
 import { PlanOutcome, PlanResult } from './outcome';
 import { leadPlan } from './verdict';
+import { Bucket, bucketOf } from './buckets';
 
 /** A stored result, as it comes back out of JSONB — filledAt is a string, not a Date. */
 export type StoredResult = Omit<PlanResult, 'filledAt'> & { filledAt: string | null };
@@ -21,6 +22,9 @@ export interface AnalysisStatus {
   freshness: Freshness;
   filledAt: string | null;
   targetsHit: number;
+  /** Which scoreboard group this row belongs to. Decided here so the card and
+   *  the scoreboard can never put the same row in two places. */
+  bucket: Bucket;
   currentPrice: number;
   /** When the outcome was worked out. An OPEN trade's netR is only as fresh as this. */
   scoredAt: string | null;
@@ -142,6 +146,7 @@ export class AnalysisStatusService {
           netR: null,
           filledAt: null,
           targetsHit: 0,
+          bucket: bucketOf(null, null),
           plan: null,
         });
         continue;
@@ -161,6 +166,7 @@ export class AnalysisStatusService {
         netR: scored.netR,
         filledAt: scored.filledAt,
         targetsHit: scored.targetsHit,
+        bucket: bucketOf(scored.outcome, scored.netR),
         plan: {
           entries: lead.entries.map((e) => e.price),
           averageEntry: lead.averageEntry,

@@ -1,41 +1,84 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchApi, RequestError } from '@/lib/api/client';
 import type {
+  AnalysesStats,
   AnalysisDetail,
   AnalysisListResponse,
   RunAnalysisResponse,
   SavedNarration,
 } from '@/types/analyses';
+import type { Bucket } from '@/lib/history-buckets';
 import { queryKeys } from './query-keys';
 
 export interface AnalysesFilter {
   symbol?: string;
-  /** Backend default 50, max 1000. */
+  /** Rows per page. Backend default 20. */
   limit?: number;
   /** Only analyses from the last N days — a window, not a silent row cap. */
   days?: number;
   /**
-   * Score every row: outcome, R, freshness, and the plan geometry a card
-   * draws. Costs the backend one price and one candle fetch PER COIN, so leave
-   * it off wherever the rows are only being counted.
+   * Include outcome, R, freshness and the plan geometry a card draws. Costs
+   * the backend a price per coin, so leave it off where rows are only counted.
    */
   status?: boolean;
+  /** Filter by scoreboard group. Applied in SQL, so it spans every page. */
+  bucket?: Bucket | 'all';
 }
 
-export function useAnalyses(filter: AnalysesFilter = {}) {
+function toQuery(filter: AnalysesFilter, cursor?: string): string {
   const params = new URLSearchParams();
   if (filter.symbol) params.set('symbol', filter.symbol.toUpperCase());
   if (filter.limit) params.set('limit', String(filter.limit));
   if (filter.days) params.set('days', String(filter.days));
   if (filter.status) params.set('status', 'true');
-  const query = params.toString();
+  if (filter.bucket && filter.bucket !== 'all') params.set('bucket', filter.bucket);
+  if (cursor) params.set('cursor', cursor);
+  const q = params.toString();
+  return q ? `?${q}` : '';
+}
 
+/** One page. Used where a fixed number of rows is wanted and nothing more. */
+export function useAnalyses(filter: AnalysesFilter = {}) {
   return useQuery({
     queryKey: queryKeys.analyses.list(filter),
-    queryFn: () =>
-      fetchApi<AnalysisListResponse>(`/api/analyses${query ? `?${query}` : ''}`),
+    queryFn: () => fetchApi<AnalysisListResponse>(`/api/analyses${toQuery(filter)}`),
+  });
+}
+
+/**
+ * The history list, a page at a time.
+ *
+ * Cursor rather than offset: three analyses are saved a day, so rows arrive
+ * between requests, and offset paging would repeat or skip a row every time
+ * one did.
+ */
+export function useAnalysesPages(filter: AnalysesFilter = {}) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.analyses.pages(filter),
+    queryFn: ({ pageParam }) =>
+      fetchApi<AnalysisListResponse>(`/api/analyses${toQuery(filter, pageParam)}`),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // Someone who scrolls a long way should not hold every page they passed.
+    maxPages: 10,
+  });
+}
+
+/**
+ * The scoreboard. Its own request, so the numbers land without waiting for
+ * rows — and it counts the whole window, not the page on screen.
+ */
+export function useAnalysesStats(filter: Pick<AnalysesFilter, 'symbol' | 'days'> = {}) {
+  const params = new URLSearchParams();
+  if (filter.symbol) params.set('symbol', filter.symbol.toUpperCase());
+  if (filter.days) params.set('days', String(filter.days));
+  const q = params.toString();
+
+  return useQuery({
+    queryKey: queryKeys.analyses.stats(filter),
+    queryFn: () => fetchApi<AnalysesStats>(`/api/analyses/stats${q ? `?${q}` : ''}`),
   });
 }
 

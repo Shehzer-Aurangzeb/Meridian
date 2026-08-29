@@ -1,11 +1,11 @@
-import type { AnalysisListItem, AnalysisStatus } from '@/types/analyses';
+import type { AnalysisListItem } from '@/types/analyses';
 
 /**
- * Where an analysis stands, in a handful of groups that answer "how is this
- * going" without opening it.
+ * Where an analysis stands, in the groups the scoreboard shows.
  *
- * Won or lost is decided AFTER fees. Before fees the same set of trades can
- * look profitable while actually losing money.
+ * The BACKEND decides which bucket a row is in — it arrives on `status.bucket`
+ * and in the stats response. This file only names them, so the card and the
+ * scoreboard cannot disagree about the same row.
  */
 export type Bucket =
   | 'openUp'
@@ -14,12 +14,8 @@ export type Bucket =
   | 'lostClosed'
   | 'neverStarted'
   | 'tooEarly'
-  /**
-   * Filled, held the full 72h, and never reached a target or the stop. Its own
-   * bucket rather than won/lost by sign, because the R is a MARK, not a
-   * realised exit — folding it into "closed, won" is the survivorship error
-   * that made the live scoreboard read better than the backtest.
-   */
+  /** Held the full window, no target and no stop. Its own group because the R
+   *  is a MARK, not a realised exit. */
   | 'expired'
   | 'unscored';
 
@@ -34,98 +30,9 @@ export const BUCKET_LABEL: Record<Bucket, string> = {
   unscored: 'No plan',
 };
 
-export function bucketOf(status: AnalysisStatus | null | undefined): Bucket {
-  if (!status?.outcome) return 'unscored';
-  switch (status.outcome) {
-    case 'PENDING':
-      return 'tooEarly';
-    case 'MISSED':
-      return 'neverStarted';
-    case 'OPEN':
-      return (status.netR ?? 0) >= 0 ? 'openUp' : 'openDown';
-    case 'STOPPED':
-      return 'lostClosed';
-    case 'ALL_TARGETS':
-      return 'wonClosed';
-    case 'PARTIAL':
-      return (status.netR ?? 0) >= 0 ? 'wonClosed' : 'lostClosed';
-    case 'EXPIRED':
-      return 'expired';
-    // No candles, no verdict. Counted nowhere visible, so it cannot flatter or
-    // damage the split — it is absent, and absent is the honest reading.
-    case 'UNSCOREABLE':
-      return 'unscored';
-    default:
-      return 'unscored';
-  }
-}
-
-/** Was this analysis produced before the planner boundary? */
+/** Was this built before the planner boundary? Shown, but left out of totals. */
 export function isPreEpoch(row: AnalysisListItem, epoch: string | undefined): boolean {
   return epoch !== undefined && Date.parse(row.createdAt) < Date.parse(epoch);
-}
-
-export interface ResultsSummary {
-  counts: Record<Bucket, number>;
-  /** Sum of net R over everything that filled. */
-  netR: number;
-  total: number;
-  filled: number;
-  closed: number;
-  /**
-   * Rows left out of every number above because an older planner built them.
-   * Reported rather than quietly dropped: a total that silently covers fewer
-   * rows than the list below it is the same lie as hiding the rows outright.
-   */
-  excluded: number;
-}
-
-/**
- * The totals matter as much as the split, so callers must show how many
- * analyses there were and how many actually opened, next to the groups.
- *
- * `epoch` leaves older analyses OUT of these numbers while they stay visible
- * in the list: they were built by code with known bugs, so averaging them with
- * current ones describes neither.
- */
-export function summariseResults(
-  rows: AnalysisListItem[],
-  epoch?: string,
-): ResultsSummary {
-  const counts: Record<Bucket, number> = {
-    openUp: 0,
-    openDown: 0,
-    wonClosed: 0,
-    lostClosed: 0,
-    expired: 0,
-    neverStarted: 0,
-    tooEarly: 0,
-    unscored: 0,
-  };
-  let netR = 0;
-  let filled = 0;
-  let closed = 0;
-  let excluded = 0;
-
-  for (const row of rows) {
-    if (isPreEpoch(row, epoch)) {
-      excluded += 1;
-      continue;
-    }
-    const bucket = bucketOf(row.status);
-    counts[bucket] += 1;
-    if (row.status?.netR != null) {
-      netR += row.status.netR;
-      filled += 1;
-      // Expired counts as closed — the position is over. It just has no verdict.
-      if (bucket === 'wonClosed' || bucket === 'lostClosed' || bucket === 'expired') {
-        closed += 1;
-      }
-    }
-  }
-
-  // `total` is what the numbers describe, not how many rows were handed in.
-  return { counts, netR, total: rows.length - excluded, filled, closed, excluded };
 }
 
 /** The buckets a status filter offers, in the order they read best. */

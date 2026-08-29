@@ -14,6 +14,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { AnalysisStatusService, resultsFor, StoredResult } from './analysis-status.service';
+import { AnalysesStats, AnalysisStatsService } from './analysis-stats.service';
+import { Bucket, BUCKETS, bucketWhere } from './buckets';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
 import { PlanResult } from './outcome';
@@ -56,17 +58,62 @@ function windowStart(days: string | undefined): Date {
   );
 }
 
+/**
+ * Rows per page. 20 because that is what the history page renders before you
+ * scroll; asking for more ships bytes nobody reads. The 1000 ceiling stays for
+ * the dashboard, which still counts rows in one go.
+ */
+const DEFAULT_PAGE = 20;
+
 /** Nonsense limits fall back to the default rather than clamping to 1 row. */
 function pageSize(limit: string | undefined): number {
   const n = Number(limit);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : 50;
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : DEFAULT_PAGE;
 }
 
 /**
+ * A place in the list: a timestamp plus an id.
+ *
+ * The id is not decoration. Three analyses are saved in the same batch and can
+ * share a `createdAt` to the millisecond; without a tiebreak the page boundary
+ * lands in the middle of them and a row is repeated or skipped.
+ */
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  return `${row.createdAt.toISOString()}_${row.id}`;
+}
+
+function decodeCursor(raw: string): { createdAt: Date; id: string } {
+  const at = raw.indexOf('_');
+  const createdAt = new Date(raw.slice(0, at));
+  const id = raw.slice(at + 1);
+  if (at < 0 || Number.isNaN(createdAt.getTime()) || !id) {
+    throw new HttpException('Invalid cursor', HttpStatus.BAD_REQUEST);
+  }
+  return { createdAt, id };
+}
+
+/** Everything strictly older than the cursor, ordered the same way. */
+function afterCursor(raw: string): Prisma.CoordinatorRunWhereInput {
+  const { createdAt, id } = decodeCursor(raw);
+  return {
+    OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: id } }],
+  };
+}
+
+const ORDER: Prisma.CoordinatorRunOrderByWithRelationInput[] = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
+/**
  *   POST /analyses?symbol=BTC   run one analysis and save it
- *   GET  /analyses              list saved analyses, newest first
+ *   GET  /analyses              one page of analyses, newest first
+ *   GET  /analyses/stats        counts and net R across the whole window
  *   GET  /analyses/:id          one analysis in full
  *   POST /analyses/:id/narrate  write (or return) Claude's read of it
+ *
+ * `stats` is declared before `:id` on purpose — Nest matches in order, and the
+ * other way round every request for it reads an analysis called "stats".
  */
 @ApiTags('analyses')
 @Controller('analyses')
@@ -76,6 +123,7 @@ export class AnalysesController {
     private readonly persistence: CoordinatorPersistenceService,
     private readonly prisma: PrismaService,
     private readonly status: AnalysisStatusService,
+    private readonly statsService: AnalysisStatsService,
     private readonly narrator: AnalystNarrationService,
     private readonly scorer: OutcomeScorerService,
   ) {}
@@ -95,37 +143,58 @@ export class AnalysesController {
     return { id, analysis };
   }
 
-  @Get()
-  @ApiOperation({ summary: 'List saved analyses, newest first' })
-  async list(
-    @Query('symbol') symbol?: string,
-    @Query('limit') limit?: string,
-    @Query('status') status?: string,
-    @Query('days') days?: string,
-  ): Promise<{
-    count: number;
-    analyses: unknown[];
-    truncated: boolean;
-    from: string;
-    epoch: string;
-  }> {
-    const where: Prisma.CoordinatorRunWhereInput = {};
+  /** The filters both the list and the scoreboard share. */
+  private windowWhere(symbol?: string, days?: string): Prisma.CoordinatorRunWhereInput {
+    const where: Prisma.CoordinatorRunWhereInput = { createdAt: { gte: windowStart(days) } };
     if (symbol) {
       const coin = validSymbol(symbol);
       if (!coin) throw new HttpException('Invalid symbol', HttpStatus.BAD_REQUEST);
       where.symbol = coin;
     }
+    return where;
+  }
 
+  @Get()
+  @ApiOperation({ summary: 'One page of saved analyses, newest first' })
+  async list(
+    @Query('symbol') symbol?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('days') days?: string,
+    @Query('cursor') cursor?: string,
+    @Query('bucket') bucket?: string,
+  ): Promise<{
+    count: number;
+    analyses: unknown[];
+    /** Pass back as `?cursor=` for the next page. Null when there are no more. */
+    nextCursor: string | null;
+    from: string;
+    epoch: string;
+  }> {
     const from = windowStart(days);
-    where.createdAt = { gte: from };
+    const where = this.windowWhere(symbol, days);
     const take = pageSize(limit);
 
-    // The payloads are large and only needed to build `status`.
+    // Filtering happens in SQL, not in the browser: with paging, a filter
+    // applied after the fact only ever sees the page it was given.
+    const filters: Prisma.CoordinatorRunWhereInput[] = [];
+    if (bucket && bucket !== 'all') {
+      if (!BUCKETS.includes(bucket as Bucket)) {
+        throw new HttpException('Unknown bucket', HttpStatus.BAD_REQUEST);
+      }
+      filters.push(bucketWhere(bucket as Bucket));
+    }
+    if (cursor) filters.push(afterCursor(cursor));
+    if (filters.length > 0) where.AND = filters;
+
     const wantStatus = status === 'true' || status === '1';
-    const analyses = await this.prisma.coordinatorRun.findMany({
+    if (wantStatus) await this.scorer.refreshOpen();
+
+    // One extra row, purely to learn whether another page exists.
+    const rows = await this.prisma.coordinatorRun.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
-      take,
+      orderBy: ORDER,
+      take: take + 1,
       select: {
         id: true,
         symbol: true,
@@ -141,23 +210,44 @@ export class AnalysesController {
       },
     });
 
-    // A full page means there may be more. Say so, rather than let a total
-    // quietly describe only part of the data.
-    const truncated = analyses.length === take;
+    const page = rows.slice(0, take);
+    const nextCursor = rows.length > take && page.length > 0 ? encodeCursor(page[page.length - 1]) : null;
     const window = { from: from.toISOString(), epoch: RESULTS_EPOCH.toISOString() };
 
-    if (!wantStatus) return { count: analyses.length, analyses, truncated, ...window };
+    if (!wantStatus) {
+      return { count: page.length, analyses: page, nextCursor, ...window };
+    }
 
-    const statuses = await this.status.build(analyses);
+    const statuses = await this.status.build(page);
     return {
-      count: analyses.length,
-      truncated,
+      count: page.length,
+      nextCursor,
       ...window,
-      analyses: analyses.map(({ coordinatorPayload, outcomePayload, scoredAt, ...row }) => ({
+      analyses: page.map(({ coordinatorPayload, outcomePayload, scoredAt, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,
       })),
     };
+  }
+
+  /**
+   * The scoreboard, over the WHOLE window rather than the page on screen.
+   *
+   * Separate from the list so the numbers appear without waiting for rows, and
+   * so a page of 20 does not have to become a page of 603 to be counted.
+   */
+  @Get('stats')
+  @ApiOperation({ summary: 'Counts and net R across every analysis in the window' })
+  async stats(
+    @Query('symbol') symbol?: string,
+    @Query('days') days?: string,
+  ): Promise<AnalysesStats> {
+    await this.scorer.refreshOpen();
+    return this.statsService.build(
+      this.windowWhere(symbol, days),
+      RESULTS_EPOCH,
+      windowStart(days),
+    );
   }
 
   @Get(':id')

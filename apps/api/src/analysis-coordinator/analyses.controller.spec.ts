@@ -9,6 +9,7 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { OutcomeScorerService } from './outcome-scorer.service';
 import { AnalysisStatusService } from './analysis-status.service';
+import { AnalysisStatsService } from './analysis-stats.service';
 import { AnalysisCoordinatorModule } from './analysis-coordinator.module';
 
 const payload = {
@@ -56,7 +57,7 @@ describe('AnalysesController', () => {
   const analyzer = { analyze: jest.fn() };
   const persistence = { persistAnalysis: jest.fn() };
   const narrator = { narrate: jest.fn() };
-  const scorer = { scoreUnresolved: jest.fn() };
+  const scorer = { scoreUnresolved: jest.fn(), refreshOpen: jest.fn() };
 
   const controller = new AnalysesController(
     analyzer as unknown as AnalyzeService,
@@ -66,6 +67,7 @@ describe('AnalysesController', () => {
       prisma as unknown as PrismaService,
       binance as unknown as BinanceService,
     ),
+    new AnalysisStatsService(prisma as unknown as PrismaService),
     narrator as unknown as AnalystNarrationService,
     scorer as unknown as OutcomeScorerService,
   );
@@ -112,12 +114,19 @@ describe('AnalysesController', () => {
     );
     expect(asked.from).toBe((gte as Date).toISOString());
 
-    // Exactly `take` rows back means there may be more the caller cannot see —
-    // a scoreboard built on a silently truncated list describes a subset.
-    prisma.coordinatorRun.findMany.mockResolvedValue(new Array(50).fill({ id: 'x' }));
-    expect((await controller.list()).truncated).toBe(true);
-    prisma.coordinatorRun.findMany.mockResolvedValue([{ id: 'x' }]);
-    expect((await controller.list()).truncated).toBe(false);
+    // A full page plus one means there is another page. The extra row is asked
+    // for and then dropped — it exists only to answer that question.
+    const full = Array.from({ length: 21 }, (_, i) => ({
+      id: `x${i}`,
+      createdAt: new Date(1000 - i),
+    }));
+    prisma.coordinatorRun.findMany.mockResolvedValue(full);
+    const page = await controller.list();
+    expect(page.count).toBe(20);
+    expect(page.nextCursor).toBe(`${new Date(981).toISOString()}_x19`);
+
+    prisma.coordinatorRun.findMany.mockResolvedValue([{ id: 'x', createdAt: new Date(0) }]);
+    expect((await controller.list()).nextCursor).toBeNull();
   });
 
   it('leaves the list a plain database read unless status is asked for', async () => {
@@ -130,6 +139,9 @@ describe('AnalysesController', () => {
     );
     expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select.outcomePayload).toBe(false);
     expect(binance.getCurrentPrice).not.toHaveBeenCalled();
+    // No status asked for means no refresh either — the dashboard counts rows
+    // and must not pay for the exchange.
+    expect(scorer.refreshOpen).not.toHaveBeenCalled();
   });
 
   it('reads the stored outcome and fetches NO candles at all', async () => {
@@ -146,6 +158,9 @@ describe('AnalysesController', () => {
 
     // Price is still shared across rows of the same coin — two coins, two calls.
     expect(binance.getCurrentPrice).toHaveBeenCalledTimes(2);
+    // Open trades are refreshed before the read, so the mark on the 20 rows
+    // shown is at most one staleness window old.
+    expect(scorer.refreshOpen).toHaveBeenCalledTimes(1);
     // THE point of the change. Scoring 603 rows from raw candles on every
     // request was 92% of a 32-second response, and the window could not be
     // shared because each row is anchored to its own createdAt. Not fewer
@@ -160,6 +175,9 @@ describe('AnalysesController', () => {
       netR: -1.1,
       targetsHit: 0,
       filledAt: '2026-08-20T00:00:00.000Z',
+      // The card colours itself from this, so it can never disagree with the
+      // scoreboard about which group the row is in.
+      bucket: 'lostClosed',
       // The ladder, stop and targets a card draws — projected, not the whole plan.
       plan: { entries: [102, 100, 98], stop: 90, targets: [110] },
     });
@@ -233,15 +251,87 @@ describe('AnalysesController', () => {
     expect(plain.epoch).toBe(RESULTS_EPOCH.toISOString());
   });
 
+  it('pages on time AND id, so a batch of same-second rows cannot split badly', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    const at = new Date('2026-08-20T10:00:00.000Z');
+
+    await controller.list(undefined, undefined, undefined, undefined, `${at.toISOString()}_run_7`);
+
+    const { AND } = prisma.coordinatorRun.findMany.mock.calls[0][0].where;
+    // Older, OR the same instant with a smaller id. Three analyses land in one
+    // batch and can share a millisecond — without the second arm the boundary
+    // falls inside that batch and a row is repeated or lost.
+    expect(AND[0]).toEqual({
+      OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: 'run_7' } }],
+    });
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].orderBy).toEqual([
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]);
+  });
+
+  it('rejects a cursor it did not issue', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    for (const bad of ['nonsense', 'not-a-date_run_1', '2026-08-20T10:00:00.000Z_']) {
+      await expect(
+        controller.list(undefined, undefined, undefined, undefined, bad),
+      ).rejects.toThrow(HttpException);
+    }
+  });
+
+  it('filters by bucket in SQL, not after the page is cut', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list(undefined, undefined, undefined, undefined, undefined, 'openDown');
+
+    const { AND } = prisma.coordinatorRun.findMany.mock.calls[0][0].where;
+    // Filtering the page after the fact would only ever see 20 rows and would
+    // report "no losing trades" whenever they sat on page two.
+    expect(AND[0]).toEqual({ outcome: 'OPEN', netR: { lt: 0 } });
+
+    await expect(
+      controller.list(undefined, undefined, undefined, undefined, undefined, 'madeUp'),
+    ).rejects.toThrow(HttpException);
+  });
+
+  it('counts the whole window, not the page, and refreshes open trades first', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-08-20'), outcome: 'STOPPED', netR: -1 },
+      { createdAt: new Date('2026-08-20'), outcome: 'ALL_TARGETS', netR: 2 },
+      { createdAt: new Date('2026-08-20'), outcome: 'OPEN', netR: 0.5 },
+      // Before the epoch: shown in the list, absent from every total.
+      { createdAt: new Date('2026-08-01'), outcome: 'ALL_TARGETS', netR: 99 },
+    ]);
+
+    const stats = await controller.stats();
+
+    expect(scorer.refreshOpen).toHaveBeenCalled();
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select).toEqual({
+      createdAt: true,
+      outcome: true,
+      netR: true,
+    });
+    expect(stats.counts).toMatchObject({ lostClosed: 1, wonClosed: 1, openUp: 1 });
+    expect(stats.excluded).toBe(1);
+    expect(stats.total).toBe(3);
+    expect(stats.filled).toBe(3);
+    expect(stats.closed).toBe(2);
+    // Marked counts the open trade where it sits; resolved leaves it out. The
+    // 99R pre-epoch row is in neither.
+    expect(stats.netR.marked).toBeCloseTo(1.5, 10);
+    expect(stats.netR.resolved).toBeCloseTo(1, 10);
+    expect(stats.netR.nResolved).toBe(2);
+    expect(stats.netR.markingGap).toBeCloseTo(0.5 - 0.5, 10);
+  });
+
   it('caps and floors the list limit rather than trusting the query', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list(undefined, '9999');
-    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(1000);
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].take).toBe(1001);
     // A nonsense limit falls back to the default, it does not clamp to 1 row.
     await controller.list(undefined, '-5');
-    expect(prisma.coordinatorRun.findMany.mock.calls[1][0].take).toBe(50);
+    expect(prisma.coordinatorRun.findMany.mock.calls[1][0].take).toBe(21);
     await controller.list(undefined, 'abc');
-    expect(prisma.coordinatorRun.findMany.mock.calls[2][0].take).toBe(50);
+    expect(prisma.coordinatorRun.findMany.mock.calls[2][0].take).toBe(21);
   });
 
   it('404s an unknown id', async () => {
@@ -315,6 +405,7 @@ describe('AnalysesController.narrate', () => {
     {} as unknown as CoordinatorPersistenceService,
     prisma as unknown as PrismaService,
     {} as unknown as AnalysisStatusService,
+    {} as unknown as AnalysisStatsService,
     narrator as unknown as AnalystNarrationService,
     {} as unknown as OutcomeScorerService,
   );

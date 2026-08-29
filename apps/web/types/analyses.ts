@@ -1,3 +1,4 @@
+import type { Bucket } from '@/lib/history-buckets';
 /**
  * The shapes the API returns, copied by hand because the website does not
  * import from the backend.
@@ -208,6 +209,8 @@ export interface AnalysisStatus {
   /** How many targets price reached, in order. */
   targetsHit: number;
   currentPrice: number;
+  /** Which scoreboard group this row is in. Decided by the backend. */
+  bucket: Bucket;
   /**
    * When the outcome was scored. Only meaningful for OPEN trades: their netR
    * is a mark at the last close the scorer saw, so it is as old as this.
@@ -225,8 +228,8 @@ export interface AnalysisStatus {
 
 export interface AnalysisListResponse {
   count: number;
-  /** The window returned exactly `limit` rows, so older ones are not in it. */
-  truncated: boolean;
+  /** Pass back as `?cursor=` for the next page. Null when there are no more. */
+  nextCursor: string | null;
   analyses: AnalysisListItem[];
   /** ISO. The window actually applied, whether or not it was asked for. */
   from: string;
@@ -286,4 +289,25 @@ export interface HealthResponse {
     binance: number | null;
     database: number | null;
   };
+}
+
+/** The scoreboard, counted across the whole window rather than one page. */
+export interface AnalysesStats {
+  counts: Record<Bucket, number>;
+  total: number;
+  filled: number;
+  closed: number;
+  /** Built by an older planner: shown in the list, absent from every total. */
+  excluded: number;
+  netR: {
+    /** Every filled trade, open ones valued where they sit. */
+    marked: number;
+    /** Trades that actually finished. */
+    resolved: number;
+    nResolved: number;
+    /** How much of `marked` rests on valuing unfinished trades. */
+    markingGap: number;
+  };
+  from: string;
+  epoch: string;
 }

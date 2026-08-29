@@ -17,8 +17,7 @@ import { leadPlan } from './verdict';
  *
  * Two rules:
  *   1. A terminal outcome is never re-scored. Its candles are already past.
- *   2. `scoredAt` null means "score me" — including a row whose candles would
- *      not load, so a network failure is retried, not frozen as a verdict.
+ *   2. `scoredAt` is the last attempt, and MOVING says what is worth another.
  */
 
 /** Hourly bars from the analysis, plus two for the part-formed hour at each end. */
@@ -27,6 +26,18 @@ const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
 
 /** Rows fetched at once. 8 stays comfortably inside Binance's weight budget. */
 const FETCH_CONCURRENCY = 8;
+
+/**
+ * The only outcomes that can still change. Everything else is decided.
+ *
+ * UNSCOREABLE is in here because it is a failed fetch, not a verdict — it must
+ * be retried. It is subject to the same staleness window as the rest, so a coin
+ * the exchange will not serve costs one attempt per window, not one per read.
+ */
+const MOVING = ['PENDING', 'OPEN', 'UNSCOREABLE'];
+
+/** How stale an open trade's mark may get before a read path refreshes it. */
+export const REFRESH_AFTER_MS = 120_000;
 
 /** What one row needs before it can be scored. */
 type Scorable = {
@@ -91,16 +102,23 @@ export class OutcomeScorerService {
    * Score every row that can still move, plus every row never scored.
    * `ids` narrows it to specific rows — used right after an analysis is saved.
    */
-  async scoreUnresolved(options: { ids?: string[]; now?: number } = {}): Promise<ScoreRunResult> {
+  async scoreUnresolved(
+    options: { ids?: string[]; now?: number; staleAfterMs?: number } = {},
+  ): Promise<ScoreRunResult> {
     const started = Date.now();
     const now = options.now ?? started;
+    // With a staleness window, a row scored recently enough is left alone.
+    const moving =
+      options.staleAfterMs === undefined
+        ? { outcome: { in: MOVING } }
+        : { outcome: { in: MOVING }, scoredAt: { lt: new Date(now - options.staleAfterMs) } };
 
     const rows = await this.prisma.coordinatorRun.findMany({
       where: {
         ...(options.ids ? { id: { in: options.ids } } : {}),
         // Unsettled, or still moving. A terminal row matches neither arm,
         // which is what makes this cheap.
-        OR: [{ scoredAt: null }, { outcome: { in: ['PENDING', 'OPEN'] } }],
+        OR: [{ scoredAt: null }, moving],
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -114,6 +132,32 @@ export class OutcomeScorerService {
     });
 
     return this.score(rows, now, started);
+  }
+
+  /**
+   * The gate every read path walks through: refresh open trades whose mark has
+   * gone stale, then let the caller read the database.
+   *
+   * Never throws. A dead exchange means a slightly old number, not a dead page.
+   *
+   * ponytail: the in-flight promise de-duplicates concurrent requests on ONE
+   * Lambda instance only. Two instances can still both refresh; the writes are
+   * idempotent, so that costs a few requests, not correctness. Needs a database
+   * lock only if instance count ever makes that wasteful.
+   */
+  private inflight: Promise<ScoreRunResult> | null = null;
+
+  async refreshOpen(staleAfterMs = REFRESH_AFTER_MS): Promise<ScoreRunResult | null> {
+    if (this.inflight) return this.inflight.catch(() => null);
+    this.inflight = this.scoreUnresolved({ staleAfterMs });
+    try {
+      return await this.inflight;
+    } catch (err) {
+      this.logger.warn(`refreshOpen failed, serving stored outcomes: ${String(err)}`);
+      return null;
+    } finally {
+      this.inflight = null;
+    }
   }
 
   /** Score EVERY row, terminal included. The backfill — the only caller allowed past the guard. */
@@ -195,28 +239,32 @@ export class OutcomeScorerService {
       );
       out.candleFetches += fetched.length;
 
-      for (const [row, candles] of fetched) {
-        const analysis = row.coordinatorPayload as AnalysisRecord;
-        // Strictly after the analysis: the hour in progress when it was taken
-        // must not open the trade after the fact.
-        const results = scorePlans(
-          analysis.plans,
-          candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
-          row.createdAt,
-          now,
-        );
+      // Written together, not one after another: these are round trips to a
+      // database on the other side of the internet, and 29 of them in a row
+      // cost more than the candles they are writing.
+      await Promise.all(
+        fetched.map(([row, candles]) => {
+          const analysis = row.coordinatorPayload as AnalysisRecord;
+          // Strictly after the analysis: the hour in progress when it was taken
+          // must not open the trade after the fact.
+          const results = scorePlans(
+            analysis.plans,
+            candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
+            row.createdAt,
+            now,
+          );
 
-        // Failed fetch: keep the badge honest, but leave `scoredAt` null so
-        // the next run tries again.
-        const failed = results.every((r) => r.outcome === 'UNSCOREABLE');
-        if (failed) out.unscoreable += 1;
-        else out.scored += 1;
+          // A failed fetch keeps the badge honest and is retried, because
+          // UNSCOREABLE is in MOVING — no null timestamp needed to remember it.
+          if (results.every((r) => r.outcome === 'UNSCOREABLE')) out.unscoreable += 1;
+          else out.scored += 1;
 
-        await this.prisma.coordinatorRun.update({
-          where: { id: row.id },
-          data: outcomeColumns(analysis.plans, results, failed ? null : new Date(now)),
-        });
-      }
+          return this.prisma.coordinatorRun.update({
+            where: { id: row.id },
+            data: outcomeColumns(analysis.plans, results, new Date(now)),
+          });
+        }),
+      );
     }
 
     out.ms = Date.now() - started;

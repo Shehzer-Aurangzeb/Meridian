@@ -27,8 +27,8 @@ function HistoryLoading() {
 export default function HistoryPage() {
   const {
     summary,
+    summaryLoading,
     epoch,
-    truncated,
     entries,
     coins,
     prices,
@@ -38,6 +38,7 @@ export default function HistoryPage() {
     filters,
     bucket,
     hasMore,
+    loadingMore,
     sentinel,
     isLoading,
     error,
@@ -59,20 +60,24 @@ export default function HistoryPage() {
         </div>
       )}
 
+      {/* Its own request, so the numbers land without waiting for the rows. */}
+      {summaryLoading && <Skeleton className="h-28 mb-6" />}
+      {summary && (
+        <ResultsScoreboard
+          summary={summary}
+          activeBucket={bucket}
+          onBucketChange={setBucket}
+        />
+      )}
+
       {!isLoading && !error && (
         <>
-          <ResultsScoreboard
-            summary={summary}
-            truncated={truncated}
-            activeBucket={bucket}
-            onBucketChange={setBucket}
-          />
 
           <FilterBar
             filters={filters}
             onFiltersChange={setFilters}
             coins={coins}
-            totalCount={totalFetched}
+            totalCount={summary?.total ?? totalFetched}
             showingCount={totalFiltered}
           />
 
@@ -98,7 +103,7 @@ export default function HistoryPage() {
 
           {/* Sits below the grid; crossing it reveals the next slice. */}
           <div ref={sentinel} className="h-8" />
-          {hasMore && (
+          {(hasMore || loadingMore) && (
             <p className="text-center text-[12px] text-text-tertiary py-2">
               Loading more…
             </p>

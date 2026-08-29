@@ -1,7 +1,8 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { BUCKET_LABEL, type Bucket, type ResultsSummary } from '@/lib/history-buckets';
+import { BUCKET_LABEL, type Bucket } from '@/lib/history-buckets';
+import type { AnalysesStats } from '@/types/analyses';
 
 /**
  * How the analyses turned out, as counts and never percentages.
@@ -29,16 +30,13 @@ const ORDER: Bucket[] = [
 ];
 
 interface ResultsScoreboardProps {
-  summary: ResultsSummary;
-  /** True when the window hit the row ceiling — the counts are a subset. */
-  truncated: boolean;
+  summary: AnalysesStats;
   activeBucket: Bucket | 'all';
   onBucketChange: (bucket: Bucket | 'all') => void;
 }
 
 export function ResultsScoreboard({
   summary,
-  truncated,
   activeBucket,
   onBucketChange,
 }: ResultsScoreboardProps) {
@@ -55,18 +53,35 @@ export function ResultsScoreboard({
           <span className="font-mono tabular-nums text-text-primary">{closed}</span>{' '}
           closed
         </p>
+        {/* Both conventions, never one silently. `marked` values open and
+            expired trades where they sit; `resolved` counts only the ones that
+            actually finished. Quoting one without the other is how a mark
+            comes to be read as a result. */}
         <p className="text-[13px] text-text-secondary">
           net{' '}
           <span
             className={cn(
               'font-mono tabular-nums font-medium',
-              netR >= 0 ? 'text-green' : 'text-rust',
+              netR.marked >= 0 ? 'text-green' : 'text-rust',
             )}
           >
-            {netR >= 0 ? '+' : ''}
-            {netR.toFixed(2)}R
+            {netR.marked >= 0 ? '+' : ''}
+            {netR.marked.toFixed(2)}R
           </span>{' '}
-          <span className="text-text-tertiary">after costs</span>
+          <span className="text-text-tertiary">marked</span>
+          <span className="text-text-tertiary"> · </span>
+          <span
+            className={cn(
+              'font-mono tabular-nums font-medium',
+              netR.resolved >= 0 ? 'text-green' : 'text-rust',
+            )}
+          >
+            {netR.resolved >= 0 ? '+' : ''}
+            {netR.resolved.toFixed(2)}R
+          </span>{' '}
+          <span className="text-text-tertiary">
+            over {netR.nResolved} finished
+          </span>
         </p>
       </div>
 
@@ -108,7 +123,6 @@ export function ResultsScoreboard({
         Paper outcomes, one per analysis — the same zone re-analysed three times
         a day counts three times, so these are higher than{' '}
         <span className="font-mono">pnpm forward-test</span>, which deduplicates.
-        {truncated && ' Showing the newest rows only — older ones are outside this window.'}
         {/* Said out loud, never silently: a total that covers fewer rows than
             the list under it is the same lie as hiding those rows. */}
         {summary.excluded > 0 && (

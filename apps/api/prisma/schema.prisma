@@ -82,6 +82,8 @@ model CoordinatorRun {
   entryFilledAt    DateTime?
 
   @@index([symbol, createdAt])
+  /// The list pages on (createdAt, id) and orders by createdAt DESC.
+  @@index([createdAt])
   /// The job's query: unsettled rows, plus the ones that can still move.
   @@index([scoredAt])
   @@index([outcome])
