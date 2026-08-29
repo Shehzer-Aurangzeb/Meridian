@@ -3,7 +3,7 @@
 import { cn } from '@/lib/utils';
 import { SectionHead } from '@/components/ui/section-head';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAnalyses } from '@/lib/hooks/use-analyses';
+import { useAnalyses, useAnalysesStats } from '@/lib/hooks/use-analyses';
 import { summariseAnalyses } from '@/lib/summarise-analyses';
 
 /**
@@ -55,7 +55,11 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 export function StatsStrip() {
+  // Rows for the coin list and the newest one; the COUNT comes from the stats
+  // endpoint. Counting the rows it happened to fetch made this read "200"
+  // when there were 400 — a cap reported as a total.
   const { data, isLoading, error } = useAnalyses({ limit: 200 });
+  const totals = useAnalysesStats();
   const summary = summariseAnalyses(data?.analyses ?? []);
 
   if (isLoading) {
@@ -91,7 +95,11 @@ export function StatsStrip() {
   }
 
   const stats: StatData[] = [
-    { label: 'Analyses', value: String(summary.totalAnalyses), subtext: summary.sinceDateLabel },
+    {
+      label: 'Analyses',
+      value: String(totals.data?.total ?? summary.totalAnalyses),
+      subtext: summary.sinceDateLabel,
+    },
     { label: 'Coins covered', value: String(summary.coinsCovered), subtext: summary.coinList },
     { label: 'Most recent', value: summary.latestCoin, subtext: summary.latestLabel },
   ];

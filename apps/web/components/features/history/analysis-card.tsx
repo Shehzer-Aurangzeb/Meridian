@@ -253,6 +253,18 @@ export function AnalysisCard({ entry, livePrice, preEpoch, onOpen }: AnalysisCar
             {netR === null ? '—' : `${netR >= 0 ? '+' : ''}${netR.toFixed(2)}R`}
           </span>
         </div>
+
+        {/* An OPEN trade's R is a MARK at the last close the scorer saw, sitting
+            next to a price that ticks every second. Say how old it is, or the
+            two read as one number. Every other outcome is finished, so its age
+            means nothing and is not shown. */}
+        <div className="flex justify-end">
+          {status.outcome === 'OPEN' && status.scoredAt && (
+            <span className="text-[10px] text-text-tertiary mt-1">
+              marked {formatRelative(status.scoredAt)}
+            </span>
+          )}
+        </div>
       </button>
 
       {expanded && status.plan && (

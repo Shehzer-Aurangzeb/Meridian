@@ -100,11 +100,22 @@ export default function HistoryPage() {
             </div>
           )}
 
-          {/* Sits below the grid; crossing it reveals the next slice. */}
+          {/* Ghost cards rather than a line of text: the grid keeps its shape
+              while the next page lands, so nothing below it jumps. */}
+          {loadingMore && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-40" />
+              ))}
+            </div>
+          )}
+
+          {/* Sits below the grid; crossing it asks for the next page. */}
           <div ref={sentinel} className="h-8" />
-          {(hasMore || loadingMore) && (
+
+          {!hasMore && entries.length > 0 && (
             <p className="text-center text-[12px] text-text-tertiary py-2">
-              Loading more…
+              That is all {summary?.total ?? entries.length} of them.
             </p>
           )}
         </>
