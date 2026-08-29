@@ -195,9 +195,17 @@ npx ts-node test/manual/holdout.ts --self-check
 
 ## A note on `docs/`
 
-Design notes, research logs and reference material live in `docs/`, which is not
-published. Code comments referring to `docs/STATE_OF_PLAY.md` and similar point
-at those local working notes — the code stands on its own without them.
+Everything except this file lives in `docs/`, and it splits in two.
+
+**Published, and in git:** `ROADMAP.md` and the `*_AB.md` pre-registrations.
+Each A/B file states its bar and its prediction BEFORE a run and records the
+result after, so they are the project's evidence rather than notes about it — a
+result whose configuration is lost is not a result.
+
+**Local only, deliberately:** `STATE_OF_PLAY.md`, the strategy playbook PDF, and
+the handover and planning notes. Code comments pointing at
+`docs/STATE_OF_PLAY.md` and similar refer to these; the code stands on its own
+without them.
 
 ---
 

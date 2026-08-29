@@ -36,4 +36,16 @@ coverage/
 *.tsbuildinfo
 
 # Working notes and reference material — kept locally, not published.
-docs/
+#
+# ...except the research record. ROADMAP.md and the *_AB.md pre-registrations
+# ARE the project's evidence: each one states a bar before a run and the result
+# after it, and a result whose configuration is lost is not a result. They were
+# tracked at the repo root; moving them under docs/ must not quietly untrack
+# them, which a bare `docs/` would do — the directory ignore is why §3 already
+# records a "Session 2 audit" document nobody can find.
+#
+# Everything else here (STATE_OF_PLAY.md, the playbook PDF, handover notes)
+# stays local exactly as before.
+docs/*
+!docs/*_AB.md
+!docs/ROADMAP.md
