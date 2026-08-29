@@ -21,6 +21,7 @@ export const queryKeys = {
         filter.days ?? null,
         filter.status ?? false,
         filter.bucket ?? 'all',
+        filter.sort ?? 'newest',
       ] as const,
     /** Paged list. A different key from `list` — the cached shape differs. */
     pages: (filter: AnalysesFilter) =>

@@ -78,32 +78,47 @@ function pageSize(limit: string | undefined): number {
  * share a `createdAt` to the millisecond; without a tiebreak the page boundary
  * lands in the middle of them and a row is repeated or skipped.
  */
-function encodeCursor(row: { createdAt: Date; id: string }): string {
-  return `${row.createdAt.toISOString()}_${row.id}`;
+function encodeCursor(row: { createdAt: Date; netR: number | null; id: string }, sort: SortKey): string {
+  const value = SORTS[sort].field === 'netR' ? String(row.netR) : row.createdAt.toISOString();
+  return `${value}_${row.id}`;
 }
 
-function decodeCursor(raw: string): { createdAt: Date; id: string } {
+/** Everything strictly past the cursor, in whatever order the list is using. */
+function afterCursor(raw: string, sort: SortKey): Prisma.CoordinatorRunWhereInput {
   const at = raw.indexOf('_');
-  const createdAt = new Date(raw.slice(0, at));
   const id = raw.slice(at + 1);
-  if (at < 0 || Number.isNaN(createdAt.getTime()) || !id) {
-    throw new HttpException('Invalid cursor', HttpStatus.BAD_REQUEST);
-  }
-  return { createdAt, id };
+  const { field, dir } = SORTS[sort];
+  const raw0 = raw.slice(0, at);
+  const value: Date | number = field === 'netR' ? Number(raw0) : new Date(raw0);
+  const bad =
+    at < 0 || !id || (value instanceof Date ? Number.isNaN(value.getTime()) : Number.isNaN(value));
+  if (bad) throw new HttpException('Invalid cursor', HttpStatus.BAD_REQUEST);
+
+  // Past the cursor's value, OR level with it but past its id.
+  const past = dir === 'desc' ? { lt: value } : { gt: value };
+  const tie = dir === 'desc' ? { lt: id } : { gt: id };
+  return { OR: [{ [field]: past }, { [field]: value, id: tie }] };
 }
 
-/** Everything strictly older than the cursor, ordered the same way. */
-function afterCursor(raw: string): Prisma.CoordinatorRunWhereInput {
-  const { createdAt, id } = decodeCursor(raw);
-  return {
-    OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: id } }],
-  };
-}
+/**
+ * How the list is ordered, and what a cursor therefore means.
+ *
+ * `best`/`worst` only include rows that HAVE an R. Sorting 145 rows with no
+ * plan by their result is meaningless, and it keeps the cursor free of nulls.
+ */
+const SORTS = {
+  newest: { dir: 'desc', field: 'createdAt' },
+  oldest: { dir: 'asc', field: 'createdAt' },
+  best: { dir: 'desc', field: 'netR' },
+  worst: { dir: 'asc', field: 'netR' },
+} as const;
 
-const ORDER: Prisma.CoordinatorRunOrderByWithRelationInput[] = [
-  { createdAt: 'desc' },
-  { id: 'desc' },
-];
+export type SortKey = keyof typeof SORTS;
+
+function orderFor(sort: SortKey): Prisma.CoordinatorRunOrderByWithRelationInput[] {
+  const { field, dir } = SORTS[sort];
+  return [{ [field]: dir }, { id: dir }];
+}
 
 /**
  *   POST /analyses?symbol=BTC   run one analysis and save it
@@ -163,6 +178,7 @@ export class AnalysesController {
     @Query('days') days?: string,
     @Query('cursor') cursor?: string,
     @Query('bucket') bucket?: string,
+    @Query('sort') sort?: string,
   ): Promise<{
     count: number;
     analyses: unknown[];
@@ -175,6 +191,11 @@ export class AnalysesController {
     const where = this.windowWhere(symbol, days);
     const take = pageSize(limit);
 
+    if (sort && !(sort in SORTS)) {
+      throw new HttpException('Unknown sort', HttpStatus.BAD_REQUEST);
+    }
+    const order = (sort ?? 'newest') as SortKey;
+
     // Filtering happens in SQL, not in the browser: with paging, a filter
     // applied after the fact only ever sees the page it was given.
     const filters: Prisma.CoordinatorRunWhereInput[] = [];
@@ -184,7 +205,9 @@ export class AnalysesController {
       }
       filters.push(bucketWhere(bucket as Bucket));
     }
-    if (cursor) filters.push(afterCursor(cursor));
+    // Ranking by result is meaningless for a row that never opened.
+    if (SORTS[order].field === 'netR') filters.push({ netR: { not: null } });
+    if (cursor) filters.push(afterCursor(cursor, order));
     if (filters.length > 0) where.AND = filters;
 
     const wantStatus = status === 'true' || status === '1';
@@ -193,10 +216,11 @@ export class AnalysesController {
     // One extra row, purely to learn whether another page exists.
     const rows = await this.prisma.coordinatorRun.findMany({
       where,
-      orderBy: ORDER,
+      orderBy: orderFor(order),
       take: take + 1,
       select: {
         id: true,
+        netR: true,
         symbol: true,
         timeframe: true,
         regime: true,
@@ -211,11 +235,17 @@ export class AnalysesController {
     });
 
     const page = rows.slice(0, take);
-    const nextCursor = rows.length > take && page.length > 0 ? encodeCursor(page[page.length - 1]) : null;
+    const nextCursor =
+      rows.length > take && page.length > 0 ? encodeCursor(page[page.length - 1], order) : null;
     const window = { from: from.toISOString(), epoch: RESULTS_EPOCH.toISOString() };
 
     if (!wantStatus) {
-      return { count: page.length, analyses: page, nextCursor, ...window };
+      return {
+        count: page.length,
+        analyses: page.map(({ netR, ...row }) => row),
+        nextCursor,
+        ...window,
+      };
     }
 
     const statuses = await this.status.build(page);
@@ -223,7 +253,7 @@ export class AnalysesController {
       count: page.length,
       nextCursor,
       ...window,
-      analyses: page.map(({ coordinatorPayload, outcomePayload, scoredAt, ...row }) => ({
+      analyses: page.map(({ coordinatorPayload, outcomePayload, scoredAt, netR, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,
       })),

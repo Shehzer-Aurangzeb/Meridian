@@ -119,13 +119,16 @@ describe('AnalysesController', () => {
     const full = Array.from({ length: 21 }, (_, i) => ({
       id: `x${i}`,
       createdAt: new Date(1000 - i),
+      netR: null,
     }));
     prisma.coordinatorRun.findMany.mockResolvedValue(full);
     const page = await controller.list();
     expect(page.count).toBe(20);
     expect(page.nextCursor).toBe(`${new Date(981).toISOString()}_x19`);
 
-    prisma.coordinatorRun.findMany.mockResolvedValue([{ id: 'x', createdAt: new Date(0) }]);
+    prisma.coordinatorRun.findMany.mockResolvedValue([
+      { id: 'x', createdAt: new Date(0), netR: null },
+    ]);
     expect((await controller.list()).nextCursor).toBeNull();
   });
 
@@ -258,9 +261,9 @@ describe('AnalysesController', () => {
     await controller.list(undefined, undefined, undefined, undefined, `${at.toISOString()}_run_7`);
 
     const { AND } = prisma.coordinatorRun.findMany.mock.calls[0][0].where;
-    // Older, OR the same instant with a smaller id. Three analyses land in one
-    // batch and can share a millisecond — without the second arm the boundary
-    // falls inside that batch and a row is repeated or lost.
+    // Older, OR the same instant with a smaller id. Nothing shares a timestamp
+    // today, so the second arm never fires — it is there so that the day one
+    // does, the boundary does not fall inside the tie and drop a row.
     expect(AND[0]).toEqual({
       OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: 'run_7' } }],
     });
@@ -268,6 +271,50 @@ describe('AnalysesController', () => {
       { createdAt: 'desc' },
       { id: 'desc' },
     ]);
+  });
+
+  it('sorts by result on the SERVER, and only over rows that have one', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list(undefined, undefined, undefined, undefined, undefined, undefined, 'best');
+
+    const call = prisma.coordinatorRun.findMany.mock.calls[0][0];
+    expect(call.orderBy).toEqual([{ netR: 'desc' }, { id: 'desc' }]);
+    // Sorting 145 rows that never opened by their result is meaningless, and
+    // leaving them in would put nulls in the cursor.
+    expect(call.where.AND).toContainEqual({ netR: { not: null } });
+
+    await expect(
+      controller.list(undefined, undefined, undefined, undefined, undefined, undefined, 'sideways'),
+    ).rejects.toThrow(HttpException);
+  });
+
+  it('pages a result sort on netR, not on time', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    await controller.list(
+      undefined, undefined, undefined, undefined, '-0.5_run_3', undefined, 'best',
+    );
+
+    const { AND } = prisma.coordinatorRun.findMany.mock.calls[0][0].where;
+    // Same shape, different column: paging a netR sort on a timestamp would
+    // walk the wrong axis entirely.
+    expect(AND).toContainEqual({
+      OR: [{ netR: { lt: -0.5 } }, { netR: -0.5, id: { lt: 'run_3' } }],
+    });
+  });
+
+  it('hands back a cursor the sort can actually use', async () => {
+    const rows = Array.from({ length: 21 }, (_, i) => ({
+      id: `x${i}`,
+      createdAt: new Date(1000 - i),
+      netR: 2 - i * 0.1,
+    }));
+    prisma.coordinatorRun.findMany.mockResolvedValue(rows);
+
+    const page = await controller.list(
+      undefined, undefined, undefined, undefined, undefined, undefined, 'best',
+    );
+    // A timestamp cursor under a netR sort would page through the wrong column.
+    expect(page.nextCursor).toBe(`${2 - 19 * 0.1}_x19`);
   });
 
   it('rejects a cursor it did not issue', async () => {

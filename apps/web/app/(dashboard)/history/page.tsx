@@ -33,8 +33,7 @@ export default function HistoryPage() {
     coins,
     prices,
     livePricesConnected,
-    totalFiltered,
-    totalFetched,
+    loadedCount,
     filters,
     bucket,
     hasMore,
@@ -77,8 +76,8 @@ export default function HistoryPage() {
             filters={filters}
             onFiltersChange={setFilters}
             coins={coins}
-            totalCount={summary?.total ?? totalFetched}
-            showingCount={totalFiltered}
+            totalCount={summary?.total ?? loadedCount}
+            loadedCount={loadedCount}
           />
 
           {entries.length === 0 ? (

@@ -25,6 +25,8 @@ export interface AnalysesFilter {
   status?: boolean;
   /** Filter by scoreboard group. Applied in SQL, so it spans every page. */
   bucket?: Bucket | 'all';
+  /** Order. Applied in SQL, so "best R" means best of all of them. */
+  sort?: 'newest' | 'oldest' | 'best' | 'worst';
 }
 
 function toQuery(filter: AnalysesFilter, cursor?: string): string {
@@ -34,6 +36,7 @@ function toQuery(filter: AnalysesFilter, cursor?: string): string {
   if (filter.days) params.set('days', String(filter.days));
   if (filter.status) params.set('status', 'true');
   if (filter.bucket && filter.bucket !== 'all') params.set('bucket', filter.bucket);
+  if (filter.sort && filter.sort !== 'newest') params.set('sort', filter.sort);
   if (cursor) params.set('cursor', cursor);
   const q = params.toString();
   return q ? `?${q}` : '';

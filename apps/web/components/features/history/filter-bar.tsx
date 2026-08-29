@@ -1,21 +1,20 @@
 'use client';
 
-import { SearchIcon } from '@/assets/icons/search-icon';
 
 /**
- * Coin, window, sort. Regime and strategy filters were removed — they answer
- * "how was this made", and the page is about how it turned out. Outcome is
- * filtered by clicking a scoreboard bucket, not from here.
+ * Coin, window, sort. Every one of them is applied by the SERVER — a filter
+ * applied here would only ever see the pages already scrolled past.
+ *
+ * The free-text search went with that change: it matched coin symbols, which
+ * the dropdown already does across every page, over a list of ten.
  */
 export interface HistoryFilters {
-  search: string;
   coin: string;
   dateRange: '24h' | '7d' | '30d' | 'all';
   sort: 'newest' | 'oldest' | 'best' | 'worst';
 }
 
 export const DEFAULT_FILTERS: HistoryFilters = {
-  search: '',
   coin: 'all',
   dateRange: '30d',
   sort: 'newest',
@@ -91,8 +90,9 @@ interface FilterBarProps {
   filters: HistoryFilters;
   onFiltersChange: (filters: HistoryFilters) => void;
   coins: string[];
+  /** Every analysis these filters match, not the rows scrolled to so far. */
   totalCount: number;
-  showingCount: number;
+  loadedCount: number;
 }
 
 export function FilterBar({
@@ -100,7 +100,7 @@ export function FilterBar({
   onFiltersChange,
   coins,
   totalCount,
-  showingCount,
+  loadedCount,
 }: FilterBarProps) {
   const updateFilter = <K extends keyof HistoryFilters>(
     key: K,
@@ -114,23 +114,10 @@ export function FilterBar({
       <SectionHead
         eyebrow="Browse"
         title="All analyses"
-        meta={`Showing ${showingCount} of ${totalCount}`}
+        meta={`Loaded ${loadedCount} of ${totalCount}`}
       />
 
-      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
-        {/* Search on its own row: sharing one grid with the selects squeezed
-            every control at tablet widths. */}
-        <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-border/10 dark:border-border">
-          <SearchIcon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search coin…"
-            value={filters.search}
-            onChange={(e) => updateFilter('search', e.target.value)}
-            className="bg-transparent border-0 outline-none w-full text-sm text-text-primary placeholder:text-text-tertiary"
-          />
-        </div>
-
+      <div className="bg-surface border border-border/10 dark:border-border rounded-lg p-3 md:p-4">
         <div className="flex flex-wrap gap-2.5">
           <FilterSelect
             label="Coin"

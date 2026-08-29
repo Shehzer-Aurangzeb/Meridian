@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
 /**
- * GET /api/analyses?symbol=BTC&limit=20&days=30&status=true&cursor=…&bucket=…
+ * GET /api/analyses?symbol=BTC&limit=20&days=30&status=true&cursor=…&bucket=…&sort=…
  *
  * One page. No payloads; the detail route has those. `status=true` costs the
  * backend a price per coin, so it is opt-in.
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const symbol = query_.get('symbol');
 
   if (symbol) params.set('symbol', symbol.toUpperCase());
-  for (const key of ['limit', 'days', 'cursor', 'bucket'] as const) {
+  for (const key of ['limit', 'days', 'cursor', 'bucket', 'sort'] as const) {
     const value = query_.get(key);
     if (value) params.set(key, value);
   }

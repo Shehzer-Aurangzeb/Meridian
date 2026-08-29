@@ -15,9 +15,9 @@ import {
 /**
  * The history page: rows a page at a time, scoreboard in its own request.
  *
- * Coin and bucket filters go to the SERVER. Filtering here would only ever see
- * the pages already loaded, so "no losing trades" would mean "none on page one".
- * Search stays local — it is a substring match on rows already on screen.
+ * EVERY filter and the sort go to the server. Doing any of it here would only
+ * ever see the pages already scrolled past, so "worst R first" would mean
+ * "worst of the twenty on screen" and quietly read as a result.
  */
 export function useHistoryPage() {
   const router = useRouter();
@@ -36,6 +36,7 @@ export function useHistoryPage() {
     days,
     status: true,
     bucket,
+    sort: filters.sort,
     symbol: filters.coin === 'all' ? undefined : filters.coin,
   });
 
@@ -48,40 +49,15 @@ export function useHistoryPage() {
   );
   const epoch = data?.pages[0]?.epoch ?? stats.data?.epoch;
 
-  const coins = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.symbol))).sort(),
-    [rows],
-  );
+  // Coins accumulate and never shrink. The set grows as pages arrive, and
+  // rebuilding the socket every time one did was a teardown per scroll.
+  const seenCoins = useRef<Set<string>>(new Set());
+  const coins = useMemo(() => {
+    for (const r of rows) seenCoins.current.add(r.symbol);
+    return Array.from(seenCoins.current).sort();
+  }, [rows]);
 
-  // One socket for every coin on screen, regardless of filter — reconnecting
-  // on every filter change would cost more than the idle stream.
   const { prices, connected } = useLivePrices(coins);
-
-  const entries = useMemo(() => {
-    const search = filters.search.trim().toUpperCase();
-    const matched = search ? rows.filter((r) => r.symbol.includes(search)) : rows;
-
-    // Unscored rows sort last under an R sort — they have no R to rank on.
-    const byR = (a: AnalysisListItem, b: AnalysisListItem, dir: 1 | -1) => {
-      const ra = a.status?.netR;
-      const rb = b.status?.netR;
-      if (ra == null && rb == null) return 0;
-      if (ra == null) return 1;
-      if (rb == null) return -1;
-      return (rb - ra) * dir;
-    };
-
-    switch (filters.sort) {
-      case 'oldest':
-        return [...matched].reverse();
-      case 'best':
-        return [...matched].sort((a, b) => byR(a, b, 1));
-      case 'worst':
-        return [...matched].sort((a, b) => byR(a, b, -1));
-      default:
-        return matched; // already newest-first from the API
-    }
-  }, [rows, filters.search, filters.sort]);
 
   // Infinite scroll: a sentinel below the last card asks for the next page.
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -102,13 +78,12 @@ export function useHistoryPage() {
     summary: stats.data ?? null,
     summaryLoading: stats.isLoading,
     epoch,
-    entries,
+    entries: rows,
     coins,
     prices,
     livePricesConnected: connected,
     /** Rows loaded so far. The scoreboard's `total` is the real count. */
-    totalFetched: rows.length,
-    totalFiltered: entries.length,
+    loadedCount: rows.length,
     filters,
     bucket,
     hasMore: hasNextPage,
