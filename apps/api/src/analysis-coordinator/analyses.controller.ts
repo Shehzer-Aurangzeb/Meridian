@@ -158,9 +158,15 @@ export class AnalysesController {
     return { id, analysis };
   }
 
-  /** The filters both the list and the scoreboard share. */
-  private windowWhere(symbol?: string, days?: string): Prisma.CoordinatorRunWhereInput {
-    const where: Prisma.CoordinatorRunWhereInput = { createdAt: { gte: windowStart(days) } };
+  /**
+   * The filters both the list and the scoreboard share.
+   *
+   * `from` is passed in, not recomputed. Calling windowStart twice in one
+   * request reads the clock twice, so the window reported to the caller could
+   * be a millisecond off the window actually queried.
+   */
+  private windowWhere(from: Date, symbol?: string): Prisma.CoordinatorRunWhereInput {
+    const where: Prisma.CoordinatorRunWhereInput = { createdAt: { gte: from } };
     if (symbol) {
       const coin = validSymbol(symbol);
       if (!coin) throw new HttpException('Invalid symbol', HttpStatus.BAD_REQUEST);
@@ -188,7 +194,7 @@ export class AnalysesController {
     epoch: string;
   }> {
     const from = windowStart(days);
-    const where = this.windowWhere(symbol, days);
+    const where = this.windowWhere(from, symbol);
     const take = pageSize(limit);
 
     if (sort && !(sort in SORTS)) {
@@ -273,11 +279,8 @@ export class AnalysesController {
     @Query('days') days?: string,
   ): Promise<AnalysesStats> {
     await this.scorer.refreshOpen();
-    return this.statsService.build(
-      this.windowWhere(symbol, days),
-      RESULTS_EPOCH,
-      windowStart(days),
-    );
+    const from = windowStart(days);
+    return this.statsService.build(this.windowWhere(from, symbol), RESULTS_EPOCH, from);
   }
 
   @Get(':id')

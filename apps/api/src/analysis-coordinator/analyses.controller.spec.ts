@@ -112,6 +112,10 @@ describe('AnalysesController', () => {
     expect(Math.abs((gte as Date).getTime() - (Date.now() - 30 * 86_400_000))).toBeLessThan(
       1000,
     );
+    // The window reported must be the window QUERIED. This used to read the
+    // clock twice per request — once for the response, once for the where
+    // clause — so the two landed a millisecond apart whenever the call
+    // straddled a tick. CI caught it; it is a real disagreement, not a flake.
     expect(asked.from).toBe((gte as Date).toISOString());
 
     // A full page plus one means there is another page. The extra row is asked
@@ -338,6 +342,22 @@ describe('AnalysesController', () => {
     await expect(
       controller.list(undefined, undefined, undefined, undefined, undefined, 'madeUp'),
     ).rejects.toThrow(HttpException);
+  });
+
+  it('reports the same window it queried, on both routes', async () => {
+    // Reading the clock twice in one request makes `from` a claim about a
+    // window nothing was fetched from. Looped, because the gap only opens when
+    // the two reads straddle a millisecond.
+    prisma.coordinatorRun.findMany.mockResolvedValue([]);
+    for (let i = 0; i < 200; i += 1) {
+      const list = await controller.list(undefined, undefined, undefined, undefined);
+      const listGte = prisma.coordinatorRun.findMany.mock.calls.at(-1)![0].where.createdAt.gte;
+      expect(list.from).toBe((listGte as Date).toISOString());
+
+      const stats = await controller.stats(undefined, '30');
+      const statsGte = prisma.coordinatorRun.findMany.mock.calls.at(-1)![0].where.createdAt.gte;
+      expect(stats.from).toBe((statsGte as Date).toISOString());
+    }
   });
 
   it('counts the whole window, not the page, and refreshes open trades first', async () => {
