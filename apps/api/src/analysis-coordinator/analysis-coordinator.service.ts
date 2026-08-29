@@ -12,22 +12,15 @@ import { EntryChecklistParams } from '../analysis/interfaces/checklist.types';
 import { MarketRegimeResult } from '../market-regime/interfaces/market-regime.types';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 
-/**
- * Single candle window used for the entire pipeline. Wide enough to
- * support every downstream service (regime needs ~250 for percentile
- * history, squeeze only looks at last 20, checklist needs >= 100).
- */
+/** One candle window for the whole pipeline. Regime needs the most, ~250. */
 export const ANALYSIS_CANDLE_LIMIT = 250;
 
 /**
- * Runs the analysis end to end:
+ * Runs the analysis end to end: fetch price history once, measure once, then
+ * route to the approach that matches the market.
  *
- *   1. fetch the price history once
- *   2. work out every measurement from it, once
- *   3. decide what kind of market this is, then apply the matching approach
- *
- * Nothing further down fetches its own data or recalculates anything, so a
- * number cannot come out differently in two places.
+ * Nothing downstream fetches or recalculates, so a number cannot come out
+ * differently in two places.
  */
 @Injectable()
 export class AnalysisCoordinatorService {
@@ -69,10 +62,7 @@ export class AnalysisCoordinatorService {
     return this.routeFromRegime(context, timeframe, regimeResult, direction);
   }
 
-  /**
-   * Picks the approach that matches the market type and applies it. Separate
-   * so a caller can report progress between steps without repeating work.
-   */
+  /** Applies the approach that matches the market type. */
   routeFromRegime(
     context: IndicatorContext,
     timeframe: string,
@@ -109,9 +99,8 @@ export class AnalysisCoordinatorService {
     const checklistResult =
       this.checklistService.evaluateChecklist(checklistInputs);
 
-    // Nothing is filtered out here. This describes what it sees; it does not
-    // decide whether the analysis was worth doing. An earlier version made
-    // that judgement and stayed silent on 99.6% of the bars it looked at.
+    // Describes what it sees; never decides the analysis was not worth doing.
+    // An earlier version did, and stayed silent on 99.6% of bars.
     this.logger.debug(
       `Checklist ${checklistResult.conditionsMet}/5 conditions met`,
     );
@@ -131,10 +120,7 @@ export class AnalysisCoordinatorService {
     };
   }
 
-  /**
-   * Gathers what the entry checklist needs, reusing measurements already
-   * taken and adding only the few extras it needs on top.
-   */
+  /** What the entry checklist needs, reusing measurements already taken. */
   private buildChecklistInputs(
     context: IndicatorContext,
     regimeResult: MarketRegimeResult,
@@ -159,8 +145,7 @@ export class AnalysisCoordinatorService {
       );
     }
 
-    // The last closing price. Every measurement is based on closing prices,
-    // so the price compared against them has to be one too.
+    // A close, because everything it is compared against is a close.
     const currentPrice = closes[closes.length - 1];
 
     // Support / resistance derived from the same candle series.
@@ -168,9 +153,7 @@ export class AnalysisCoordinatorService {
     const { support, resistance } =
       this.indicatorsService.identifySupportResistance(candlesArr);
 
-    // Infer market structure from price position vs the S/R midpoint
-    // and trailing 20-candle pivots. Logic preserved verbatim from the
-    // legacy `gatherChecklistInputs` implementation.
+    // Structure from price vs the S/R midpoint and trailing 20-bar pivots.
     let marketStructure: 'HH/HL' | 'LH/LL' | 'ranging' | 'unknown' = 'unknown';
     if (support !== null && resistance !== null) {
       const mid = (support + resistance) / 2;
@@ -186,8 +169,7 @@ export class AnalysisCoordinatorService {
       }
     }
 
-    // The nearest important level, found the same way the rest of the app
-    // finds them — from actual turning points in price, not a fixed grid.
+    // Nearest level, from real turning points rather than a fixed grid.
     const levels = this.supportResistanceService.levelsFromCandles(
       candlesArr,
       context.timeframe as Timeframe,
@@ -200,11 +182,8 @@ export class AnalysisCoordinatorService {
           )
         : null;
 
-    // Direction is an INPUT when the caller knows it. A confirmation filter
-    // must be told which side it is confirming; deciding for itself and then
-    // vetoing is how support-zone arrivals came to be evaluated as shorts,
-    // where `rsi >= 60` and the UPPER Bollinger band can never pass.
-    // Falls back to trend-derived direction only when the caller has no view.
+    // Direction is an INPUT when the caller knows it. Guessing it here is how
+    // support arrivals came to be scored as shorts, which can never pass.
     const tradeType = direction ?? this.deriveTradeType(regimeResult, marketStructure);
 
     return {
@@ -230,16 +209,11 @@ export class AnalysisCoordinatorService {
   }
 
   /**
-   * Guesses a direction from the trend, in order:
-   *   1. the pattern of highs and lows — rising means up, falling means down
-   *   2. which side of the trend measure is stronger
-   *   3. otherwise, up
-   */
-  /**
-   * Only used when the caller does not say which direction it means. It is a
-   * guess, and a poor one whenever the direction comes from something other
-   * than the trend — arriving at support is a buy whatever the trend says.
-   * Pass the direction in wherever possible.
+   * Guesses a direction from the trend: highs and lows first, then which side
+   * of the trend measure is stronger, else up.
+   *
+   * A poor guess whenever direction comes from something other than trend —
+   * arriving at support is a buy whatever the trend says. Pass it in instead.
    */
   private deriveTradeType(
     regimeResult: MarketRegimeResult,

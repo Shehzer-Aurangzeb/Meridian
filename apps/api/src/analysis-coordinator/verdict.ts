@@ -4,12 +4,9 @@ import { Freshness } from './freshness';
 import { PlanResult } from './outcome';
 
 /**
- * The analysis written out as sentences.
- *
- * Nothing here is interpretation — every phrase just reads back a number that
- * was already worked out. That is why it is plain code and not an AI: it
- * cannot fail, cost money, or make something up. The AI explanation is a
- * separate, optional extra.
+ * The analysis written out as sentences. Every phrase reads back a number that
+ * already exists — no interpretation, so it cannot fail, cost money, or make
+ * anything up. The AI explanation is a separate, optional extra.
  */
 export interface Verdict {
   /** One line: the whole analysis reduced to its point. */
@@ -45,10 +42,7 @@ const ROUTE_WORDS: Record<string, string> = {
   CONFLUENCE_CHECKLIST: 'a confluence entry',
 };
 
-/**
- * Which plan to lead with: one that can be taken now, else one that is close,
- * else the nearest. Not "the best" — both plans stay on the page.
- */
+/** Which plan to lead with: actionable, else approaching, else nearest. */
 export function leadPlan(plans: TradePlan[]): TradePlan | null {
   if (plans.length === 0) return null;
   const byDistance = [...plans].sort(

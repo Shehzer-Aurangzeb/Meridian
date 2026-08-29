@@ -5,23 +5,13 @@ import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 import { ClaudeAnalysisResponse } from '../ai/interfaces/claude-response.types';
 import { AnalysisRecord } from './analyze.service';
 
-/**
- * What gets saved for one analysis run.
- *
- * TODO: two old columns are no longer written but kept in the database, so
- * past rows still show what the old system said at the time. They can be
- * dropped later if that history stops mattering.
- */
+/** What gets saved for one analysis run. */
 export interface CoordinatorRunInput {
   coordinatorResult: CoordinatorAnalysisResult;
   aiResponse: ClaudeAnalysisResponse | null;
   durationMs: number;
   errorMessage?: string | null;
-  /**
-   * Optional smart-TTL expiry. When provided, persisted on the row so
-   * downstream consumers (UI countdown, cleanup jobs) can reason about
-   * signal freshness. Null/omitted ⇒ no TTL recorded.
-   */
+  /** Optional TTL for the signal. Omitted means no expiry recorded. */
   expiresAt?: Date | null;
 }
 
@@ -31,12 +21,7 @@ export class CoordinatorPersistenceService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Fire-and-forget persistence of a completed coordinator run.
-   *
-   * Never throws. Persistence failures are logged but do not propagate —
-   * the SSE pipeline must never be blocked or corrupted by a DB error.
-   */
+  /** Save without waiting. Never throws — a DB error must not break the stream. */
   persist(input: CoordinatorRunInput): void {
     void this.write(input).catch((error) => {
       const message =
@@ -48,11 +33,7 @@ export class CoordinatorPersistenceService {
     });
   }
 
-  /**
-   * Persist a run that errored before producing a coordinator result.
-   * Used by the SSE controller's ERROR branch when the failure occurs
-   * before the strategy route has been determined.
-   */
+  /** Save a run that failed before it produced anything. */
   persistError(args: {
     symbol: string;
     timeframe: string;
@@ -84,10 +65,7 @@ export class CoordinatorPersistenceService {
       });
   }
 
-  /**
-   * Saves a complete analysis, levels and plans included. Waited on, unlike
-   * the other save: a scheduled run that failed to save has done nothing.
-   */
+  /** Save a whole analysis. Waited on — a run that did not save did nothing. */
   async persistAnalysis(record: AnalysisRecord): Promise<{ id: string }> {
     return this.prisma.coordinatorRun.create({
       data: {
@@ -95,8 +73,7 @@ export class CoordinatorPersistenceService {
         timeframe: record.timeframes.regime,
         regime: record.regime.regime,
         strategyRoute: record.route,
-        // Records whether a Claude call ran. Nothing narrates on this path
-        // yet — narration is a caller's flag, not a pipeline stage.
+        // Nothing narrates on this path; narration is asked for separately.
         shouldInvokeAI: false,
         aiAction: null,
         aiConfidence: null,
@@ -117,10 +94,7 @@ export class CoordinatorPersistenceService {
         timeframe: coordinatorResult.timeframe,
         regime: coordinatorResult.regimeResult.regime,
         strategyRoute: coordinatorResult.strategyRoute,
-        // The pipeline no longer emits a verdict, so this column now records
-        // what actually happened: did a Claude call run for this row. Kept
-        // rather than migrated, per the no-migration decision — historical
-        // rows keep their original "was this gated in" meaning.
+        // Now records whether a Claude call ran. Old rows keep the old meaning.
         shouldInvokeAI: aiResponse !== null,
         aiAction: aiResponse?.action ?? null,
         aiConfidence: aiResponse?.confidence ?? null,

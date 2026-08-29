@@ -3,16 +3,12 @@ import { scoreTrade } from '../common/replay/trade-scoring';
 import { TradePlan } from '../analysis/services/trade-plan.service';
 
 /**
- * Did the plan we printed actually work?
+ * Did the plan actually work? Replays the hours after an analysis against its
+ * own entry, stop and targets.
  *
- * Replays the hours after a saved analysis against its own entry, stop and
- * targets. It calls the same `scoreTrade` as the backtest, with the same time
- * windows, so a badge on the site and a trade in the backtest mean the same
- * thing.
- *
- * Worked out once by OutcomeScorerService and stored on the row. Read paths
- * never call this and never fetch candles — recomputing 603 outcomes on every
- * request cost 32 seconds, 92% of it network.
+ * Calls the same `scoreTrade` as the backtest, so a badge on the site and a
+ * trade in the backtest mean the same thing. Run once by OutcomeScorerService
+ * and stored — read paths never call this.
  */
 export type PlanOutcome =
   | 'PENDING'
@@ -23,11 +19,7 @@ export type PlanOutcome =
   | 'ALL_TARGETS'
   /** Opened, then ran out of time without hitting a target or the stop. */
   | 'EXPIRED'
-  /**
-   * The price history needed to judge this plan could not be loaded, so it gets
-   * no badge and no result. Saying nothing is better than showing a badge that
-   * might be wrong.
-   */
+  /** The price history could not be loaded, so there is no verdict to give. */
   | 'UNSCOREABLE';
 
 export interface PlanResult {
@@ -39,13 +31,7 @@ export interface PlanResult {
   netR: number | null;
   filledAt: Date | null;
   targetsHit: number;
-  /**
-   * The entry is split into three steps at different prices. Reaching the
-   * nearest one opens a fifth of the position; the rest only fills if price
-   * moves further in, and whatever is left is cancelled once the stop or the
-   * first target lands. So a real position is often smaller than the plan
-   * describes, and `r` is already scaled to the size actually held.
-   */
+  /** Entry steps that filled. A real position is often smaller than planned. */
   legsFilled: number;
   filledFraction: number;
   /** Bars the position was held for. 0 until it opens. */
@@ -53,17 +39,10 @@ export interface PlanResult {
 }
 
 /**
- * Outcomes that can never change again.
+ * Outcomes that can never change again — the candles that decided them are past.
  *
- * The candles that decided them are in the past, and adding later bars cannot
- * undo a stop or a target that already landed. PARTIAL belongs here too: the
- * scorer only emits it when `stopped` is true, so the position is closed —
- * "partial" describes how much profit was taken before the stop, not a trade
- * still running.
- *
- * MISSED and EXPIRED are terminal because both require their whole window to
- * have elapsed. UNSCOREABLE is deliberately absent: it means the price history
- * could not be loaded, which is a transport failure, not a verdict.
+ * PARTIAL is in here: scoreTrade only emits it when `stopped` is true, so the
+ * position is closed. UNSCOREABLE is not: that is a failed fetch, not a verdict.
  */
 const TERMINAL: ReadonlySet<string> = new Set<PlanOutcome>([
   'STOPPED',
@@ -77,33 +56,19 @@ export function isTerminalOutcome(outcome: string | null | undefined): boolean {
   return outcome !== null && outcome !== undefined && TERMINAL.has(outcome);
 }
 
-/**
- * Hours a plan gets to be reached before it counts as missed rather than still
- * waiting. Every backtested plan that ever filled did so within a day, half of
- * them within three hours; after that price had simply moved on.
- */
+/** Hours to reach the entry before the plan counts as missed. */
 export const FILL_WINDOW_HOURS = 24;
 
-/**
- * Hours an open position gets to finish before it is closed out at whatever
- * price it sat at. The same number the backtest uses, so the two agree.
- */
+/** Hours a position gets before it is closed at whatever price it sat at. */
 export const MAX_HOLD_HOURS = 72;
 
 /** Hours of price history needed to judge a plan, starting from the analysis. */
 export const OUTCOME_WINDOW_HOURS = FILL_WINDOW_HOURS + MAX_HOLD_HOURS;
 
 /**
- * Cost of opening and closing once, as a % of position value.
- *
- * MEASURED at the venue, August 2026 — fee tier and real spread on the ten
- * coins at the size actually traded. It replaces 0.14%, which was a fee plus a
- * guessed slippage taken from a different exchange's futures pricing.
- *
- * Deliberately one number rather than a fee and a spread added together: only
- * the total was measured, and splitting it would be inventing the halves.
- *
- * Kept here so the site and the backtest price trades identically.
+ * Cost of opening and closing once, as a % of position value. MEASURED at the
+ * venue, August 2026 — fee and real spread together, because only the total
+ * was measured. Shared with the backtest so both price trades identically.
  */
 export const DEFAULT_ROUND_TRIP_PCT = 0.25;
 
@@ -113,12 +78,9 @@ export function costR(riskPercent: number, roundTripPct = DEFAULT_ROUND_TRIP_PCT
 }
 
 /**
- * Is this price history good enough to judge the plan against?
- *
- * It has to START at the analysis and be long enough. History that begins
- * later is a different stretch of time, and judging a plan against it can turn
- * a finished trade back into "never started" or invent an entry from a price
- * touched weeks afterwards.
+ * Is this price history good enough to judge the plan against? It must START at
+ * the analysis and be long enough — history that begins later is a different
+ * stretch of time, and scoring against it invents fills that never happened.
  */
 export function isScoreable(
   candlesSince: Candle[],
@@ -184,16 +146,14 @@ export function scorePlans(
       };
     }
 
-    // This status needs an exit signal, and none is set here. If it ever shows
-    // up, someone has added an exit rule to the live path without giving it a
-    // badge — better to fail loudly than to display the wrong one.
+    // Nothing here sets an exitSignal, so this cannot happen. If it does,
+    // someone added an exit rule without giving it a badge.
     if (scored.status === 'SIGNAL_EXIT') {
       throw new Error('SIGNAL_EXIT from the live scorer: an exitSignal was configured');
     }
 
-    // A trade that has not finished is one of two things: the hold time is up,
-    // so it is over and valued where it sat (EXPIRED), or the hours simply have
-    // not passed yet, so it is genuinely still running (OPEN).
+    // Unfinished is one of two things: hold time is up (EXPIRED), or the hours
+    // simply have not passed yet (OPEN).
     const heldOut = elapsedHours >= (scored.barsToFill as number) + MAX_HOLD_HOURS;
     const outcome: PlanOutcome =
       scored.status === 'TIMEOUT' || scored.status === 'NO_FILL'

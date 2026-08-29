@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
 import { OutcomeScorerService } from './outcome-scorer.service';
+import { AnalysisStatusService } from './analysis-status.service';
 import { AnalysisCoordinatorModule } from './analysis-coordinator.module';
 
 const payload = {
@@ -61,7 +62,10 @@ describe('AnalysesController', () => {
     analyzer as unknown as AnalyzeService,
     persistence as unknown as CoordinatorPersistenceService,
     prisma as unknown as PrismaService,
-    binance as unknown as BinanceService,
+    new AnalysisStatusService(
+      prisma as unknown as PrismaService,
+      binance as unknown as BinanceService,
+    ),
     narrator as unknown as AnalystNarrationService,
     scorer as unknown as OutcomeScorerService,
   );
@@ -310,7 +314,7 @@ describe('AnalysesController.narrate', () => {
     {} as unknown as AnalyzeService,
     {} as unknown as CoordinatorPersistenceService,
     prisma as unknown as PrismaService,
-    {} as unknown as BinanceService,
+    {} as unknown as AnalysisStatusService,
     narrator as unknown as AnalystNarrationService,
     {} as unknown as OutcomeScorerService,
   );

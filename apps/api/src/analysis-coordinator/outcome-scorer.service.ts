@@ -15,28 +15,17 @@ import { leadPlan } from './verdict';
 /**
  * Scores saved analyses once and writes the result to the row.
  *
- * The whole point is WHERE the work happens, not what it computes: this calls
- * exactly the same `scorePlans` the read paths used to call, with the same
- * candles and the same windows. Nothing about a verdict changes — only that it
- * is derived once, here, instead of on every page load.
- *
- * Two rules keep it cheap and keep it honest:
- *
- *   1. A terminal outcome is never re-scored. STOPPED, PARTIAL, ALL_TARGETS,
- *      MISSED and EXPIRED are decided by candles that are already in the past.
- *   2. `scoredAt` is the settled marker. Null means "score me" — including for
- *      a row whose candles could not be fetched, so a network failure is
- *      retried rather than frozen into the record as a verdict.
+ * Two rules:
+ *   1. A terminal outcome is never re-scored. Its candles are already past.
+ *   2. `scoredAt` null means "score me" — including a row whose candles would
+ *      not load, so a network failure is retried, not frozen as a verdict.
  */
 
 /** Hourly bars from the analysis, plus two for the part-formed hour at each end. */
 const OUTCOME_TIMEFRAME: TimeInterval = '1h';
 const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
 
-/**
- * How many rows to fetch candles for at once. The same 8 the read path used,
- * which stayed comfortably inside Binance's weight budget for months.
- */
+/** Rows fetched at once. 8 stays comfortably inside Binance's weight budget. */
 const FETCH_CONCURRENCY = 8;
 
 /** What one row needs before it can be scored. */
@@ -64,12 +53,9 @@ export interface ScoreRunResult {
 }
 
 /**
- * The columns written for one row, derived in ONE place from ONE PlanResult[].
- *
- * The scalars are a projection of `outcomePayload`, not a second computation.
- * A second definition of netR is exactly the drift that cost a checkpoint the
- * last time it happened, so there is no second definition — just a lift of the
- * lead plan's fields out of the array the detail page reads.
+ * The columns written for one row. The scalars are a PROJECTION of
+ * `outcomePayload` — the lead plan's fields lifted out of it, never a second
+ * computation of netR.
  */
 export function outcomeColumns(
   plans: AnalysisRecord['plans'],
@@ -80,8 +66,7 @@ export function outcomeColumns(
   const result = lead ? results[plans.indexOf(lead)] : undefined;
 
   return {
-    // Dates inside become ISO strings on the way into JSONB. Read paths only
-    // pass them back out, so nothing ever calls getTime() on one.
+    // Dates become ISO strings in JSONB. Read paths only pass them back out.
     outcomePayload: results as unknown as Prisma.InputJsonValue,
     scoredAt,
     outcome: result?.outcome ?? null,
@@ -103,11 +88,8 @@ export class OutcomeScorerService {
   ) {}
 
   /**
-   * Score every row that can still move, and every row never scored.
-   *
-   * `ids` restricts it to specific rows — used right after an analysis is
-   * saved, so a fresh row shows PENDING immediately instead of waiting for the
-   * next scheduled run.
+   * Score every row that can still move, plus every row never scored.
+   * `ids` narrows it to specific rows — used right after an analysis is saved.
    */
   async scoreUnresolved(options: { ids?: string[]; now?: number } = {}): Promise<ScoreRunResult> {
     const started = Date.now();
@@ -116,9 +98,8 @@ export class OutcomeScorerService {
     const rows = (await this.prisma.coordinatorRun.findMany({
       where: {
         ...(options.ids ? { id: { in: options.ids } } : {}),
-        // Unsettled, or settled at an outcome that is still moving. A terminal
-        // row matches neither arm, which is what makes this cheap: 29 rows of
-        // 603 rather than all of them.
+        // Unsettled, or still moving. A terminal row matches neither arm,
+        // which is what makes this cheap.
         OR: [{ scoredAt: null }, { outcome: { in: ['PENDING', 'OPEN'] } }],
       },
       orderBy: { createdAt: 'desc' },
@@ -135,10 +116,7 @@ export class OutcomeScorerService {
     return this.score(rows, now, started);
   }
 
-  /**
-   * Score EVERY row, terminal ones included. The one-off backfill, and nothing
-   * else — it is the only caller allowed past the terminal guard.
-   */
+  /** Score EVERY row, terminal included. The backfill — the only caller allowed past the guard. */
   async scoreAll(options: { now?: number } = {}): Promise<ScoreRunResult> {
     const started = Date.now();
     const rows = (await this.prisma.coordinatorRun.findMany({
@@ -171,9 +149,8 @@ export class OutcomeScorerService {
       ms: 0,
     };
 
-    // The guard. A settled terminal row reaching this loop means the query lost
-    // its filter, and the symptom of that bug is silent: everything still works,
-    // it is just slow again and burning Binance quota. Fail instead.
+    // A settled terminal row here means the query lost its filter. That bug is
+    // silent — it still works, just slow again — so fail loudly instead.
     if (!options.allowTerminal) {
       const frozen = rows.filter((r) => r.scoredAt !== null && isTerminalOutcome(r.outcome));
       if (frozen.length > 0) {
@@ -185,9 +162,8 @@ export class OutcomeScorerService {
       }
     }
 
-    // Rows that build no plan are settled without touching the network. This is
-    // 145 of 603 in production — a quarter of the fetching the read path used to
-    // do was for windows thrown away fifteen lines later.
+    // No plan means nothing to score, so no candles are fetched. 145 of 603
+    // rows in production.
     const needCandles: Scorable[] = [];
     const noPlan: string[] = [];
     for (const row of rows) {
@@ -199,7 +175,7 @@ export class OutcomeScorerService {
       needCandles.push(row);
     }
     if (noPlan.length > 0) {
-      // Every one of these writes the same values, so it is one statement.
+      // All the same values, so one statement.
       await this.prisma.coordinatorRun.updateMany({
         where: { id: { in: noPlan } },
         data: outcomeColumns([], [], new Date(now)) as Prisma.CoordinatorRunUpdateManyMutationInput,
@@ -221,8 +197,8 @@ export class OutcomeScorerService {
 
       for (const [row, candles] of fetched) {
         const analysis = row.coordinatorPayload as AnalysisRecord;
-        // Strictly after the analysis: the hour already in progress when it was
-        // taken must not be allowed to open the trade after the fact.
+        // Strictly after the analysis: the hour in progress when it was taken
+        // must not open the trade after the fact.
         const results = scorePlans(
           analysis.plans,
           candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
@@ -230,9 +206,8 @@ export class OutcomeScorerService {
           now,
         );
 
-        // A window that could not be loaded is a transport failure, not a
-        // verdict. Record what it looks like today so the badge is unchanged,
-        // but leave `scoredAt` null so the next run tries again.
+        // Failed fetch: keep the badge honest, but leave `scoredAt` null so
+        // the next run tries again.
         const failed = results.every((r) => r.outcome === 'UNSCOREABLE');
         if (failed) out.unscoreable += 1;
         else out.scored += 1;

@@ -19,11 +19,7 @@ import {
 } from './analysis-coordinator.service';
 import { CoordinatorAnalysisResult } from './interfaces/coordinator.types';
 
-/**
- * One complete analysis: what the command line prints, what gets saved, and
- * what the chart draws. One shape for all three, so a saved analysis can
- * always be reproduced.
- */
+/** One complete analysis. Same shape for the CLI, the database and the chart. */
 export interface AnalysisRecord {
   symbol: string;
   /** Which chart each part was measured on. Always stated, never assumed. */
@@ -35,11 +31,7 @@ export interface AnalysisRecord {
   };
   regime: CoordinatorAnalysisResult['regimeResult'];
   route: CoordinatorAnalysisResult['strategyRoute'];
-  /**
-   * One checklist per direction. A buy plan and a sell plan come out of the
-   * same map, and a checklist only makes sense for one side at a time — a
-   * single shared one put the wrong side's score next to half the plans.
-   */
+  /** One per direction. A shared one put the wrong side's score on half the plans. */
   checklists: Partial<
     Record<'long' | 'short', NonNullable<CoordinatorAnalysisResult['checklistResult']>>
   > | null;
@@ -50,10 +42,8 @@ export interface AnalysisRecord {
 }
 
 /**
- * Puts the whole analysis together: what kind of market this is, and where
- * the levels and plans are.
- *
- * It does not print, save, or call the AI — those are the caller's job.
+ * Puts the analysis together: market type, levels, plans. Does not print,
+ * save, or call the AI — that is the caller's job.
  */
 @Injectable()
 export class AnalyzeService {
@@ -72,8 +62,7 @@ export class AnalyzeService {
     const startedAt = Date.now();
     const coin = symbol.toUpperCase();
 
-    // What kind of market this is. Fetches its own, longer history: one of
-    // its measures compares today against the last 200 readings.
+    // Fetches its own longer history — one measure needs 200 past readings.
     const candles = await this.binanceService.getCandles(
       coin,
       ANALYSIS_TIMEFRAME,
@@ -93,15 +82,12 @@ export class AnalyzeService {
       regime,
     );
 
-    // The levels and plans. Deliberately independent of the market type, so
-    // a plan is never quietly hidden because of it.
-    //
+    // Independent of market type, so a plan is never quietly hidden.
     // TODO: whether plans SHOULD be filtered by market type is untested.
     const map = await this.levelMapService.build(coin);
     const plans = this.tradePlanService.buildPlans(map.zones, map.spot, map.atr);
 
-    // The checklist confirms a trade, so it has to be told which side it is
-    // confirming. Run once for each direction a plan was built for.
+    // Must be told which side it confirms, so once per direction.
     const checklists =
       routed.strategyRoute === 'CONFLUENCE_CHECKLIST'
         ? (Object.fromEntries(
