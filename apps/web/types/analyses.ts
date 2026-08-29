@@ -208,6 +208,11 @@ export interface AnalysisStatus {
   /** How many targets price reached, in order. */
   targetsHit: number;
   currentPrice: number;
+  /**
+   * When the outcome was scored. Only meaningful for OPEN trades: their netR
+   * is a mark at the last close the scorer saw, so it is as old as this.
+   */
+  scoredAt: string | null;
   plan: {
     entries: number[];
     averageEntry: number;

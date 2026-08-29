@@ -15,15 +15,11 @@ import { BinanceService } from '../market-data/market-data.service';
 import { AnalysisRecord, AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
 import { analysisFreshness, Freshness } from './freshness';
-import {
-  OUTCOME_WINDOW_HOURS,
-  PlanOutcome,
-  PlanResult,
-  scorePlans,
-} from './outcome';
+import { PlanOutcome, PlanResult } from './outcome';
+import { OutcomeScorerService } from './outcome-scorer.service';
 import { buildVerdict, leadPlan, Verdict } from './verdict';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
-import { Candle, TimeInterval } from '../common/types/candle.types';
+import { TradePlan } from '../analysis/services/trade-plan.service';
 
 /** A saved narration, stored in the `aiPayload` Json column. */
 export interface SavedNarration {
@@ -45,10 +41,20 @@ export interface AnalysisStatus {
   /** After fees. This is the number the scoreboard adds up. */
   netR: number | null;
   freshness: Freshness;
-  filledAt: Date | null;
+  /** ISO string: read back out of the stored outcome, never re-parsed. */
+  filledAt: string | null;
   /** How many targets price reached, in order. */
   targetsHit: number;
   currentPrice: number;
+  /**
+   * When this outcome was worked out. Null means nothing has scored it yet.
+   *
+   * It matters for OPEN trades and only for them: their `netR` is a MARK at
+   * the last close the scorer saw, so between job runs it is up to the
+   * schedule's interval out of date. Every other outcome is finished and this
+   * is just provenance.
+   */
+  scoredAt: string | null;
   /** Just the prices a card draws. The full plan is far larger and unused here. */
   plan: {
     entries: number[];
@@ -67,12 +73,37 @@ function readNarration(payload: unknown): SavedNarration | null {
 }
 
 /**
- * The price history each analysis is judged against: hourly bars starting at
- * the analysis itself, long enough to cover the fill and hold windows. The
- * extra 2 bars allow for the part-formed hour at each end.
+ * A plan's stored result, as it comes back out of JSONB. Identical to
+ * `PlanResult` except that `filledAt` is the ISO string Postgres stored, not a
+ * Date — nothing here parses it, it is passed straight back out.
  */
-const OUTCOME_TIMEFRAME: TimeInterval = '1h';
-const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
+type StoredResult = Omit<PlanResult, 'filledAt'> & { filledAt: string | null };
+
+/**
+ * Read the stored results off a row.
+ *
+ * Null means the scoring job has not reached this row yet — a new analysis
+ * between its POST and the write that follows, or a row whose candle window
+ * could not be fetched. Both are honestly "not scored", which is the badge
+ * UNSCOREABLE already carries, so that is what they get.
+ */
+function storedResults(payload: unknown, plans: TradePlan[]): StoredResult[] | null {
+  return Array.isArray(payload) && payload.length === plans.length
+    ? (payload as StoredResult[])
+    : null;
+}
+
+const NOT_SCORED = (direction: 'long' | 'short'): StoredResult => ({
+  direction,
+  outcome: 'UNSCOREABLE',
+  r: null,
+  netR: null,
+  filledAt: null,
+  targetsHit: 0,
+  legsFilled: 0,
+  filledFraction: 0,
+  barsHeld: 0,
+});
 
 /**
  * Analyses before this date were built by an older version of the planner that
@@ -88,13 +119,6 @@ const OUTCOME_CANDLES = OUTCOME_WINDOW_HOURS + 2;
  * needs a database migration.
  */
 export const RESULTS_EPOCH = new Date('2026-08-16T00:00:00Z');
-
-/**
- * How many price-history requests to send at once. Each row needs its own, and
- * a page can hold up to 1000 — sending them all together gets the exchange to
- * block us.
- */
-const OUTCOME_FETCH_CONCURRENCY = 8;
 
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
 
@@ -116,6 +140,7 @@ export class AnalysesController {
     private readonly prisma: PrismaService,
     private readonly binance: BinanceService,
     private readonly narrator: AnalystNarrationService,
+    private readonly scorer: OutcomeScorerService,
   ) {}
 
   @Post()
@@ -132,6 +157,10 @@ export class AnalysesController {
 
     const analysis = await this.analyzeService.analyze(coin);
     const { id } = await this.persistence.persistAnalysis(analysis);
+    // Score it now, on this write path. Without it the row would show "Not
+    // scored" until the next scheduled run — read paths no longer score
+    // anything, so a row nobody has scored has nothing to show.
+    await this.scorer.scoreUnresolved({ ids: [id] });
     return { id, analysis };
   }
 
@@ -193,6 +222,8 @@ export class AnalysesController {
         errorMessage: true,
         createdAt: true,
         coordinatorPayload: wantStatus,
+        outcomePayload: wantStatus,
+        scoredAt: wantStatus,
       },
     });
 
@@ -208,7 +239,7 @@ export class AnalysesController {
       count: analyses.length,
       truncated,
       ...window,
-      analyses: analyses.map(({ coordinatorPayload, ...row }) => ({
+      analyses: analyses.map(({ coordinatorPayload, outcomePayload, scoredAt, ...row }) => ({
         ...row,
         status: statuses.get(row.id) ?? null,
       })),
@@ -218,15 +249,26 @@ export class AnalysesController {
   /**
    * Work out how every row on the page turned out.
    *
-   * The current price is looked up once per coin. The price HISTORY cannot be
-   * shared, because each analysis is judged from its own moment in time — so
-   * that is one request per row. They are small and cached.
+   * ZERO candle fetching. Every outcome was scored once by OutcomeScorerService
+   * and stored on the row; this reads it back. What is still worked out here is
+   * only what depends on the CURRENT price — freshness — and that is one price
+   * lookup per coin, not one price history per row.
+   *
+   * This used to fetch a 98-bar window for every row, anchored to that row's
+   * own createdAt, so nothing could be shared or cached: 603 rows meant 603
+   * network requests and 92% of a 32-second response.
    */
   private async statusBySymbol(
-    rows: Array<{ id: string; symbol: string; createdAt: Date; coordinatorPayload: unknown }>,
+    rows: Array<{
+      id: string;
+      symbol: string;
+      createdAt: Date;
+      coordinatorPayload: unknown;
+      outcomePayload: unknown;
+      scoredAt: Date | null;
+    }>,
   ): Promise<Map<string, AnalysisStatus>> {
     const symbols = [...new Set(rows.map((r) => r.symbol))];
-    const now = Date.now();
 
     const perSymbol = new Map(
       await Promise.all(
@@ -245,27 +287,6 @@ export class AnalysesController {
         }),
       ),
     );
-
-    // One history request per row, a few at a time. A row whose history cannot
-    // be loaded is marked unscoreable rather than judged against the wrong
-    // stretch of time.
-    const perRow = new Map<string, Candle[]>();
-    for (let i = 0; i < rows.length; i += OUTCOME_FETCH_CONCURRENCY) {
-      const batch = await Promise.all(
-        rows.slice(i, i + OUTCOME_FETCH_CONCURRENCY).map(async (row) => {
-          const candles = await this.binance
-            .getCandlesFrom(
-              row.symbol,
-              OUTCOME_TIMEFRAME,
-              row.createdAt.getTime(),
-              OUTCOME_CANDLES,
-            )
-            .catch(() => [] as Candle[]);
-          return [row.id, candles] as const;
-        }),
-      );
-      for (const [id, candles] of batch) perRow.set(id, candles);
-    }
 
     const out = new Map<string, AnalysisStatus>();
     for (const row of rows) {
@@ -291,20 +312,17 @@ export class AnalysesController {
           filledAt: null,
           targetsHit: 0,
           currentPrice: shared.price,
+          scoredAt: row.scoredAt?.toISOString() ?? null,
           plan: null,
         });
         continue;
       }
 
-      // Only the lead plan: the card shows one line.
-      const [scored] = scorePlans(
-        [lead],
-        (perRow.get(row.id) ?? []).filter(
-          (c) => c.time.getTime() > row.createdAt.getTime(),
-        ),
-        row.createdAt,
-        now,
-      );
+      // Only the lead plan: the card shows one line. The stored array holds one
+      // result per plan in plan order, so this picks the same one the old code
+      // scored on its own.
+      const stored = storedResults(row.outcomePayload, analysis.plans);
+      const scored = stored?.[analysis.plans.indexOf(lead)] ?? NOT_SCORED(lead.direction);
 
       out.set(row.id, {
         direction: scored.direction,
@@ -317,6 +335,7 @@ export class AnalysesController {
         filledAt: scored.filledAt,
         targetsHit: scored.targetsHit,
         currentPrice: shared.price,
+        scoredAt: row.scoredAt?.toISOString() ?? null,
         plan: {
           entries: lead.entries.map((e) => e.price),
           averageEntry: lead.averageEntry,
@@ -339,7 +358,7 @@ export class AnalysesController {
     createdAt: Date;
     currentPrice: number;
     freshness: Freshness;
-    outcomes: PlanResult[];
+    outcomes: StoredResult[];
     verdict: Verdict;
     narration: SavedNarration | null;
     analysis: AnalysisRecord;
@@ -351,6 +370,7 @@ export class AnalysesController {
         symbol: true,
         createdAt: true,
         coordinatorPayload: true,
+        outcomePayload: true,
         aiPayload: true,
       },
     });
@@ -360,25 +380,15 @@ export class AnalysesController {
 
     const analysis = row.coordinatorPayload as unknown as AnalysisRecord;
 
-    // Everything the page needs, fetched together: the current price, the
-    // newest analysis for this coin, and the price history since this one.
-    const [currentPrice, newestRow, candles] = await Promise.all([
+    // Both of these depend on the CURRENT price, so they cannot be stored. The
+    // outcomes can, and are — no candles are fetched on this path either.
+    const [currentPrice, newestRow] = await Promise.all([
       this.binance.getCurrentPrice(row.symbol),
       this.prisma.coordinatorRun.findFirst({
         where: { symbol: row.symbol, id: { not: row.id } },
         orderBy: { createdAt: 'desc' },
         select: { coordinatorPayload: true },
       }),
-      // Hourly bars, so a stop or target touched during the day is not missed.
-      // Starting at the analysis, not at now.
-      this.binance
-        .getCandlesFrom(
-          row.symbol,
-          OUTCOME_TIMEFRAME,
-          row.createdAt.getTime(),
-          OUTCOME_CANDLES,
-        )
-        .catch(() => [] as Candle[]),
     ]);
 
     const newest = newestRow?.coordinatorPayload as unknown as AnalysisRecord | undefined;
@@ -388,14 +398,10 @@ export class AnalysesController {
       currentPrice,
       newest?.map ? { map: newest.map } : null,
     );
-    // Strictly after the analysis: the hour already in progress when it was
-    // taken must not be allowed to open the trade after the fact.
-    const outcomes = scorePlans(
-      analysis.plans,
-      candles.filter((c) => c.time.getTime() > row.createdAt.getTime()),
-      row.createdAt,
-      Date.now(),
-    );
+    // One result per plan, in plan order, exactly as the page renders them.
+    const outcomes =
+      storedResults(row.outcomePayload, analysis.plans ?? []) ??
+      (analysis.plans ?? []).map((p) => NOT_SCORED(p.direction));
 
     return {
       id: row.id,
@@ -403,7 +409,7 @@ export class AnalysesController {
       currentPrice,
       freshness,
       outcomes,
-      verdict: buildVerdict(analysis, freshness, outcomes, currentPrice),
+      verdict: buildVerdict(analysis, freshness, outcomes as unknown as PlanResult[], currentPrice),
       narration: readNarration(row.aiPayload),
       analysis,
     };

@@ -7,6 +7,7 @@ import { CoordinatorPersistenceService } from './coordinator-persistence.service
 import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
 import { AnalystNarrationService } from '../ai/analyst-narration.service';
+import { OutcomeScorerService } from './outcome-scorer.service';
 import { AnalysisCoordinatorModule } from './analysis-coordinator.module';
 
 const payload = {
@@ -54,6 +55,7 @@ describe('AnalysesController', () => {
   const analyzer = { analyze: jest.fn() };
   const persistence = { persistAnalysis: jest.fn() };
   const narrator = { narrate: jest.fn() };
+  const scorer = { scoreUnresolved: jest.fn() };
 
   const controller = new AnalysesController(
     analyzer as unknown as AnalyzeService,
@@ -61,7 +63,24 @@ describe('AnalysesController', () => {
     prisma as unknown as PrismaService,
     binance as unknown as BinanceService,
     narrator as unknown as AnalystNarrationService,
+    scorer as unknown as OutcomeScorerService,
   );
+
+  /** One stored result, as it comes back out of JSONB — filledAt is a string. */
+  const stored = (over: Record<string, unknown> = {}) => [
+    {
+      direction: 'long',
+      outcome: 'STOPPED',
+      r: -1,
+      netR: -1.1,
+      filledAt: '2026-08-20T00:00:00.000Z',
+      targetsHit: 0,
+      legsFilled: 1,
+      filledFraction: 0.2,
+      barsHeld: 3,
+      ...over,
+    },
+  ];
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -105,52 +124,81 @@ describe('AnalysesController', () => {
     expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select.coordinatorPayload).toBe(
       false,
     );
+    expect(prisma.coordinatorRun.findMany.mock.calls[0][0].select.outcomePayload).toBe(false);
     expect(binance.getCurrentPrice).not.toHaveBeenCalled();
   });
 
-  it('fetches price per COIN but the replay window per ROW', async () => {
+  it('reads the stored outcome and fetches NO candles at all', async () => {
     const rows = [
-      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
-      { id: 'b', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
-      { id: 'c', symbol: 'ETH', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload, outcomePayload: stored() },
+      { id: 'b', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload, outcomePayload: stored() },
+      { id: 'c', symbol: 'ETH', createdAt: new Date(0), coordinatorPayload: payload, outcomePayload: stored() },
     ];
     prisma.coordinatorRun.findMany.mockResolvedValue(rows);
     prisma.coordinatorRun.findFirst.mockResolvedValue({ coordinatorPayload: payload });
     binance.getCurrentPrice.mockResolvedValue(100);
-    binance.getCandlesFrom.mockResolvedValue([]);
 
     const result = await controller.list(undefined, undefined, 'true');
 
     // Price is still shared across rows of the same coin — two coins, two calls.
     expect(binance.getCurrentPrice).toHaveBeenCalledTimes(2);
-    // The replay window cannot be shared: each row is scored from its own
-    // createdAt, so it is one fetch per ROW, not per coin.
-    expect(binance.getCandlesFrom).toHaveBeenCalledTimes(3);
-    expect(binance.getCandlesFrom.mock.calls[0][2]).toBe(0); // startTime = createdAt
+    // THE point of the change. Scoring 603 rows from raw candles on every
+    // request was 92% of a 32-second response, and the window could not be
+    // shared because each row is anchored to its own createdAt. Not fewer
+    // fetches — none.
+    expect(binance.getCandlesFrom).not.toHaveBeenCalled();
+    expect(binance.getCandlesPaged).not.toHaveBeenCalled();
 
     const first = result.analyses[0] as { status: { netR: number | null } };
-    // Dated 1970 and Binance returned nothing for that window. It is not MISSED
-    // — we do not know what happened — so it is explicitly unscoreable.
     expect(first.status).toMatchObject({
       direction: 'long',
-      outcome: 'UNSCOREABLE',
+      outcome: 'STOPPED',
+      netR: -1.1,
       targetsHit: 0,
+      filledAt: '2026-08-20T00:00:00.000Z',
       // The ladder, stop and targets a card draws — projected, not the whole plan.
       plan: { entries: [102, 100, 98], stop: 90, targets: [110] },
     });
-    // Never filled, so there is no R to charge a cost against.
-    expect(first.status.netR).toBeNull();
-    // The payload is read to score, never returned.
+    // Neither payload is returned: one is large, the other is projected into
+    // `status` already.
     expect(result.analyses[0]).not.toHaveProperty('coordinatorPayload');
+    expect(result.analyses[0]).not.toHaveProperty('outcomePayload');
+  });
+
+  it('says "not scored" rather than inventing a verdict for an unscored row', async () => {
+    prisma.coordinatorRun.findMany.mockResolvedValue([
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload, outcomePayload: null },
+    ]);
+    prisma.coordinatorRun.findFirst.mockResolvedValue(null);
+    binance.getCurrentPrice.mockResolvedValue(100);
+
+    const result = await controller.list(undefined, undefined, 'true');
+
+    // A row the job has not reached is not MISSED and not a loss. It is not
+    // knowable yet, which is exactly what UNSCOREABLE means.
+    expect((result.analyses[0] as { status: { outcome: string } }).status.outcome).toBe(
+      'UNSCOREABLE',
+    );
+    expect(binance.getCandlesFrom).not.toHaveBeenCalled();
+  });
+
+  it('scores a freshly created analysis on the write path', async () => {
+    analyzer.analyze.mockResolvedValue(payload);
+    persistence.persistAnalysis.mockResolvedValue({ id: 'new_1' });
+
+    await controller.run('BTC');
+
+    // Without this the new row would read "not scored" until the next
+    // scheduled run, because no read path scores anything any more.
+    expect(scorer.scoreUnresolved).toHaveBeenCalledWith({ ids: ['new_1'] });
   });
 
   it('drops the status of a coin Binance cannot serve, not its row', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([
-      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload },
+      { id: 'a', symbol: 'BTC', createdAt: new Date(0), coordinatorPayload: payload, outcomePayload: stored() },
     ]);
     prisma.coordinatorRun.findFirst.mockResolvedValue(null);
     binance.getCurrentPrice.mockRejectedValue(new Error('binance down'));
-    binance.getCandlesFrom.mockRejectedValue(new Error('binance down'));
 
     const result = await controller.list(undefined, undefined, 'true');
     expect(result.count).toBe(1);
@@ -181,35 +229,6 @@ describe('AnalysesController', () => {
     expect(plain.epoch).toBe(RESULTS_EPOCH.toISOString());
   });
 
-  it('fetches the replay windows in bounded batches, not one burst', async () => {
-    const rows = Array.from({ length: 20 }, (_, i) => ({
-      id: `r${i}`,
-      symbol: 'BTC',
-      createdAt: new Date(0),
-      coordinatorPayload: payload,
-    }));
-    prisma.coordinatorRun.findMany.mockResolvedValue(rows);
-    prisma.coordinatorRun.findFirst.mockResolvedValue(null);
-    binance.getCurrentPrice.mockResolvedValue(100);
-
-    let live = 0;
-    let peak = 0;
-    binance.getCandlesFrom.mockImplementation(async () => {
-      live += 1;
-      peak = Math.max(peak, live);
-      await new Promise((r) => setTimeout(r, 1));
-      live -= 1;
-      return [];
-    });
-
-    await controller.list(undefined, undefined, 'true');
-
-    expect(binance.getCandlesFrom).toHaveBeenCalledTimes(20);
-    // 1000 rows is a legal limit, and 1000 simultaneous klines requests is how
-    // an IP gets banned off the exchange.
-    expect(peak).toBeLessThanOrEqual(8);
-  });
-
   it('caps and floors the list limit rather than trusting the query', async () => {
     prisma.coordinatorRun.findMany.mockResolvedValue([]);
     await controller.list(undefined, '9999');
@@ -232,23 +251,24 @@ describe('AnalysesController', () => {
       symbol: 'BTC',
       createdAt: new Date(0),
       coordinatorPayload: payload,
+      outcomePayload: null,
     });
     prisma.coordinatorRun.findFirst.mockResolvedValue({
       coordinatorPayload: { map: { zones: [{ center: 500 }] } },
     });
     binance.getCurrentPrice.mockResolvedValue(120);
-    binance.getCandlesFrom.mockResolvedValue([]);
 
     const res = await controller.detail('run_1');
     // Price is above the long's stop so it is not invalidated, but the newest
     // map kept none of its zones.
     expect(res.freshness).toBe('SUPERSEDED');
     expect(res.currentPrice).toBe(120);
-    // The fixture is dated 1970 and no candles came back for its window. That
-    // is not "passed by" — it is not knowable, and saying MISSED would be the
-    // bug this replaces.
+    // Nothing has scored this row yet. That is not "passed by" — it is not
+    // knowable, and saying MISSED would be the bug this replaces.
     expect(res.outcomes.map((o) => o.outcome)).toEqual(['UNSCOREABLE']);
     expect(res.outcomes[0].r).toBeNull();
+    // The detail page is a read path too.
+    expect(binance.getCandlesFrom).not.toHaveBeenCalled();
     // The newest-row lookup must exclude the row being read, or every
     // analysis would be compared against itself and never go stale.
     expect(prisma.coordinatorRun.findFirst.mock.calls[0][0].where).toEqual({
@@ -292,6 +312,7 @@ describe('AnalysesController.narrate', () => {
     prisma as unknown as PrismaService,
     {} as unknown as BinanceService,
     narrator as unknown as AnalystNarrationService,
+    {} as unknown as OutcomeScorerService,
   );
 
   const full = payload;

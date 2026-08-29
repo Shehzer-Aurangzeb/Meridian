@@ -10,8 +10,9 @@ import { TradePlan } from '../analysis/services/trade-plan.service';
  * windows, so a badge on the site and a trade in the backtest mean the same
  * thing.
  *
- * Worked out fresh each time it is read. Nothing is stored, so nothing can go
- * stale and there is no background job to keep in step.
+ * Worked out once by OutcomeScorerService and stored on the row. Read paths
+ * never call this and never fetch candles — recomputing 603 outcomes on every
+ * request cost 32 seconds, 92% of it network.
  */
 export type PlanOutcome =
   | 'PENDING'
@@ -47,6 +48,33 @@ export interface PlanResult {
    */
   legsFilled: number;
   filledFraction: number;
+  /** Bars the position was held for. 0 until it opens. */
+  barsHeld: number;
+}
+
+/**
+ * Outcomes that can never change again.
+ *
+ * The candles that decided them are in the past, and adding later bars cannot
+ * undo a stop or a target that already landed. PARTIAL belongs here too: the
+ * scorer only emits it when `stopped` is true, so the position is closed —
+ * "partial" describes how much profit was taken before the stop, not a trade
+ * still running.
+ *
+ * MISSED and EXPIRED are terminal because both require their whole window to
+ * have elapsed. UNSCOREABLE is deliberately absent: it means the price history
+ * could not be loaded, which is a transport failure, not a verdict.
+ */
+const TERMINAL: ReadonlySet<string> = new Set<PlanOutcome>([
+  'STOPPED',
+  'PARTIAL',
+  'ALL_TARGETS',
+  'MISSED',
+  'EXPIRED',
+]);
+
+export function isTerminalOutcome(outcome: string | null | undefined): boolean {
+  return outcome !== null && outcome !== undefined && TERMINAL.has(outcome);
 }
 
 /**
@@ -119,6 +147,7 @@ const UNSCOREABLE = (direction: 'long' | 'short'): PlanResult => ({
   targetsHit: 0,
   legsFilled: 0,
   filledFraction: 0,
+  barsHeld: 0,
 });
 
 export function scorePlans(
@@ -151,6 +180,7 @@ export function scorePlans(
         targetsHit: 0,
         legsFilled: 0,
         filledFraction: 0,
+        barsHeld: 0,
       };
     }
 
@@ -181,6 +211,7 @@ export function scorePlans(
       targetsHit: scored.targetsHit,
       legsFilled: scored.legsFilled,
       filledFraction: scored.filledFraction,
+      barsHeld: scored.barsHeld,
     };
   });
 }

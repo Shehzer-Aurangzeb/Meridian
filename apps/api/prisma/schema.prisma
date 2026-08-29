@@ -58,9 +58,42 @@ model CoordinatorRun {
 
   createdAt DateTime  @default(now())
   expiresAt DateTime?
-  entryFilledAt DateTime?
+
+  /// ── The scored outcome, written by the job and never on a read path ──
+  ///
+  /// Scoring one row costs 3.9 ms; fetching the candles it scores costs ~360 ms
+  /// of network. Recomputing on every read made the history page a 32-second
+  /// wait, 92% of it spent re-deriving results that finished days ago.
+  ///
+  /// `scoredAt` is the settled marker, not just a timestamp: null means "score
+  /// me". A row whose candles could not be fetched keeps `outcome` at
+  /// UNSCOREABLE but leaves `scoredAt` null, so it is retried rather than
+  /// frozen at a failure. See OutcomeScorerService.
+
+  /// Every plan's result, in the same order as `coordinatorPayload.plans`.
+  /// The detail page renders one per plan, so the lead plan alone is not
+  /// enough. Shape is PlanResult[] from outcome.ts.
+  outcomePayload Json?
+  /// When the job last settled this row. Null means it still needs scoring.
+  scoredAt DateTime?
+
+  /// The lead plan's result, lifted out of `outcomePayload` so the list and
+  /// the stats endpoint can filter and GROUP BY without opening the JSON.
+  /// Written by one function beside the JSON, never derived twice.
+  outcome          String?
+  outcomeDirection String?
+  /// Result in R before costs. Null until the trade opens.
+  grossR           Float?
+  /// After costs. This is the number the scoreboard adds up.
+  netR             Float?
+  targetsHit       Int?
+  /// When the first entry step filled. Null until it does.
+  entryFilledAt    DateTime?
 
   @@index([symbol, createdAt])
+  /// The job's query: unsettled rows, plus the ones that can still move.
+  @@index([scoredAt])
+  @@index([outcome])
   @@index([strategyRoute, createdAt])
   @@index([aiAction, createdAt])
 }

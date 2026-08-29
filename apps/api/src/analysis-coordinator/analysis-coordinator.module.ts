@@ -11,6 +11,7 @@ import { AnalysisCoordinatorService } from './analysis-coordinator.service';
 import { AnalysesController } from './analyses.controller';
 import { AnalyzeService } from './analyze.service';
 import { CoordinatorPersistenceService } from './coordinator-persistence.service';
+import { OutcomeScorerService } from './outcome-scorer.service';
 
 @Module({
   imports: [
@@ -28,11 +29,13 @@ import { CoordinatorPersistenceService } from './coordinator-persistence.service
     AnalysisCoordinatorService,
     AnalyzeService,
     CoordinatorPersistenceService,
+    OutcomeScorerService,
   ],
   exports: [
     AnalysisCoordinatorService,
     AnalyzeService,
     CoordinatorPersistenceService,
+    OutcomeScorerService,
   ],
 })
 export class AnalysisCoordinatorModule {}

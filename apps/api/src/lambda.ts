@@ -11,6 +11,7 @@ import { AppModule } from './app.module';
 import { configureApp, docsEnabled } from './configure-app';
 import { AnalyzeService } from './analysis-coordinator/analyze.service';
 import { CoordinatorPersistenceService } from './analysis-coordinator/coordinator-persistence.service';
+import { OutcomeScorerService } from './analysis-coordinator/outcome-scorer.service';
 import { FlowCollectorService, type CollectResult } from './flow/flow-collector.service';
 import { loadSecrets } from './load-secrets';
 
@@ -86,10 +87,12 @@ async function getApp(): Promise<INestApplication> {
 async function runScheduled(event: ScheduledEvent): Promise<{
   saved: string[];
   failed: Record<string, string>;
+  scored: unknown;
 }> {
   const app = await getApp();
   const analyzer = app.get(AnalyzeService);
   const persistence = app.get(CoordinatorPersistenceService);
+  const scorer = app.get(OutcomeScorerService);
 
   const saved: string[] = [];
   const failed: Record<string, string> = {};
@@ -104,9 +107,22 @@ async function runScheduled(event: ScheduledEvent): Promise<{
     }
   }
 
+  // Then settle the outcomes. Only rows that can still move are touched — the
+  // ones just created, plus whatever was PENDING or OPEN last time. Terminal
+  // rows are never revisited, which is what keeps this a handful of requests
+  // rather than one per analysis ever saved.
+  //
+  // Never fails the run: a scored outcome is a nicety, a saved analysis is not.
+  let scored: unknown;
+  try {
+    scored = await scorer.scoreUnresolved();
+  } catch (err) {
+    scored = { error: err instanceof Error ? err.message : String(err) };
+  }
+
   // Returned so it lands in the CloudWatch log for the invocation.
-  console.log(JSON.stringify({ saved, failed }));
-  return { saved, failed };
+  console.log(JSON.stringify({ saved, failed, scored }));
+  return { saved, failed, scored };
 }
 
 /**
@@ -126,7 +142,7 @@ export const handler = async (
   callback: Parameters<Handler>[2],
 ): Promise<
   | APIGatewayProxyResultV2
-  | { saved: string[]; failed: Record<string, string> }
+  | { saved: string[]; failed: Record<string, string>; scored: unknown }
   | CollectResult
 > => {
   if (isScheduled(event)) {

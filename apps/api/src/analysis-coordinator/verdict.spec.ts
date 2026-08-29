@@ -75,6 +75,7 @@ const outcome = (over: Partial<PlanResult> = {}): PlanResult => ({
   targetsHit: 0,
   legsFilled: 0,
   filledFraction: 0,
+  barsHeld: 0,
   ...over,
 });
 
