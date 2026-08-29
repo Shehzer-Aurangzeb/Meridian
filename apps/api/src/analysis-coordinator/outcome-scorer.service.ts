@@ -95,7 +95,7 @@ export class OutcomeScorerService {
     const started = Date.now();
     const now = options.now ?? started;
 
-    const rows = (await this.prisma.coordinatorRun.findMany({
+    const rows = await this.prisma.coordinatorRun.findMany({
       where: {
         ...(options.ids ? { id: { in: options.ids } } : {}),
         // Unsettled, or still moving. A terminal row matches neither arm,
@@ -111,7 +111,7 @@ export class OutcomeScorerService {
         outcome: true,
         scoredAt: true,
       },
-    })) as Scorable[];
+    });
 
     return this.score(rows, now, started);
   }
@@ -119,7 +119,7 @@ export class OutcomeScorerService {
   /** Score EVERY row, terminal included. The backfill — the only caller allowed past the guard. */
   async scoreAll(options: { now?: number } = {}): Promise<ScoreRunResult> {
     const started = Date.now();
-    const rows = (await this.prisma.coordinatorRun.findMany({
+    const rows = await this.prisma.coordinatorRun.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -129,7 +129,7 @@ export class OutcomeScorerService {
         outcome: true,
         scoredAt: true,
       },
-    })) as Scorable[];
+    });
 
     return this.score(rows, options.now ?? started, started, { allowTerminal: true });
   }
