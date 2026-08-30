@@ -66,7 +66,9 @@ export const SR_DEFAULTS = {
   CLUSTER_THRESHOLD: 0.5, // 0.5% price range for clustering
   MIN_TOUCHES: 2,
   MAX_LEVELS: 10,
-  LOOKBACK_CANDLES: 100,
+  // LOOKBACK_CANDLES lived here and governed nothing. `SupportResistanceService`
+  // never read it — it scans every candle handed in, and the window is chosen by
+  // the CALLER via `CANDLE_LIMITS`. The one script that read it now owns it.
   SWING_LOOKBACK: 2, // Bars to look back/forward for swing detection
   STRENGTH_THRESHOLDS: {
     WEAK: 2,
