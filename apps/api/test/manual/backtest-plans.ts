@@ -718,9 +718,17 @@ async function runCoin(coin: string): Promise<{
     };
 
     for (const plan of plans) {
-      allSignals[plan.direction].push({ index: i, plan, structure, context: barContext });
-
       if (!STATES.includes(plan.state)) continue;
+      // The control pool is filled AFTER the state filter and BEFORE the
+      // cooldown check, which is the only position that makes the control mean
+      // what it claims: "the same plans, taken at random times".
+      //
+      // It used to be filled before the filter. That handed the control every
+      // APPROACHING and FAR plan the strategy arm never saw, so the two arms
+      // were drawn from different populations and the difference between them
+      // was partly a difference of population. Cooldown stays on the strategy
+      // side only — that IS the timing rule the control exists to vary.
+      allSignals[plan.direction].push({ index: i, plan, structure, context: barContext });
       eligible += 1;
       if (i <= cooldownUntil[plan.direction]) continue;
 
