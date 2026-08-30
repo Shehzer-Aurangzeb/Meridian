@@ -289,7 +289,8 @@ export class ChecklistService {
     nearestLevel: {
       price: number;
       type: 'support' | 'resistance';
-      strength: number;
+      /** Real tests, not the 1-5 strength score. See EntryChecklistParams. */
+      touchCount: number;
       volumeAtTouch?: number[];
     } | null,
     volumeAtNearestLevel?: number,
@@ -312,7 +313,7 @@ export class ChecklistService {
 
     // Check for full credit (20 points)
     const fullCreditProximity = distancePercent <= SR_THRESHOLDS.STRONG_PROXIMITY_PERCENT;
-    const fullCreditStrength = nearestLevel.strength >= SR_THRESHOLDS.STRONG_MIN_TESTS;
+    const fullCreditStrength = nearestLevel.touchCount >= SR_THRESHOLDS.STRONG_MIN_TESTS;
     const meetsFullCredit = isCorrectType && fullCreditProximity && fullCreditStrength;
 
     // Check for partial credit (15 points)
@@ -321,7 +322,7 @@ export class ChecklistService {
 
     if (!meetsFullCredit && isCorrectType) {
       const partialProximity = distancePercent <= SR_THRESHOLDS.PARTIAL_PROXIMITY_PERCENT;
-      const exactlyTwoTests = nearestLevel.strength === SR_THRESHOLDS.PARTIAL_MIN_TESTS;
+      const exactlyTwoTests = nearestLevel.touchCount === SR_THRESHOLDS.PARTIAL_MIN_TESTS;
 
       if (partialProximity && exactlyTwoTests && nearestLevel.volumeAtTouch && volumeAtNearestLevel) {
         const avgVolume = this.calculateMean(nearestLevel.volumeAtTouch);
@@ -336,7 +337,7 @@ export class ChecklistService {
 
     let reason: string;
     if (meetsFullCredit) {
-      reason = `Price is ${distancePercent.toFixed(2)}% from strong ${requiredType} (${nearestLevel.strength} tests, full credit)`;
+      reason = `Price is ${distancePercent.toFixed(2)}% from strong ${requiredType} (${nearestLevel.touchCount} tests, full credit)`;
     } else if (meetsPartialCredit) {
       reason = `Price is ${distancePercent.toFixed(2)}% from ${requiredType} with volume confirmation (2 tests on elevated volume, partial credit 15 pts)`;
     } else {
@@ -347,8 +348,8 @@ export class ChecklistService {
       if (!fullCreditProximity && !meetsPartialCredit) {
         issues.push(`${distancePercent.toFixed(2)}% away`);
       }
-      if (!fullCreditStrength && nearestLevel.strength !== SR_THRESHOLDS.PARTIAL_MIN_TESTS) {
-        issues.push(`${nearestLevel.strength} tests`);
+      if (!fullCreditStrength && nearestLevel.touchCount !== SR_THRESHOLDS.PARTIAL_MIN_TESTS) {
+        issues.push(`${nearestLevel.touchCount} tests`);
       }
       reason = `Level not ideal: ${issues.join(', ')}`;
     }
@@ -357,7 +358,7 @@ export class ChecklistService {
       name: 'Support/Resistance Confluence',
       passed,
       value: nearestLevel
-        ? `${nearestLevel.type} at ${nearestLevel.price.toFixed(2)} (${nearestLevel.strength} tests)`
+        ? `${nearestLevel.type} at ${nearestLevel.price.toFixed(2)} (${nearestLevel.touchCount} tests)`
         : 'None',
       threshold: `${requiredType} within 2% (3+ tests) or 1.5% (2 tests + volume)`,
       reason,

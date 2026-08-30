@@ -43,16 +43,6 @@ export interface MarketStructureConditionParams {
   structure: 'HH/HL' | 'LH/LL' | 'ranging' | 'unknown';
 }
 
-export interface SupportResistanceConditionParams {
-  tradeType: 'long' | 'short';
-  currentPrice: number;
-  nearestLevel: {
-    price: number;
-    type: 'support' | 'resistance';
-    strength: number; // number of tests
-  } | null;
-}
-
 export interface EntryChecklistParams {
   tradeType: 'long' | 'short';
   rsi: number;
@@ -70,7 +60,17 @@ export interface EntryChecklistParams {
   nearestLevel: {
     price: number;
     type: 'support' | 'resistance';
-    strength: number;
+    /**
+     * How many times price actually tested this level. This is what the
+     * SR_THRESHOLDS below count, so it is what the checklist must read.
+     *
+     * NOT `strength`, which is a 1-5 SCORE derived from the touch count and
+     * then nudged half a point for whether the level held. The checklist used
+     * to compare `strength` against thresholds named MIN_TESTS, which for a
+     * level that held rounded up to count + 1 — so a level touched twice was
+     * scored as "3+ tests" and given full credit.
+     */
+    touchCount: number;
     volumeAtTouch?: number[]; // Volume at each test touch
   } | null;
   volumeAtNearestLevel?: number; // Current volume for volume confirmation
