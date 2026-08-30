@@ -294,13 +294,26 @@ export class FlowCollectorService {
     symbols: string[],
     days: number = DEFAULT_BACKFILL_DAYS,
     now: number = Date.now(),
+    /**
+     * Which metrics to fetch. Undefined means all of them, which is what the
+     * schedule wants.
+     *
+     * A one-off backfill does not: three of these are in the bulk archive at
+     * 5-minute resolution, so re-fetching them over a multi-year window would
+     * be hundreds of pages per coin to re-store rows already held.
+     */
+    only?: string[],
   ): Promise<CollectResult> {
     const failed: Record<string, string> = {};
     let saved = 0;
     let fetched = 0;
+    const specs = only ? METRICS.filter((m) => only.includes(m.metric)) : METRICS;
+    if (specs.length === 0) {
+      throw new Error(`collect: no metric matches ${only?.join(',')}`);
+    }
 
     for (const symbol of symbols) {
-      for (const spec of METRICS) {
+      for (const spec of specs) {
         const key = `${symbol}:${spec.metric}`;
         try {
           const rows = await this.fetchWindow(toPair(symbol), spec, now - days * DAY_MS, now);

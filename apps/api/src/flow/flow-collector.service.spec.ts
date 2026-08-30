@@ -166,6 +166,25 @@ describe('FlowCollectorService.collect', () => {
     expect(mockedGet.mock.calls[0][1]?.params.symbol).toBe('BTCUSDT');
   });
 
+  it('fetches only the named metrics, and refuses a name it does not know', async () => {
+    // A long-window backfill must not re-fetch the three metrics the bulk
+    // archive already provides at 5-minute resolution — over years that is
+    // hundreds of pages per coin to re-store rows the database holds.
+    mockedGet.mockImplementation(async (url: string) => ({ data: rowsFor(url, [RECENT]) }));
+    const { prisma, written } = fakePrisma();
+    const service = new FlowCollectorService(prisma);
+
+    await service.collect(['BTC'], 1, NOW, ['fundingRate', 'premium']);
+
+    expect(new Set(written.map((w) => w.metric))).toEqual(new Set(['fundingRate', 'premium']));
+    expect(mockedGet).toHaveBeenCalledTimes(2);
+
+    // A typo must not silently collect nothing and report success.
+    await expect(service.collect(['BTC'], 1, NOW, ['fundingrate'])).rejects.toThrow(
+      /no metric matches/,
+    );
+  });
+
   it('stops paging when a full page does not move older', async () => {
     // The failure this guards: an endpoint that clamps endTime and keeps
     // returning the same newest rows. The page is FULL every time, so the

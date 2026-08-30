@@ -23,7 +23,8 @@
     "score": "npx ts-node --transpile-only scripts/score-outcomes.ts",
     "interval": "npx ts-node --transpile-only test/manual/interval-check.ts",
     "cost-sweep": "npx ts-node --transpile-only test/manual/cost-sweep.ts",
-    "book-depth": "npx ts-node --transpile-only scripts/book-depth-import.ts"
+    "book-depth": "npx ts-node --transpile-only scripts/book-depth-import.ts",
+    "flow-backfill": "npx ts-node --transpile-only scripts/flow-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
