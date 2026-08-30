@@ -316,8 +316,19 @@ export interface ScoredRow {
   netR: number;
 }
 
-/** Ran out of time with the trade still open, rather than finishing. */
-export const isUnresolved = (row: ScoredRow): boolean => row.status === 'TIMEOUT';
+/**
+ * Never reached a finished result: still open when time ran out (TIMEOUT), or
+ * never entered at all (NO_FILL).
+ *
+ * NO_FILL used to be missing here, which made an unfilled trade "resolved" with
+ * a netR of zero — and zero is booked as a LOSS below. So every trade that
+ * never happened counted as a finished loser. Live callers filter unfilled rows
+ * out before they arrive, so no published number moved, but `outcome.ts` had
+ * already written `TIMEOUT || NO_FILL` for itself rather than reuse this. One
+ * definition, here.
+ */
+export const isUnresolved = (row: ScoredRow): boolean =>
+  row.status === 'TIMEOUT' || row.status === 'NO_FILL';
 
 /** What one trade contributes to a total: its result after costs, always. */
 export function scoreRow(row: ScoredRow): number {
@@ -333,6 +344,10 @@ export interface Aggregate {
   /** Trades still open when time ran out, and what they are valued at. */
   unresolved: number;
   unresolvedMeanR: number;
+  /**
+   * Wins, win rate, average win and average loss are over the trades that
+   * ENTERED — open ones included at their mark, NO_FILL rows excluded.
+   */
   wins: number;
   winRate: number;
   avgWin: number;
@@ -358,12 +373,22 @@ export function aggregate(rows: ScoredRow[]): Aggregate {
     xs.length === 0 ? NaN : xs.reduce((a, b) => a + b, 0) / xs.length;
 
   const v = rows.map(scoreRow);
-  // Win or loss is decided by the sign of the result after costs.
-  const w = v.filter((x) => x > 0);
-  const l = v.filter((x) => x <= 0);
 
   const open = rows.filter(isUnresolved);
   const resolved = rows.filter((r) => !isUnresolved(r));
+
+  // Win or loss is decided by the sign of the result after costs, over the
+  // trades that ENTERED. An open trade stays in, valued at its mark — that is
+  // the marked convention `expectancy` and `totalR` use, and the win rate has
+  // to agree with them or the two describe different populations.
+  //
+  // A NO_FILL row is not a position. It sits at exactly 0.0R, and 0 is a loss
+  // by the rule below, so leaving it in booked every trade that never happened
+  // as a finished loser and diluted the rate with rows that had no result to
+  // give.
+  const fv = rows.filter((r) => r.status !== 'NO_FILL').map(scoreRow);
+  const w = fv.filter((x) => x > 0);
+  const l = fv.filter((x) => x <= 0);
 
   const expectancy = mean(v);
   const expectancyResolved = mean(resolved.map(scoreRow));
@@ -375,7 +400,9 @@ export function aggregate(rows: ScoredRow[]): Aggregate {
     unresolved: open.length,
     unresolvedMeanR: mean(open.map(scoreRow)),
     wins: w.length,
-    winRate: rows.length === 0 ? NaN : w.length / rows.length,
+    // Over the trades that entered. `rows.length` put unfilled rows in the
+    // denominator, so the rate fell every time a plan was never triggered.
+    winRate: fv.length === 0 ? NaN : w.length / fv.length,
     avgWin,
     avgLose,
     payoff: l.length === 0 || avgLose === 0 ? NaN : avgWin / Math.abs(avgLose),

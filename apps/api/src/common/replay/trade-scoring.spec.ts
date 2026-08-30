@@ -492,6 +492,22 @@ describe('aggregate', () => {
   it('totalR is the sum of the scored rows, unresolved included', () => {
     expect(aggregate(rows).totalR).toBeCloseTo(1.4, 10);
   });
+
+  it('does not book a trade that never entered as a finished loss', () => {
+    // A NO_FILL row sits at exactly 0.0R. It used to count as RESOLVED (only
+    // TIMEOUT was unresolved) and 0 is a loss, so a plan that never triggered
+    // arrived as a losing trade that had finished.
+    const withNoFill = [...rows, { status: 'NO_FILL', netR: 0 }];
+    const a = aggregate(withNoFill);
+
+    expect(a.nResolved).toBe(3); // unchanged: the +2 and the two −1s
+    expect(a.expectancyResolved).toBeCloseTo(0, 10); // (2 − 1 − 1)/3
+    expect(a.unresolved).toBe(2); // the open winner AND the unfilled row
+
+    // Not in the win/loss population either, so the rate is still 2 of 4.
+    expect(a.wins).toBe(2);
+    expect(a.winRate).toBeCloseTo(0.5, 10);
+  });
 });
 
 describe('scoreTrade — the re-analysis exit', () => {
