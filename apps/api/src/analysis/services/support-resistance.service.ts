@@ -47,12 +47,27 @@ export class SupportResistanceService {
         `levelsFromCandles: currentPrice must be a positive number, got ${currentPrice}`,
       );
     }
-    // Thin-but-real history stays a warning: callers already guard their own
-    // minimum (the replay walk needs 50) and a genuinely young listing is a
-    // market fact, not a bug.
+    // Thin history throws too. It used to warn and return [], and the warning
+    // is invisible under `Logger.overrideLogger(false)` — which every backtest
+    // sets — so a whole chart could drop out of a level map and read downstream
+    // as "this timeframe offered nothing". Same failure as the empty case
+    // above, one line further down.
+    //
+    // Safe to throw because nothing legitimately arrives thin: every caller
+    // asks for `CANDLE_LIMITS`, whose smallest entry is 100, and the ten
+    // scheduled coins all have years of history on every timeframe.
+    //
+    // ponytail: throwing means one thin chart fails the whole analysis for that
+    // coin rather than losing one timeframe. That is the right trade while the
+    // case is unreachable. If a genuinely young listing ever appears, add an
+    // explicit `allowThinHistory` option so the caller declares it on purpose —
+    // do not go back to a silent [].
     if (candles.length < 20) {
-      this.logger.warn(`Insufficient candles for S/R analysis: ${candles.length}`);
-      return [];
+      throw new Error(
+        `levelsFromCandles: ${candles.length} candles for ${timeframe}, need 20. ` +
+          'Too little history to find levels — that is missing data, not an ' +
+          'absence of levels.',
+      );
     }
 
     // 2. Find swing highs and lows
