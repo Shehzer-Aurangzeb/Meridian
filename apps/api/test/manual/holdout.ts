@@ -135,6 +135,72 @@ export function blockBootstrap(
   };
 }
 
+/**
+ * The same block bootstrap, on the DIFFERENCE between two arms.
+ *
+ * Not two calls to `blockBootstrap` with the intervals subtracted. That treats
+ * the arms as independent when both are drawn from the same weeks of the same
+ * market, so it over-states the width — and the width is the whole answer here.
+ * A draw picks a block and takes BOTH arms' trades from it, so a week that was
+ * kind to the strategy was kind to the control in the same draw.
+ *
+ * Blocks are keyed off a shared `t0` across both arms, or the two series would
+ * be cut on different boundaries and "the same block" would mean two things.
+ *
+ * A draw where either arm ended up with no trades is skipped rather than
+ * counted as a zero difference — no trades is not a result of zero.
+ */
+export function blockBootstrapDiff(
+  a: Array<{ time: number; value: number }>,
+  b: Array<{ time: number; value: number }>,
+  blockDays: number,
+  draws: number,
+  seed: number,
+): { lo: number; hi: number; blocks: number; pPositive: number; point: number } {
+  const empty = { lo: NaN, hi: NaN, blocks: 0, pPositive: NaN, point: NaN };
+  if (a.length === 0 || b.length === 0) return empty;
+
+  const rng = makeRng(seed);
+  const t0 = Math.min(...a.map((r) => r.time), ...b.map((r) => r.time));
+  const ms = blockDays * 86_400_000;
+  const keyOf = (t: number): number => Math.floor((t - t0) / ms);
+
+  // Every block either series touches, so a block present in only one arm still
+  // gets drawn — and contributes to that arm alone, which is the truth about it.
+  const byBlock = new Map<number, { a: number[]; b: number[] }>();
+  const put = (arm: 'a' | 'b', rows: typeof a): void => {
+    for (const r of rows) {
+      const k = keyOf(r.time);
+      let cell = byBlock.get(k);
+      if (!cell) byBlock.set(k, (cell = { a: [], b: [] }));
+      cell[arm].push(r.value);
+    }
+  };
+  put('a', a);
+  put('b', b);
+  const blocks = [...byBlock.values()];
+
+  const out: number[] = [];
+  for (let i = 0; i < draws; i += 1) {
+    let sumA = 0, nA = 0, sumB = 0, nB = 0;
+    for (let j = 0; j < blocks.length; j += 1) {
+      const pick = blocks[Math.floor(rng() * blocks.length)];
+      for (const v of pick.a) { sumA += v; nA += 1; }
+      for (const v of pick.b) { sumB += v; nB += 1; }
+    }
+    if (nA > 0 && nB > 0) out.push(sumA / nA - sumB / nB);
+  }
+  if (out.length === 0) return empty;
+
+  return {
+    lo: quantile(out, 0.025),
+    hi: quantile(out, 0.975),
+    blocks: blocks.length,
+    pPositive: out.filter((x) => x > 0).length / out.length,
+    point: mean(a.map((r) => r.value)) - mean(b.map((r) => r.value)),
+  };
+}
+
 export interface Profile {
   n: number;
   winRate: string;
@@ -328,7 +394,14 @@ if (require.main === module && args.includes('--self-check')) {
 
 // ── load ────────────────────────────────────────────────────────────────
 
-function load(path: string): Row[] {
+/**
+ * One arm of a `backtest:plans --csv` dump.
+ *
+ * Exported so nothing writes a fourth CSV parser for these files. `tier` picks
+ * the arm: the strategy rows are PLAN, the random control's are RANDOM and live
+ * in the sibling `.random.csv`.
+ */
+export function load(path: string, tier: string = 'PLAN'): Row[] {
   const lines = fs
     .readFileSync(path, 'utf8')
     .trim()
@@ -346,7 +419,7 @@ function load(path: string): Row[] {
   return lines
     .slice(1)
     .map((l) => l.split(','))
-    .filter((c) => c[iTier] === 'PLAN')
+    .filter((c) => c[iTier] === tier)
     .map((c) => ({
       coin: c[iCoin],
       time: new Date(c[iTime]).getTime(),
