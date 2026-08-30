@@ -1,5 +1,11 @@
 import { Candle } from '../types/candle.types';
-import { completedAsOf, scoreLadder, TIMEFRAME_MS } from './plan-replay';
+import {
+  completedAsOf,
+  flowAsOf,
+  scoreLadder,
+  FLOW_EMBARGO_MS,
+  TIMEFRAME_MS,
+} from './plan-replay';
 
 const HOUR = 3_600_000;
 const bar = (
@@ -43,6 +49,47 @@ describe('completedAsOf — the look-ahead guard', () => {
     expect(() => completedAsOf(candles, 0, 3 * HOUR, 10)).toThrow(/durationMs/);
     expect(() => completedAsOf(candles, HOUR, NaN, 10)).toThrow(/asOfMs/);
     expect(() => completedAsOf(candles, HOUR, 3 * HOUR, 0)).toThrow(/limit/);
+  });
+});
+
+describe('flowAsOf — the publication embargo', () => {
+  const MIN = 60_000;
+  const sample = (tsMs: number) => ({ ts: new Date(tsMs), value: tsMs });
+
+  it('excludes a row Binance had not published yet', () => {
+    // A row stamped 10:00 is not readable at 10:00 — the default embargo is one
+    // 5m bar, so it becomes readable at 10:05 and not a millisecond earlier.
+    const rows = [sample(0), sample(5 * MIN), sample(10 * MIN)];
+
+    expect(flowAsOf(rows, 5 * MIN)).toHaveLength(1);
+    expect(flowAsOf(rows, 5 * MIN - 1)).toHaveLength(0);
+    expect(flowAsOf(rows, 15 * MIN)).toHaveLength(3);
+  });
+
+  it('honours an embargo wider than the default', () => {
+    const rows = [sample(0), sample(5 * MIN)];
+    expect(flowAsOf(rows, 10 * MIN, 30 * MIN)).toHaveLength(0);
+    expect(flowAsOf(rows, 30 * MIN, 30 * MIN)).toHaveLength(1);
+  });
+
+  it('allows an explicit zero embargo but never a negative one', () => {
+    // Zero is legitimate for a series already stamped at its publish time.
+    // Negative is look-ahead spelled as a number, so it throws.
+    const rows = [sample(0)];
+    expect(flowAsOf(rows, 0, 0)).toHaveLength(1);
+    expect(() => flowAsOf(rows, 0, -1)).toThrow(/embargoMs/);
+  });
+
+  it('throws on a malformed moment instead of returning nothing', () => {
+    // Same failure mode as completedAsOf: NaN in the comparison is false for
+    // every row, so [] would read as "no flow data" rather than "bad input".
+    const rows = [sample(0)];
+    expect(() => flowAsOf(rows, NaN)).toThrow(/asOfMs/);
+    expect(() => flowAsOf(rows, 0, NaN)).toThrow(/embargoMs/);
+  });
+
+  it('defaults to one 5-minute bar', () => {
+    expect(FLOW_EMBARGO_MS).toBe(300_000);
   });
 });
 

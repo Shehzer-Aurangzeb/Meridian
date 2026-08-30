@@ -57,6 +57,49 @@ export function completedAsOf(
   return done.slice(-limit);
 }
 
+/**
+ * One 5-minute bar. The embargo a flow feature gets unless it asks for another.
+ *
+ * NOT a measurement. The publication lag has been sampled once, over 24 hours
+ * on two coins, and that sample is not in this repository — see ROADMAP §8,
+ * "Known unknowns". One bar is the coarsest delay the 5-minute grid can express
+ * and is therefore the smallest defensible floor, not the true number.
+ *
+ * Replace it with the measured value when the poller runs long enough to have
+ * one, and raise it rather than lower it if the evidence is thin.
+ */
+export const FLOW_EMBARGO_MS = 5 * 60_000;
+
+/**
+ * The flow samples that were PUBLISHED at a given moment.
+ *
+ * `completedAsOf` for `FlowSample`. A candle is unusable until its bar closes;
+ * a flow row is unusable until Binance serves it, which is later than the
+ * timestamp it carries. Both are the same mistake and neither announces itself
+ * — a feature built on unembargoed flow returns a believable number.
+ *
+ * Rows are assumed to be in the LIVE convention: stamped when the value was
+ * published, which is what `ARCHIVE_METRICS.shiftBars` exists to guarantee for
+ * archive rows. Feeding raw archive timestamps in here embargoes them one bar
+ * too early, which is the look-ahead this is meant to stop.
+ */
+export function flowAsOf<T extends { ts: Date }>(
+  samples: T[],
+  asOfMs: number,
+  embargoMs: number = FLOW_EMBARGO_MS,
+): T[] {
+  // Same reason as `completedAsOf`: NaN in a comparison is false, so bad input
+  // returns an empty array that reads as "the market was quiet".
+  if (!Number.isFinite(asOfMs)) {
+    throw new Error(`flowAsOf: asOfMs must be a number, got ${asOfMs}`);
+  }
+  if (!Number.isFinite(embargoMs) || embargoMs < 0) {
+    throw new Error(`flowAsOf: embargoMs must be zero or a positive number, got ${embargoMs}`);
+  }
+
+  return samples.filter((s) => s.ts.getTime() + embargoMs <= asOfMs);
+}
+
 export interface LadderResult {
   /** What the trade actually made across all its exits, before fees. */
   realizedR: number;
