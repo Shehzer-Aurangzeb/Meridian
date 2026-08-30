@@ -5,9 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Saves Binance's futures-flow numbers before they expire.
  *
- * Three of the four sources below only keep about 30 days of history. Once a
- * day falls off the end it is gone for good — there is no archive to buy and
- * no way to reconstruct it. So this runs daily and stores what it finds.
+ * The live endpoints keep about 30 days. This runs daily and stores what it
+ * finds, so the series continues forward from where the bulk archive ends.
  *
  * It produces no signal today. The point is that in a year there is a year of
  * data to study, instead of the same 30 days there would be if we started then.
@@ -16,8 +15,26 @@ import { PrismaService } from '../prisma/prisma.service';
 const BASE = 'https://fapi.binance.com';
 const DAY_MS = 86_400_000;
 
-/** How much history to ask for. More than a day, so a missed run self-heals. */
-export const DEFAULT_BACKFILL_DAYS = 30;
+/**
+ * How much history to ask for. Overlap so a missed run self-heals.
+ *
+ * Was 30. That was set when every metric came at 1h and a run cost ~80 page
+ * requests. Three metrics now come at 5m, which put the same 30 days at ~570
+ * requests plus a 120 ms sleep between each — past the Lambda's 120 s timeout,
+ * measured in production: the run died at the fifth of ten coins, and the last
+ * five got nothing at 5m at all.
+ *
+ * Three days is ~80 requests again, and still heals two consecutive misses.
+ *
+ * A longer outage than that is no longer unrecoverable, which is what makes
+ * this trade safe: `data.binance.vision` republishes five of these six columns
+ * as daily files, so a hole is refilled by re-running `scripts/flow-import.ts`.
+ * `premium` is the exception and Binance keeps it for years.
+ *
+ * Do NOT raise this to buy storage headroom — a wider window re-fetches rows
+ * we already hold and stores exactly the same ones. See ROADMAP §8.
+ */
+export const DEFAULT_BACKFILL_DAYS = 3;
 
 interface Row {
   ts: number;
@@ -41,8 +58,6 @@ interface MetricSpec {
   period: '1h' | '5m';
   /** Most rows an endpoint will return at once, measured by flow-probe.ts. */
   maxRows: number;
-  /** Binance keeps this one for years, so a missed day is not a lost day. */
-  longHistory?: boolean;
   parse: (raw: unknown) => Row | null;
 }
 
@@ -139,7 +154,6 @@ export const METRICS: MetricSpec[] = [
     intervalParam: 'interval',
     period: '1h',
     maxRows: 1500,
-    longHistory: true,
     parse: (raw: unknown): Row | null => {
       const k = raw as unknown[];
       if (!Array.isArray(k) || k.length < 5) return null;

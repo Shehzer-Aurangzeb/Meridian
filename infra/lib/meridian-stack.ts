@@ -179,24 +179,25 @@ export class MeridianStack extends Stack {
     // never share a cold start.
     //
     // Binance keeps roughly 30 days of open interest, taker volume and the
-    // long/short ratio. A day that falls off the end is gone permanently, so
-    // unlike the analysis schedule this one IS worth retrying — a failed run
-    // cannot be made up by the next one.
+    // long/short ratio, so unlike the analysis schedule this one IS worth
+    // retrying — a failed run is not made up by the next one on its own.
     //
-    // It asks for the whole 30 days every time, not just yesterday. Re-reading
-    // what we already hold costs nothing (the rows are keyed and skipped on
-    // insert) and means a run missed for any reason repairs itself.
+    // It asks for several days every time, not just yesterday. Re-reading what
+    // we already hold costs nothing (the rows are keyed and skipped on insert)
+    // and means a run missed for any reason repairs itself.
     //
-    // ponytail: ~70 requests for ten coins, comfortably inside the function's
-    // 120s timeout. Chunk the symbol list across several events if the coin
-    // list ever grows enough to threaten that.
+    // The window is NOT set here. It used to be `days: 30`, which silently beat
+    // the service's own default — so the constant was the number a reader would
+    // change and the event was the number that governed. Omitting it leaves
+    // exactly one: `DEFAULT_BACKFILL_DAYS`, which carries the timeout arithmetic
+    // beside it. `CollectEvent.days` stays optional for a manual one-off.
     new events.Rule(this, 'FlowCollectionSchedule', {
       description: `Save futures flow for ${SCHEDULED_SYMBOLS.length} coins daily`,
       schedule: events.Schedule.cron({ minute: '30', hour: '3' }),
       targets: [
         new targets.LambdaFunction(api, {
           event: events.RuleTargetInput.fromObject({
-            collect: { symbols: SCHEDULED_SYMBOLS, days: 30 },
+            collect: { symbols: SCHEDULED_SYMBOLS },
           }),
           retryAttempts: 2,
         }),
