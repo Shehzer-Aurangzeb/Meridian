@@ -146,9 +146,23 @@ size.
 
 **Time-series bets instead of cross-sectional.** "Will BTC go up" is largely a
 bet on crypto — the majors correlate 0.7–0.9. Ranking the ten coins against each
-other and taking the spread cancels that beta and leaves the signal. Ten coins
-and 3.65 years of 5-minute data are already here; this costs no new data and has
-never been tried.
+other and taking the spread cancels that beta and leaves the signal.
+
+**Correction, 30 Aug: the construction has been tried.** `test/manual/panel.ts`
+is 762 lines, ran on 3 Aug 2026, and is recorded in `archive/STATE_OF_PLAY.md`
+§14e (momentum) and §14f (funding). Momentum came in *below* its own random
+control — delta −0.0010, 95% CI [−0.0085, +0.0064], P(≤0) 0.60. Both failed.
+
+What that leaves is narrower and more honest: those runs used **daily bars, a
+weekly rebalance, a 30-day formation, and price or funding inputs**. Open
+interest, taker imbalance and top-trader positioning have never been ranked
+across coins at any resolution, because they had no history before 28 Aug. The
+thesis is now exactly that, and nothing wider.
+
+`panel.ts` is also Phase A's plumbing, already built and already debugged —
+universe construction, point-in-time liquidity filtering, a random-direction
+control, and `trimToContiguous`, which was added after a 127-day hole in the
+date axis made a "30-day" signal span 157 days. Read it before writing anything.
 
 **Stops.** 3,630 losers at exactly −1.000R. A stop converts "the signal was wrong
 for now" into a realised loss, and a 61% win rate at 0.56 payoff is the signature
@@ -173,7 +187,67 @@ Ten coins × 32,000 hours ≈ **320,000 rows**. Every feature read through
 **No fills, no stops, no ladder, no cooldown.** The entire geometry layer is
 removed from the question, and with it every confound in Part 1.
 
-Constraints that carry over from ROADMAP §8 and must not be re-derived:
+### Phase A inputs — settled 30 Aug, all free
+
+No paid data. The question was asked and the answer is that money is not the
+constraint: `FlowSample` holds 28,413,765 rows with **zero consumers anywhere in
+the codebase**, and §14e/§14f killed two hypotheses in one day for $0.
+
+Every feature tested also raises the bar the survivors must clear, and effective
+n here is one to two orders of magnitude below raw n. A wider net does not find
+more signal — it raises the threshold and the false-positive count.
+
+| input | source | history |
+|---|---|---|
+| `openInterest` | archive + collector | 2021-12-01 |
+| `longShortRatio` | archive + collector | 2021-12-01 |
+| `takerBuySellRatio5m` | archive + collector | 2021-12-01 |
+| `takerBuySellRatio1h` | collector | ~30d live, forward |
+| `topTraderAccountRatio` | archive + collector *(added 30 Aug)* | 2021-12-01 |
+| `topTraderPositionRatio` | archive + collector *(added 30 Aug)* | 2021-12-01 |
+| `premium` | collector | years |
+| `fundingRate` | collector *(added 30 Aug)* | ~3 years |
+| **book depth imbalance** | `data.binance.vision` bookDepth | **2023-01-01** |
+| cross-sectional rank / z-score / spread vs BTC | derived | — |
+
+**Three of those were not being collected forward.** `topTraderAccountRatio` and
+`topTraderPositionRatio` were in the archive and in no `MetricSpec`, so both
+series ended at the archive's last day — a feature built on either could have
+been measured over history and then never run live. `fundingRate` was fetched
+live by `FUNDING_AB.md` and stored nowhere. Fixed 30 Aug, with a test that fails
+if an archive metric is ever dropped from the collector again.
+
+`openInterestValue` is deliberately *not* collected: it is open interest times
+price, and every consumer already holds the price.
+
+**bookDepth is the one new dataset, and it is free.** The same
+`data.binance.vision` bucket the metrics archive comes from publishes order book
+depth at ±1% to ±5% of mid, one snapshot every 25 seconds, from 2023-01-01:
+
+```
+timestamp,percentage,depth,notional
+2026-08-20 00:00:06,-5.00,8477.61700000,577185276.20310000
+```
+
+566 KB/day compressed for BTC — about 6.7 GB for ten coins over the full
+history, against 33 MB/day for `aggTrades`, which would be ~440 GB. Book
+imbalance is genuine microstructure, is not on a retail screen, is orthogonal to
+everything tested so far, and its 2023-01-01 start matches the boundary the 2022
+coverage hole already forces.
+
+Considered and rejected: Glassnode and CryptoQuant (the predictive metrics sit on
+expensive tiers), social/sentiment feeds (timestamp integrity is the hard part —
+a row stamped when it was scraped rather than published is a look-ahead machine),
+Coin Metrics Community (daily only), Tardis.dev (made redundant by bookDepth
+being free), more timeframes (`CHARTS_AB` and `HIERARCHY_AB` both answered this),
+and more coins (§14e measured the long tail bleeding 0.436%/week).
+
+Revisit paid data only if Phase B finds something and a second orthogonal source
+is needed to confirm it.
+
+### Constraints
+
+Carried over from ROADMAP §8, and not to be re-derived:
 
 - `topTraderAccountRatio`, `topTraderPositionRatio` and `takerBuySellRatio5m`
   start **2023-01-01**. 2022 is 87.2% blank for the first two and 35.0% for

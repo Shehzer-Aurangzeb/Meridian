@@ -44,8 +44,12 @@ interface Row {
 interface MetricSpec {
   metric: string;
   path: string;
-  /** These endpoints spell the same idea two different ways. */
-  intervalParam: 'period' | 'interval';
+  /**
+   * These endpoints spell the same idea two different ways, and `fundingRate`
+   * has no bucket at all — it publishes on its own 8-hour settlement clock.
+   * Undefined means "send no interval parameter".
+   */
+  intervalParam?: 'period' | 'interval';
   /**
    * The bucket width to ask for. Was hard-coded to 1h for every metric.
    *
@@ -55,7 +59,7 @@ interface MetricSpec {
    * width only changes how often you sample. `takerlongshortRatio` is a FLOW
    * AGGREGATE over the bucket, and the two widths disagree by up to 37%.
    */
-  period: '1h' | '5m';
+  period?: '1h' | '5m';
   /** Most rows an endpoint will return at once, measured by flow-probe.ts. */
   maxRows: number;
   parse: (raw: unknown) => Row | null;
@@ -82,6 +86,10 @@ const fromField =
     return Number.isFinite(ts) && Number.isFinite(value) ? { ts, value } : null;
   };
 
+// `openInterestValue` is in the archive and is deliberately NOT collected. It is
+// open interest times price, and the price is already in the candles every
+// consumer holds. Fetching it would double the openInterestHist page count to
+// re-derive a product.
 export const METRICS: MetricSpec[] = [
   // ── the two snapshots, at 5m ────────────────────────────────────────────
   //
@@ -108,6 +116,33 @@ export const METRICS: MetricSpec[] = [
   {
     metric: 'longShortRatio',
     path: '/futures/data/globalLongShortAccountRatio',
+    intervalParam: 'period',
+    period: '5m',
+    maxRows: 500,
+    parse: fromField('longShortRatio'),
+  },
+  // ── the two top-trader ratios ───────────────────────────────────────────
+  //
+  // In the archive since 2021-12-01 and NOT collected until now, so both series
+  // stopped dead at the archive's end (2026-08-28). A feature built on either
+  // could be measured on history and then never run live, which is the one
+  // failure a research dataset must not have.
+  //
+  // They are the most interesting inputs in the archive: what accounts with the
+  // largest positions are actually doing, rather than what price did. `Account`
+  // counts traders, `Position` weights by size — a small number of large
+  // accounts moves the second and not the first, which is why both are kept.
+  {
+    metric: 'topTraderAccountRatio',
+    path: '/futures/data/topLongShortAccountRatio',
+    intervalParam: 'period',
+    period: '5m',
+    maxRows: 500,
+    parse: fromField('longShortRatio'),
+  },
+  {
+    metric: 'topTraderPositionRatio',
+    path: '/futures/data/topLongShortPositionRatio',
     intervalParam: 'period',
     period: '5m',
     maxRows: 500,
@@ -144,6 +179,25 @@ export const METRICS: MetricSpec[] = [
     period: '1h',
     maxRows: 500,
     parse: fromField('buySellRatio'),
+  },
+  {
+    // The funding rate itself, which is not the premium index. Premium is the
+    // continuous mark-vs-index gap; funding is the settled cashflow every 8
+    // hours, and it is what `FUNDING_AB.md` tested by fetching live and storing
+    // nothing. A panel needs it as a column, not as an API call.
+    //
+    // No `period` — it publishes on its own settlement clock, so `intervalParam`
+    // is omitted and the walk pages on `endTime` alone. `fundingTime`, not
+    // `timestamp`, hence its own parse.
+    metric: 'fundingRate',
+    path: '/fapi/v1/fundingRate',
+    maxRows: 1000,
+    parse: (raw: unknown): Row | null => {
+      const r = raw as Record<string, unknown>;
+      const ts = num(r.fundingTime);
+      const value = num(r.fundingRate);
+      return Number.isFinite(ts) && Number.isFinite(value) ? { ts, value } : null;
+    },
   },
   {
     // A kline, so it arrives as an array: [openTime, open, high, low, close, …].
@@ -292,7 +346,10 @@ export class FlowCollectorService {
       const res = await axios.get(`${BASE}${spec.path}`, {
         params: {
           symbol,
-          [spec.intervalParam]: spec.period,
+          // Omitted entirely for an endpoint with no bucket. Sending
+          // `undefined: undefined` would put a literal "undefined" key on the
+          // query string.
+          ...(spec.intervalParam ? { [spec.intervalParam]: spec.period } : {}),
           limit: spec.maxRows,
           endTime: cursor,
         },

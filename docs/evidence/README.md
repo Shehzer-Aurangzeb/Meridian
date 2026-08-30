@@ -13,7 +13,9 @@ does not replace them.
 
 | # | document | input class | verdict |
 |---|---|---|---|
-| 1–5 | *(recorded in `archive/STATE_OF_PLAY.md` §14)* | price shape — zones, confluence, level strength | null |
+| 1–3 | *(recorded in `archive/STATE_OF_PLAY.md` §14c–d)* | price shape — zones, confluence, level strength | null |
+| 4 | *(`archive/STATE_OF_PLAY.md` §14e, `test/manual/panel.ts`)* | **cross-sectional momentum**, long top decile / short bottom | **below its own random control** |
+| 5 | *(`archive/STATE_OF_PLAY.md` §14f, `panel.ts --signal funding`)* | **cross-sectional funding** (contrarian on crowding) | null |
 | 6 | [`CHARTS_AB.md`](CHARTS_AB.md) | seven charts vs three, pooled | worse; **reverted to three** |
 | 7 | [`HIERARCHY_AB.md`](HIERARCHY_AB.md) | seven charts, hierarchical | worse; **reverted** |
 | 8 | [`VOLUME_AB.md`](VOLUME_AB.md) | volume node distance, relative volume, volume at extremes, volume delta | DEAD |
@@ -71,9 +73,12 @@ with 3.65 years behind it rather than none.
 
 Not "tested and null" — never measured at all:
 
-- **Cross-sectional.** Every test asked "will this coin go up". None asked "which
-  of these ten goes up *more than the others*", which removes the market beta
-  that dominates a directional bet on correlated majors.
+- **Cross-sectional, on flow inputs.** The construction itself HAS been tested —
+  §14e ran momentum and §14f ran funding, long the top decile against short the
+  bottom, and both failed. But both used price-derived or funding inputs, on
+  daily bars with a weekly rebalance. Open interest, taker imbalance and
+  top-trader positioning have never been ranked across coins at any resolution,
+  because they had no history until 28 Aug 2026.
 - **Feature predictivity, separate from trade geometry.** Every test measured an
   R-multiple, which bundles entry, stop, target, timing and cost into one number.
   When that comes back null it does not say which part failed. `VOLUME_AB.md`
@@ -84,3 +89,14 @@ Not "tested and null" — never measured at all:
 
 All three are the subject of
 [`../active/RESEARCH_PLAN_2026-08-30.md`](../active/RESEARCH_PLAN_2026-08-30.md).
+
+## Two numbers from §14e worth carrying
+
+Neither is about edge, and both constrain anything built later.
+
+- **Breakeven round-trip cost is 0.309%** at 48% weekly turnover. Retail spot
+  fees run 0.5–0.8% round trip, so a strategy of that turnover is dead before
+  its signal is considered.
+- **The equal-weight top-100 altcoin universe lost 0.436% per week** over that
+  window while majors rose. Breadth into the long tail is not free: more coins
+  raises trade count and lowers per-trade quality at the same time.

@@ -33,6 +33,31 @@ describe('toPair', () => {
   });
 });
 
+describe('the collector covers the archive', () => {
+  it('collects every archive metric forward, except the one it can derive', () => {
+    // The bug this locks down: `topTraderAccountRatio` and
+    // `topTraderPositionRatio` were in the archive from 2021-12-01 and in no
+    // MetricSpec, so both series ended at the archive's last day (2026-08-28).
+    // A feature built on either could be measured over history and then never
+    // run live. Nothing failed; the columns just stopped.
+    const collected = new Set(METRICS.map((m) => m.metric));
+    const missing = ARCHIVE_METRICS.map((a) => a.metric).filter((m) => !collected.has(m));
+
+    // `openInterestValue` is open interest times price, and every consumer
+    // already holds the price. Deriving it costs nothing; fetching it would
+    // double the openInterestHist page count.
+    expect(missing).toEqual(['openInterestValue']);
+  });
+
+  it('sends no interval parameter for an endpoint that has no bucket', () => {
+    // fundingRate publishes on its 8-hour settlement clock. Sending
+    // `undefined: undefined` would put a literal "undefined" key on the query.
+    expect(spec('fundingRate').intervalParam).toBeUndefined();
+    expect(spec('fundingRate').period).toBeUndefined();
+    expect(spec('openInterest').intervalParam).toBe('period');
+  });
+});
+
 describe('parsers', () => {
   it('reads the named field out of the /futures/data/ shape', () => {
     expect(spec('openInterest').parse({ timestamp: 1000, sumOpenInterest: '42.5' })).toEqual({
@@ -112,15 +137,20 @@ describe('FlowCollectorService.collect', () => {
   const NOW = 10_000_000_000;
   const RECENT = NOW - 3_600_000;
 
-  const rowsFor = (path: string, times: number[]) =>
-    path.includes('premiumIndexKlines')
-      ? times.map((t) => [t, '1', '2', '0', '1.5'])
-      : times.map((t) => ({
-          timestamp: t,
-          sumOpenInterest: '10',
-          longShortRatio: '2',
-          buySellRatio: '3',
-        }));
+  // Three response shapes, because the endpoints do not agree on one: klines are
+  // arrays, fundingRate stamps `fundingTime`, everything else `timestamp`.
+  const rowsFor = (path: string, times: number[]) => {
+    if (path.includes('premiumIndexKlines')) return times.map((t) => [t, '1', '2', '0', '1.5']);
+    if (path.includes('fundingRate')) {
+      return times.map((t) => ({ fundingTime: t, fundingRate: '0.0001' }));
+    }
+    return times.map((t) => ({
+      timestamp: t,
+      sumOpenInterest: '10',
+      longShortRatio: '2',
+      buySellRatio: '3',
+    }));
+  };
 
   it('stores the bare coin, not the trading pair', async () => {
     mockedGet.mockImplementation(async (url: string) => ({
