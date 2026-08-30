@@ -20,7 +20,8 @@
     "forward-test": "npx ts-node test/manual/forward-test.ts",
     "journal": "npx ts-node test/manual/journal.ts",
     "golden": "npx ts-node --transpile-only scripts/golden-report.ts",
-    "score": "npx ts-node --transpile-only scripts/score-outcomes.ts"
+    "score": "npx ts-node --transpile-only scripts/score-outcomes.ts",
+    "interval": "npx ts-node --transpile-only test/manual/interval-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
