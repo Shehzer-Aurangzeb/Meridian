@@ -21,7 +21,8 @@
     "journal": "npx ts-node test/manual/journal.ts",
     "golden": "npx ts-node --transpile-only scripts/golden-report.ts",
     "score": "npx ts-node --transpile-only scripts/score-outcomes.ts",
-    "interval": "npx ts-node --transpile-only test/manual/interval-check.ts"
+    "interval": "npx ts-node --transpile-only test/manual/interval-check.ts",
+    "cost-sweep": "npx ts-node --transpile-only test/manual/cost-sweep.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
