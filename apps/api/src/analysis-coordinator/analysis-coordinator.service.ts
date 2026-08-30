@@ -200,7 +200,9 @@ export class AnalysisCoordinatorService {
         ? {
             price: nearestLevel.price,
             type: nearestLevel.type,
-            strength: nearestLevel.strength,
+            // The raw count, not `strength`. The checklist thresholds count
+            // tests; `strength` is a score that rounds a held level up.
+            touchCount: nearestLevel.touchCount,
             volumeAtTouch: volumes.slice(-20) as number[],
           }
         : null,

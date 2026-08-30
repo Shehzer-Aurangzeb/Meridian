@@ -33,7 +33,7 @@
  *  - How long a zone stays armed → MAX_BARS (48), the same horizon a trade
  *    is allowed to live. One horizon in the system, not two.
  *  - "Recent range" for the Fib swing → the full 250-bar analysis window.
- *    S/R clusters use the last 100 bars (SR_DEFAULTS.LOOKBACK_CANDLES).
+ *    S/R clusters use the last 100 bars (SR_LOOKBACK, this script's own).
  *    This approximates the playbook's 12h-macro / 4h-swing split inside a
  *    single timeframe.
  *
@@ -91,7 +91,10 @@ const ATR_STOP_MULT = 1.0; // p17: Support − ATR (not a multiple of ATR)
 const CONFLUENCE_PCT = SR_DEFAULTS.CLUSTER_THRESHOLD; // 0.5%
 const SWING_LOOKBACK = SR_DEFAULTS.SWING_LOOKBACK; // 2
 const MIN_CONFLUENCE = 2; // p53: convergence of 2+ independent levels
-const SR_LOOKBACK = SR_DEFAULTS.LOOKBACK_CANDLES; // 100
+// This script's own window, not a production setting. It used to be
+// `SR_DEFAULTS.LOOKBACK_CANDLES`, which read like a knob the live service
+// obeyed; the live service never looked at it.
+const SR_LOOKBACK = 100;
 const MAX_BARS = 48; // trade life AND zone arm window
 
 // Cost model — identical to backtest.ts so results are comparable.
