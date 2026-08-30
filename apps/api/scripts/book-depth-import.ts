@@ -54,6 +54,7 @@ const BATCH = Number(str('batch', '20000'));
 const COINS = str('coins', 'BTC,ETH,SOL,BNB,XRP,ADA,AVAX,LINK,DOT,LTC').split(',');
 const FROM = str('from', BOOK_DEPTH_START);
 const TO = str('to', new Date(Date.now() - 86_400_000).toISOString().slice(0, 10));
+const CONCURRENCY = Number(str('concurrency', '8'));
 
 /**
  * What one snapshot becomes.
@@ -173,28 +174,55 @@ export function datesBetween(from: string, to: string): string[] {
 }
 
 /** GET to a Buffer, following one redirect. 404 returns null rather than throwing. */
-function get(url: string): Promise<Buffer | null> {
+function getOnce(url: string): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
-    https
-      .get(url, (res) => {
-        if (res.statusCode === 404) {
-          res.resume();
-          return resolve(null);
-        }
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          res.resume();
-          return resolve(get(res.headers.location as string));
-        }
-        if (res.statusCode !== 200) {
-          res.resume();
-          return reject(new Error(`${url}: HTTP ${res.statusCode}`));
-        }
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-      })
-      .on('error', reject);
+    const req = https.get(url, (res) => {
+      if (res.statusCode === 404) {
+        res.resume();
+        return resolve(null);
+      }
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        res.resume();
+        return resolve(getOnce(res.headers.location as string));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`${url}: HTTP ${res.statusCode}`));
+      }
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
+    // Without this a stalled socket hangs the whole run rather than failing it.
+    req.setTimeout(30_000, () => req.destroy(new Error(`${url}: timed out`)));
+    req.on('error', reject);
   });
+}
+
+/**
+ * The same GET, retried.
+ *
+ * A single `read ETIMEDOUT` killed the first full run at 8% — 1,070 files in,
+ * about half an hour of downloading thrown away. Over 13,362 files and several
+ * hours a transient network error is not an edge case, it is a certainty, so
+ * surviving one is the difference between a job that finishes and a job that
+ * has to be babysat.
+ *
+ * A 404 is NOT retried: Binance has genuine holes in the record, and re-asking
+ * three times does not fill one.
+ */
+async function get(url: string, attempts = 4): Promise<Buffer | null> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await getOnce(url);
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+    }
+  }
+  throw last;
 }
 
 /**
@@ -224,6 +252,48 @@ async function fetchDay(dir: string, pair: string, date: string): Promise<string
 
   fs.writeFileSync(dest, zip);
   return dest;
+}
+
+/**
+ * Download everything missing, several at a time.
+ *
+ * The archive is ONE FILE PER COIN PER DAY, so ten coins over 1,337 days is
+ * 13,362 files and 26,724 requests counting checksums. Sequentially that is
+ * about five and a half hours, and every second of it is latency rather than
+ * work — the CPU sits at zero.
+ *
+ * Fetching is therefore split from importing and run with a small pool. The
+ * import stays sequential and reads from disk, which also means a fetch failure
+ * cannot leave a half-written batch in the database.
+ *
+ * ponytail: a fixed pool of eight, not a rate-limiter. S3 does not throttle at
+ * this scale and the job runs once. Lower it if a future run starts seeing 503s.
+ */
+async function fetchAll(
+  dir: string,
+  jobs: Array<{ pair: string; date: string }>,
+  concurrency: number,
+): Promise<void> {
+  let next = 0;
+  let done = 0;
+  const t0 = Date.now();
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= jobs.length) return;
+      await fetchDay(dir, jobs[i].pair, jobs[i].date);
+      done += 1;
+      if (done % 500 === 0) {
+        const rate = done / ((Date.now() - t0) / 1000);
+        console.log(
+          `  fetched ${done}/${jobs.length}  ${rate.toFixed(1)}/s  ` +
+            `eta ${(((jobs.length - done) / rate) / 60).toFixed(0)}m`,
+        );
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
 }
 
 async function main(): Promise<void> {
@@ -262,15 +332,23 @@ async function main(): Promise<void> {
   };
 
   const t0 = Date.now();
+
+  // Download first, in parallel, then import from disk. Splitting the two is
+  // what makes the run finish in under an hour instead of five and a half.
+  if (FETCH) {
+    const jobs = COINS.flatMap((c) =>
+      dates.map((date) => ({ pair: `${c.toUpperCase()}USDT`, date })),
+    ).filter((j) => !fs.existsSync(path.join(DIR, `${j.pair}-bookDepth-${j.date}.zip`)));
+    console.log(`fetching ${jobs.length} missing files with ${CONCURRENCY} workers\n`);
+    await fetchAll(DIR, jobs, CONCURRENCY);
+    console.log(`\nfetch done in ${((Date.now() - t0) / 1000 / 60).toFixed(1)}m\n`);
+  }
+
   for (const coin of COINS) {
     const pair = `${coin.toUpperCase()}USDT`;
     for (const date of dates) {
-      const file = FETCH
-        ? await fetchDay(DIR, pair, date)
-        : (() => {
-            const p = path.join(DIR, `${pair}-bookDepth-${date}.zip`);
-            return fs.existsSync(p) ? p : null;
-          })();
+      const p = path.join(DIR, `${pair}-bookDepth-${date}.zip`);
+      const file = fs.existsSync(p) ? p : null;
       if (file === null) {
         missing.push(`${coin}:${date}`);
         continue;
