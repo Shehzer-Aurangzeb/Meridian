@@ -191,7 +191,13 @@ export const METRICS: MetricSpec[] = [
     // `timestamp`, hence its own parse.
     metric: 'fundingRate',
     path: '/fapi/v1/fundingRate',
-    maxRows: 1000,
+    // 500, MEASURED, not read off the docs. This endpoint accepts limit=1000
+    // and returns 500 anyway. With maxRows at 1000 the first page came back
+    // short, the "a short page is the live edge" break fired immediately, and a
+    // 2,200-day backfill silently collected 166 days per coin and reported
+    // success. Every other maxRows here came from flow-probe.ts; this one was
+    // assumed, and that was the whole bug.
+    maxRows: 500,
     parse: (raw: unknown): Row | null => {
       const r = raw as Record<string, unknown>;
       const ts = num(r.fundingTime);
