@@ -80,6 +80,25 @@ describe('book-depth transform', () => {
     expect(got['bookImbalanceFar@2026-08-20T00:05:00.000Z']).toBe(0.5);
   });
 
+  it('keeps the far metrics on a pre-2026 file, which has no 0.2% band', () => {
+    // Binance only started publishing the 0.2% band on 2026-01-15. Every file
+    // before that has +-1..+-5 and nothing nearer, and this is the shape of
+    // roughly three of the four years of archive.
+    const csv = [
+      HEAD,
+      `2023-06-01 07:03:02,-5,1,200`,
+      `2023-06-01 07:03:02,-2,1,999999`,
+      `2023-06-01 07:03:02,2,1,999999`,
+      `2023-06-01 07:03:02,5,1,100`,
+    ].join('\n');
+
+    const got = byMetric(transform('BTC', csv, '2023-06-01'));
+    expect(got['bookImbalanceFar@2023-06-01T07:05:00.000Z']).toBeCloseTo(2 / 3, 10);
+    expect(got['bookDepthNotional@2023-06-01T07:05:00.000Z']).toBe(300);
+    // The near band is genuinely absent, so it is not reported as a reading.
+    expect(got['bookImbalanceNear@2023-06-01T07:05:00.000Z']).toBeUndefined();
+  });
+
   it('skips a snapshot with no book on either side', () => {
     // Both sides zero is the only genuinely unreadable case.
     const csv = [HEAD, snap('2026-08-20 00:00:06', {

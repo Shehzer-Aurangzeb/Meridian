@@ -143,13 +143,18 @@ export function transform(symbol: string, csv: string, fileDate?: string): Sampl
   // Average each bucket's readings, then stamp the bucket at its END.
   const buckets = new Map<number, { near: number[]; far: number[]; depth: number[] }>();
   for (const [ms, s] of snaps) {
-    const near = share(s.bidNear, s.askNear);
+    // The +-5% bucket is in every file back to 2023 and is what anchors a
+    // snapshot. The 0.2% bucket only starts on 2026-01-15 -- Binance added it
+    // to the feed then -- so a missing `near` is the normal shape of history,
+    // not a broken row. Dropping the whole snapshot for it, as this did, threw
+    // away three years of the two metrics that were present all along.
     const far = share(s.bidFar, s.askFar);
-    if (near === null || far === null) continue;
+    if (far === null) continue;
+    const near = share(s.bidNear, s.askNear);
     const key = Math.floor(ms / ARCHIVE_BAR_MS) * ARCHIVE_BAR_MS + ARCHIVE_BAR_MS;
     let b = buckets.get(key);
     if (!b) buckets.set(key, (b = { near: [], far: [], depth: [] }));
-    b.near.push(near);
+    if (near !== null) b.near.push(near);
     b.far.push(far);
     b.depth.push(s.bidFar + s.askFar);
   }
@@ -157,7 +162,9 @@ export function transform(symbol: string, csv: string, fileDate?: string): Sampl
   const mean = (xs: number[]): number => xs.reduce((a, x) => a + x, 0) / xs.length;
   const out: Sample[] = [];
   for (const [ts, b] of [...buckets.entries()].sort((a, x) => a[0] - x[0])) {
-    out.push({ symbol, metric: 'bookImbalanceNear', ts, value: mean(b.near) });
+    if (b.near.length > 0) {
+      out.push({ symbol, metric: 'bookImbalanceNear', ts, value: mean(b.near) });
+    }
     out.push({ symbol, metric: 'bookImbalanceFar', ts, value: mean(b.far) });
     out.push({ symbol, metric: 'bookDepthNotional', ts, value: mean(b.depth) });
   }
