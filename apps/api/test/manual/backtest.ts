@@ -40,7 +40,7 @@
  * Whether `--min-score` was set on prior runs is UNKNOWN, because the
  * configuration was never recorded alongside the results. That is the same
  * lost-configuration failure that forced the retraction of the +0.117R / 1d
- * result in docs/STATE_OF_PLAY.md 14c: a number whose configuration is lost
+ * result in docs/archive/STATE_OF_PLAY.md 14c: a number whose configuration is lost
  * is not a result. Record the exact command with anything produced here.
  */
 import * as dotenv from 'dotenv';

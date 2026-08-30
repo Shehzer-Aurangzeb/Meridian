@@ -55,7 +55,7 @@
  *     over any window; only the delta against this is edge.
  *
  * Every result must be quoted with the config line this prints. A number whose
- * configuration is lost is not a result (docs/STATE_OF_PLAY.md §14c).
+ * configuration is lost is not a result (docs/archive/STATE_OF_PLAY.md §14c).
  */
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';

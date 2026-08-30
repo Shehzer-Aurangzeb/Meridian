@@ -2,12 +2,19 @@
 
 Written 25 Aug 2026.
 
-This file lives at the repo root on purpose. `.gitignore` line 39 ignores any
-directory named `docs/`, and the repo is public, so that rule is deliberate:
-`docs/` holds research logs and a third-party playbook that must not be
-published. The cost is that nothing in `docs/` is backed up by git — including
-`ZONE_AUDIT.md`, which now lives there and carries the question 1 result. This
-file is at the root so that at least the index of the work survives.
+`docs/` is ignored by git except for named exceptions, because the repo is
+public and `docs/` holds research logs and a third-party playbook that must not
+be published. This file is one of the exceptions, so the index of the work
+survives. `docs/evidence/*_AB.md` and `docs/active/RESEARCH_PLAN_*.md` are the
+others.
+
+Everything else under `docs/` — including `active/ZONE_AUDIT.md`, which carries
+the question 1 result — exists on one laptop only.
+
+Updated 30 Aug 2026: `docs/` is now split into `active/`, `evidence/`,
+`archive/` and `reference/`. See `docs/README.md`. Paths below point at the new
+locations. What comes next is in
+`docs/active/RESEARCH_PLAN_2026-08-30.md`, which supersedes §2.5 of this file.
 
 Where a number below could be checked against the code or a results file, it
 was, and the location is given. Where it could not, it says so. Nothing here
@@ -21,18 +28,18 @@ is asserted on memory alone.
 was measured, and the measurement was negative.
 
 - **−0.106R per trade**, resolved trades only, after the zero-target fix.
-  Verified: `docs/HANDOFF.md:14`, with the working table at `docs/HANDOFF.md:88`
+  Verified: `docs/evidence/HANDOFF.md:14`, with the working table at `docs/evidence/HANDOFF.md:88`
   over 569 trades from `cp4-unified-20260815.csv`.
 - Every exit rule we tried came out negative once open trades are excluded.
   Closing on price — a tighter stop, a trailing stop — made it worse, because
   it turns winners into losers faster than it rescues losers. `D_tight` halves
   the stop and drops the win rate from 61.4% to 48.6% to land in the same place
-  (`docs/HANDOFF.md:126`). The least bad was closing when a fresh analysis no
+  (`docs/evidence/HANDOFF.md:126`). The least bad was closing when a fresh analysis no
   longer prints a plan, and that one is still negative.
 - Public indicators carry no directional edge. This was checked four separate
   ways — the live schedule, an 84-day run, a 3-year panel, and a base-rate
-  engine — recorded across `docs/STATE_OF_PLAY.md` and
-  `docs/STATUS_FOR_REVIEW.md`.
+  engine — recorded across `docs/archive/STATE_OF_PLAY.md` and
+  `docs/archive/STATUS_FOR_REVIEW.md`.
 
 **Could not verify, recorded as reported.** The bootstrap result
 (P(>0) = 0.000 on resolved-only) and the trailing-stop chain
@@ -188,7 +195,7 @@ got built, and why it did not survive.
 
 ### 2.6 Audit the zone map — question 1 done, null
 
-**Planned in `docs/ZONE_AUDIT.md`; results at the foot of that file.**
+**Planned in `docs/active/ZONE_AUDIT.md`; results at the foot of that file.**
 
 **Q1 (are the zones an artefact of grouping order?) — answered 27 Aug, null.**
 `apps/api/test/manual/zonestability.ts`. Over 4,770 zones, a zone centre moves
@@ -211,7 +218,7 @@ Of the two mechanisms the plan named, one is common but rarely decisive
 (sup+res pairs appear in 38% of zones, load-bearing in 8%) and the other
 **never fired once** in 4,770 zones (two fib ratios in one zone needs an anchor
 range under ~4%; none was). Re-scoring that 8% is outstanding, not closed — see
-`docs/ZONE_AUDIT.md`.
+`docs/active/ZONE_AUDIT.md`.
 
 **Both re-run 27 Aug on seven charts** after `LEVEL_TIMEFRAMES` widened to
 `1w/1d/12h/4h/1h/30m/15m`. Q1 still passes (median 0.000R reverse, 0.005R
@@ -351,9 +358,9 @@ Three constants are picked, not derived, and they drive every result:
 - `FILL_WINDOW_HOURS = 24` — `apps/api/src/analysis-coordinator/outcome.ts:57`
 
 **Correction, 27 Aug 2026 — the §14h citation is good.** An earlier version of
-this file said there is "no §14h" in `docs/STATE_OF_PLAY.md` and that
+this file said there is "no §14h" in `docs/archive/STATE_OF_PLAY.md` and that
 `forward-test.ts` cited a section that did not exist. That was wrong. §14h is at
-`docs/STATE_OF_PLAY.md:1041` — "THE TRADE PLAN ITSELF — flat before costs,
+`docs/archive/STATE_OF_PLAY.md:1041` — "THE TRADE PLAN ITSELF — flat before costs,
 negative after" — and its Config block at :1058 records
 `fill-bars=24 max-bars=72 cooldown=24` verbatim, which is exactly what
 `forward-test.ts` cites it for. The eleven citations are correct.
@@ -365,7 +372,7 @@ than derived — that part of this section stands.
 
 `forward-test.ts:20` does still miscite: it credits "methodology rule 7" for the
 claim that the unit of evidence is the month. That is **rule 8**
-(`docs/STATE_OF_PLAY.md:658`); rule 7 (:657) is about never claiming zero fitted
+(`docs/archive/STATE_OF_PLAY.md:658`); rule 7 (:657) is about never claiming zero fitted
 parameters. Off by one. The file has three separate "Methodology rules added"
 sections, each restarting its numbering, which is how it happened.
 

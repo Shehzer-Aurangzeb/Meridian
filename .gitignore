@@ -46,6 +46,22 @@ coverage/
 #
 # Everything else here (STATE_OF_PLAY.md, the playbook PDF, handover notes)
 # stays local exactly as before.
+#
+# The exceptions must be repeated per directory. A pattern only matches one
+# path segment, and git does not descend into an ignored directory at all — so
+# `!docs/*_AB.md` stopped matching the moment those files moved into
+# docs/evidence/, and five tracked files silently became deletions.
 docs/*
-!docs/*_AB.md
 !docs/ROADMAP.md
+!docs/README.md
+
+# The evidence: pre-registrations, and the index that says how each one landed.
+!docs/evidence/
+docs/evidence/*
+!docs/evidence/*_AB.md
+!docs/evidence/README.md
+
+# The current plan. Everything else under active/ is a working note.
+!docs/active/
+docs/active/*
+!docs/active/RESEARCH_PLAN_*.md
