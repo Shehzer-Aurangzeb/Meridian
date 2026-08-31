@@ -59,6 +59,7 @@ docs/*
 !docs/evidence/
 docs/evidence/*
 !docs/evidence/*_AB.md
+!docs/evidence/PHASE_B_IC.md
 !docs/evidence/README.md
 
 # The current plan. Everything else under active/ is a working note.
