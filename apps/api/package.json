@@ -25,7 +25,8 @@
     "cost-sweep": "npx ts-node --transpile-only test/manual/cost-sweep.ts",
     "book-depth": "npx ts-node --transpile-only scripts/book-depth-import.ts",
     "flow-backfill": "npx ts-node --transpile-only scripts/flow-backfill.ts",
-    "panel-build": "npx ts-node --transpile-only test/manual/panel-build.ts"
+    "panel-build": "npx ts-node --transpile-only test/manual/panel-build.ts",
+    "phase-b": "npx ts-node --transpile-only test/manual/phase-b.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
