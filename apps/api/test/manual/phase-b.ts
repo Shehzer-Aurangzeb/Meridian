@@ -101,7 +101,7 @@ export function rankPersistence(panel: Panel, feature: string, lagHours: number)
 }
 
 /** Columns that are never features: keys, the price, staleness, and the targets. */
-const NOT_A_FEATURE = (c: string): boolean =>
+export const NOT_A_FEATURE = (c: string): boolean =>
   c === 'coin' || c === 'ts' || c === 'close' || c.endsWith('_ageMin') || /^fwd\d+h$/.test(c);
 
 // ── statistics ───────────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ export interface Panel {
   data: Map<string, Float64Array>;
 }
 
-function load(file: string): Panel {
+export function load(file: string): Panel {
   const text = fs.readFileSync(file, 'utf8');
   const nl = text.indexOf('\n');
   const columns = text.slice(0, nl).trim().split(',');
