@@ -99,12 +99,38 @@ and none pays the fee), and their combination (this document).
 What has not been tried, and is named here so the decision is informed rather
 than tidy:
 
-- **Lower turnover than 72 hours.** Weekly or monthly holds pay the fee a dozen
-  times a year instead of hundreds. The panel stops at a 72h horizon, so this is
-  untested rather than ruled out. It is also the direction that documented
-  crypto edges — funding carry, cross-sectional momentum — actually live in.
-- **A non-linear combiner.** Plausible in principle; a 14x improvement over a
-  linear fit is not.
+- **Lower turnover than 72 hours, using THESE features.** Weekly holds pay the
+  fee a dozen times a year instead of hundreds. The panel stops at 72h, so the
+  Phase B feature set has not been combined at a weekly horizon.
+
+  It should be read against the fact that the weekly horizon is not new ground
+  here. `archive/STATE_OF_PLAY.md` §14e and §14f already tested the two
+  canonical weekly cross-sectional edges over 166 rebalances, 2023-04 to
+  2026-08, on a top-100 universe — and both came back null:
+
+  ```
+  momentum (30d formation, weekly hold, corrected for funding cashflow)
+      strategy +0.273%/wk   random +0.183%/wk
+      delta CI [-0.0065, +0.0078]   P(<=0) = 0.38
+      Sharpe 0.45 against random's 0.52 — WORSE risk-adjusted
+
+  funding (7d mean, contrarian, weekly hold)
+      strategy +0.037%/wk   random +0.027%/wk
+      delta +0.0001, CI [-0.0051, +0.0053], P(<=0) = 0.48 — a coin flip
+  ```
+
+  So "hold longer" is not an untested hope. The turnover argument is sound —
+  §14f measured a breakeven round trip of 0.205% at weekly rebalance, against
+  0.14% actual — but the two signals anyone would put in that slower book have
+  been measured here and neither is an edge. What remains untested is narrower
+  than it first looks: the Phase B feature set, combined, at a weekly hold.
+- **A non-linear combiner.** A tree ensemble can express what ridge cannot —
+  "high funding predicts down ONLY when bandwidth is also high" — and on
+  financial panel data that is typically worth 10 to 30% over a linear fit.
+  The gap here is 1.01 bp to 14 bp, which is 14x. Nothing in the literature
+  suggests non-linearity closes a gap of that size, and every extra parameter
+  is another way to overfit a sample whose effective n is already one to two
+  orders of magnitude below its raw n.
 - **More coins.** §14e measured the long tail bleeding 0.436%/week, so this is
   more likely to subtract than add.
 
