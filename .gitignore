@@ -54,6 +54,7 @@ coverage/
 docs/*
 !docs/ROADMAP.md
 !docs/README.md
+!docs/STATE_OF_MERIDIAN_*.md
 
 # The evidence: pre-registrations, and the index that says how each one landed.
 !docs/evidence/
@@ -66,6 +67,16 @@ docs/evidence/*
 !docs/evidence/README.md
 
 # The current plan. Everything else under active/ is a working note.
-!docs/active/
-docs/active/*
-!docs/active/RESEARCH_PLAN_*.md
+# docs/active/ is gone as of 1 Sept 2026 — both documents in it were finished
+# and moved to archive/. RESEARCH_PLAN was tracked and public, so the exception
+# follows it to its new path rather than silently untracking it.
+!docs/archive/
+docs/archive/*
+!docs/archive/RESEARCH_PLAN_*.md
+
+# Python bytecode from the research venv.
+__pycache__/
+*.pyc
+
+# Research venv (numpy/pandas/scikit-learn). Pinned in research/requirements.txt.
+.venv-research/

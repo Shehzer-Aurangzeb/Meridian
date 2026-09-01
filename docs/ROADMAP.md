@@ -11,10 +11,14 @@ others.
 Everything else under `docs/` — including `active/ZONE_AUDIT.md`, which carries
 the question 1 result — exists on one laptop only.
 
-Updated 30 Aug 2026: `docs/` is now split into `active/`, `evidence/`,
-`archive/` and `reference/`. See `docs/README.md`. Paths below point at the new
-locations. What comes next is in
-`docs/active/RESEARCH_PLAN_2026-08-30.md`, which supersedes §2.5 of this file.
+Updated 30 Aug 2026: `docs/` is split into `evidence/`, `archive/` and
+`reference/`. See `docs/README.md`. Paths below point at the new locations.
+
+**Updated 1 Sept 2026.** `docs/STATE_OF_MERIDIAN_2026-09-01.md` supersedes §1
+and §2 of this file: it records what runs in production, all eighteen tests, and
+where the chain actually breaks. `RESEARCH_PLAN_2026-08-30.md` has been executed
+in full and moved to `archive/`. §3 (parked work), §5 (discipline) and §6 (what
+survives) below are still current.
 
 Where a number below could be checked against the code or a results file, it
 was, and the location is given. Where it could not, it says so. Nothing here

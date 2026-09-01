@@ -1,6 +1,12 @@
 # The evidence ledger
 
-Every measurement this project has made, and how it landed. Written 30 Aug 2026.
+Every measurement this project has made, and how it landed. Written 30 Aug 2026,
+extended 1 Sept 2026 with Phases B–D and the fill test.
+
+For the whole picture in one place — what runs in production, what was tested,
+and exactly where it fails — read
+[`../STATE_OF_MERIDIAN_2026-09-01.md`](../STATE_OF_MERIDIAN_2026-09-01.md)
+first. This file is the index of the individual pre-registrations.
 
 **The pre-registrations are not merged into this file and must not be.** Each one
 states a bar before a run and records the result after it, and separating those
@@ -23,8 +29,22 @@ does not replace them.
 | 10 | [`DECILE_AB.md`](DECILE_AB.md) | all of the above, re-cut at decile resolution | one cell cleared, and it does not survive inspection |
 | — | [`HANDOFF.md`](HANDOFF.md) | the trade harness itself | −0.106R per resolved trade |
 
-Roughly **550,000 observations across thirteen directional tests. Nothing has
-cleared its pre-registered bar.**
+### Added 30 Aug – 1 Sept 2026 — the panel, with the geometry removed
+
+| # | document | input class | verdict |
+|---|---|---|---|
+| 11 | [`PHASE_B_IC.md`](PHASE_B_IC.md) | **every feature on its own**, cross-sectional IC, 192 tests | 7 families over \|t\| > 3.0 — **none pays the fee** |
+| 12 | [`PHASE_C_COMBINE.md`](PHASE_C_COMBINE.md) | the seven combined, ridge, purged K-fold | 1.01 bp against 14 bp; same as shuffled |
+| 13 | [`PHASE_D_NONLINEAR.md`](PHASE_D_NONLINEAR.md) | gradient-boosted trees, barrier labels, 160 features, holdout | 0.34 bp — real, above noise, a third of the fee |
+| 14 | [`STAGE0_MAKER_FILL.md`](STAGE0_MAKER_FILL.md) | would a resting limit order fill, on 1-minute bars | fills 88–92%, **gross is negative**: −8.20 bp over 3.1 years |
+
+Test 14 is the one that closes the fee argument. The orders fill, and fill
+favourably rather than adversely. The gross they fill into is negative over the
+longer sample, and a cheaper fee multiplies a negative number by one.
+
+Roughly **550,000 observations across the first thirteen tests, plus a 320,000-row
+panel across the last four. Eighteen directional tests. Nothing has cleared its
+pre-registered bar.**
 
 ---
 
@@ -69,9 +89,15 @@ with 3.65 years behind it rather than none.
 
 ---
 
-## What has never been tested
+## What was never tested, and now has been
 
-Not "tested and null" — never measured at all:
+The three items below were the open list on 30 Aug. **All three were closed
+between 30 Aug and 1 Sept** — by Phase A (the panel), Phase B (feature
+predictivity separated from trade geometry) and the flow metrics finally
+entering a test. They are left here unedited because this section is what the
+research plan was written against; the verdicts are tests 11–14 above.
+
+Not "tested and null" — never measured at all *as of 30 Aug 2026*:
 
 - **Cross-sectional, on flow inputs.** The construction itself HAS been tested —
   §14e ran momentum and §14f ran funding, long the top decile against short the
@@ -87,8 +113,20 @@ Not "tested and null" — never measured at all:
 - **The collector's own inputs.** Open interest, taker buy/sell and long/short
   ratio have never been in any test, at any resolution.
 
-All three are the subject of
-[`../active/RESEARCH_PLAN_2026-08-30.md`](../active/RESEARCH_PLAN_2026-08-30.md).
+All three were the subject of
+[`../archive/RESEARCH_PLAN_2026-08-30.md`](../archive/RESEARCH_PLAN_2026-08-30.md),
+which has now been executed in full.
+
+## What has still never been tested
+
+- **Any venue except Binance.** Every one of the 160 columns in the Phase D
+  panel is Binance-only. Cross-exchange price dispersion, funding spread and
+  open-interest share are free, reach back to 2023 on OKX and Bybit (OKX funding
+  excepted — ~3 months), and have never been measured.
+- **Anything forward-looking.** Nothing in the panel is a market expectation.
+  Deribit implied volatility and skew are free, and cover BTC and ETH only.
+- **Trade-level order flow.** `aggTrades` is free but ~440 GB, and
+  `takerBuySellRatio5m` is already a coarse version of it.
 
 ## Two numbers from §14e worth carrying
 

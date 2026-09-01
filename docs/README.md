@@ -1,23 +1,25 @@
 # docs — what is here and what it is worth
 
-Reorganised 30 Aug 2026. Nothing was deleted; `docs/` has almost no git history,
-so a delete here is unrecoverable and everything superseded was moved to
-`archive/` instead.
+Reorganised 30 Aug 2026, updated 1 Sept 2026. Nothing has ever been deleted;
+`docs/` has almost no git history, so a delete here is unrecoverable and
+everything superseded is moved to `archive/` instead.
 
 ## Where to start
 
 | you want | read |
 |---|---|
-| what the project is doing next | [`active/RESEARCH_PLAN_2026-08-30.md`](active/RESEARCH_PLAN_2026-08-30.md) |
+| **everything: what runs, what was tested, where it fails** | [`STATE_OF_MERIDIAN_2026-09-01.md`](STATE_OF_MERIDIAN_2026-09-01.md) |
+| the individual experiments and their bars | [`evidence/README.md`](evidence/README.md) |
 | what is parked, and why | [`ROADMAP.md`](ROADMAP.md) |
-| what has already been tested | [`evidence/README.md`](evidence/README.md) |
-| how the app is built | the code — every doc that described the architecture is stale |
+| how the app is built | the state document above, then the code |
 
 ## The folders
 
-**`active/`** — current. A document here is either being worked from or has open
-questions in it. If it is finished, it belongs in `evidence/`; if it has been
-overtaken, it belongs in `archive/`.
+**`active/` no longer exists.** It held two documents and both are finished:
+`RESEARCH_PLAN_2026-08-30.md` was executed in full (Phases A–D, all recorded in
+`evidence/`) and `ZONE_AUDIT.md` had its premise settled by a different route.
+Both moved to `archive/` on 1 Sept 2026 with a header saying why. Recreate the
+folder when there is genuinely open work to put in it.
 
 **`evidence/`** — completed experiments and the results they produced. These are
 the reason to trust or distrust any claim this project makes.
@@ -40,8 +42,12 @@ published.
 
 - `docs/ROADMAP.md`
 - `docs/README.md` (this file)
-- `docs/evidence/*_AB.md` and `docs/evidence/README.md`
-- `docs/active/RESEARCH_PLAN_*.md`
+- `docs/STATE_OF_MERIDIAN_*.md`
+- `docs/evidence/*_AB.md`, `docs/evidence/README.md`, and the four phase records
+  (`PHASE_B_IC.md`, `PHASE_C_COMBINE.md`, `PHASE_D_NONLINEAR.md`,
+  `STAGE0_MAKER_FILL.md`)
+- `docs/archive/RESEARCH_PLAN_*.md` — the exception followed the file when it
+  was archived, rather than silently untracking a public document
 
 Everything else — `archive/`, the playbook PDF, working notes — stays local.
 

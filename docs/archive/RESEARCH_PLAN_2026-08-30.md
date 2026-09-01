@@ -1,3 +1,22 @@
+> **ARCHIVED 1 September 2026 — executed in full.**
+>
+> Every phase this plan proposed has been run and recorded. Phase A built the
+> panel, Phase B found seven feature families over |t| > 3.0, Phase C combined
+> them and got 1.01 bp against a 14 bp fee, Phase D added non-linearity and got
+> 0.34 bp, and a stage-0 fill test then measured the gross as negative over the
+> longer sample.
+>
+> The results are in `../evidence/PHASE_B_IC.md`, `PHASE_C_COMBINE.md`,
+> `PHASE_D_NONLINEAR.md` and `STAGE0_MAKER_FILL.md`. The current picture is
+> `../STATE_OF_MERIDIAN_2026-09-01.md`.
+>
+> Two things in here are now known to be wrong and are corrected in the
+> evidence documents rather than edited here, because this is a sealed
+> pre-registration: §2.5 writes the exit condition in t-stats, which Phase B
+> cleared while still failing to pay a fee; and the input table's "no paid data
+> needed" reasoning did not anticipate that the panel's own features would come
+> out worth a third of a fee.
+
 # Research plan — 30 August 2026
 
 Two things: what the 10-coin sweep measured on 29–30 Aug, and what to build
