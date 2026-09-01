@@ -52,6 +52,16 @@ def test_standardise():
     # pandas std is sample (ddof=1); with n coins that is sqrt(n/(n-1)) off 1.
     n = len(first)
     assert abs(first.std() - np.sqrt((n - 1) / n)) < 1e-5, first.std()
+    # A column constant across coins is 0/0 and must be caught, not passed to
+    # the binner, which reports it as a window-shape error.
+    df["mkt"] = df.groupby("ts")["f"].transform("mean")
+    try:
+        cross_sectional_standardise(df, ["f", "mkt"])
+        raise AssertionError("all-NaN column was not caught")
+    except ValueError as e:
+        assert "mkt" in str(e), e
+    x2 = cross_sectional_standardise(df, ["f", "mkt"], ["mkt"])
+    assert np.isfinite(x2[:, 1]).all(), "passthrough column should survive intact"
     print("standardise    ok")
 
 

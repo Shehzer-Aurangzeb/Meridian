@@ -51,6 +51,10 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 
+# Redirected stdout is block-buffered, so a 5-minute run shows nothing until it
+# ends and a crash loses the rows already printed.
+sys.stdout.reconfigure(line_buffering=True)
+
 RNG = np.random.default_rng(12345)
 HORIZONS = [4, 12, 24, 72]
 # Round trip in basis points, charged once per closed trade on total capital.
@@ -60,6 +64,17 @@ COSTS = [0, 14, 25]
 MAX_PERSIST = 0.5
 MIN_COVERAGE = 0.9
 HOLDOUT_DAYS = 182
+# Winsorise the volatility-scaled TRAINING target here, never the P&L.
+#
+# Dividing the forward return by ATR was meant to tame the tail and made it
+# worse: kurtosis 27 becomes 243. The cause is not a tiny-ATR artefact -- the
+# 27 rows responsible have a normal ATR and a median absolute 4h move of 19.7%.
+# They are real crashes. A squared-error fit will chase 27 rows out of 320,000
+# and learn nothing else, so the model does not see past +-5 (kurtosis 2.3).
+#
+# The book is scored on the raw `fwd{H}h` return throughout, so every one of
+# those moves is still paid or suffered in the P&L. Only the lesson is clipped.
+WINSOR = 5.0
 
 
 def load(path: str) -> pd.DataFrame:
@@ -116,7 +131,7 @@ def screen(df: pd.DataFrame, cols: list[str]) -> tuple[list[str], list[str]]:
     return keep, dropped
 
 
-def engineer(df: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, list[str]]:
+def engineer(df: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, list[str], list[str]]:
     """D2. Deltas, cross-sectional ranks, and market context.
 
     Every column added here is either a difference over that coin's own past or
@@ -151,18 +166,35 @@ def engineer(df: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, list[str]
     out["mkt_atr_disp"] = byts["atrPct"].transform("std")
     out["mkt_funding"] = byts["fundingRate"].transform("mean")
     out["mkt_book"] = byts["bookImbalanceFar"].transform("mean")
-    made += ["mkt_atr", "mkt_atr_disp", "mkt_funding", "mkt_book"]
+    market = ["mkt_atr", "mkt_atr_disp", "mkt_funding", "mkt_book"]
+    made += market
 
-    return out, cols + made
+    return out, cols + made, market
 
 
-def cross_sectional_standardise(df: pd.DataFrame, cols: list[str]) -> np.ndarray:
-    """Centre and scale each feature within each hour, so the market move is gone."""
-    g = df.groupby("ts", sort=False)[cols]
-    mu = g.transform("mean")
-    sd = g.transform("std")
-    z = (df[cols] - mu) / sd.replace(0, np.nan)
-    return z.to_numpy(dtype=np.float32)
+def cross_sectional_standardise(
+    df: pd.DataFrame, cols: list[str], passthrough: list[str] | None = None
+) -> np.ndarray:
+    """Centre and scale each feature within each hour, so the market move is gone.
+
+    `passthrough` columns are handed over untouched. The market-context columns
+    are identical across coins by construction -- that is what makes them
+    context -- so standardising them cross-sectionally is 0/0 and turns each one
+    entirely into NaN. sklearn's binner then fails with "window shape cannot be
+    larger than input array shape", which is a long way from saying "your column
+    is empty". Trees are scale-invariant, so raw is the right answer for these.
+    """
+    passthrough = passthrough or []
+    z_cols = [c for c in cols if c not in passthrough]
+    g = df.groupby("ts", sort=False)[z_cols]
+    z = (df[z_cols] - g.transform("mean")) / g.transform("std").replace(0, np.nan)
+    out = pd.concat([z, df[passthrough]], axis=1)[cols]
+    # A column that is empty after this is a column the model cannot use, and
+    # finding that out here beats finding it out inside the binner.
+    empty = [c for c in cols if not np.isfinite(out[c]).any()]
+    if empty:
+        raise ValueError(f"all-NaN after standardisation: {', '.join(empty)}")
+    return out.to_numpy(dtype=np.float32)
 
 
 def non_overlapping(ts: pd.Series, horizon: int) -> np.ndarray:
@@ -287,7 +319,7 @@ def main() -> int:
         for c in [f"fwd{h}h" for h in HORIZONS] + [f"fwdVol{h}h" for h in HORIZONS] + [f"tb{h}h" for h in HORIZONS]:
             df[c] = df.groupby("ts", sort=False)[c].transform(lambda s: RNG.permutation(s.values))
 
-    df, all_cols = engineer(df, kept)
+    df, all_cols, market = engineer(df, kept)
 
     cutoff = df["ts"].max() - pd.Timedelta(days=HOLDOUT_DAYS)
     dev = df[df["ts"] < cutoff].reset_index(drop=True)
@@ -305,8 +337,8 @@ def main() -> int:
     print("the bar    net@14 > 0 on the HOLDOUT with a bootstrap interval excluding zero\n")
 
     # Built once. It does not depend on the horizon or the target.
-    xdev = cross_sectional_standardise(dev, all_cols)
-    xhold = cross_sectional_standardise(hold, all_cols)
+    xdev = cross_sectional_standardise(dev, all_cols, market)
+    xhold = cross_sectional_standardise(hold, all_cols, market)
 
     rows = []
     hdr = f"{'target':>10} {'horizon':>8} {'split':>8} {'trades':>7} {'gross bp':>9} {'net@14':>8} {'95% interval':>20}"
@@ -314,6 +346,8 @@ def main() -> int:
     for horizon in HORIZONS:
         for target, is_cls in ((f"fwdVol{horizon}h", False), (f"tb{horizon}h", True)):
             ydev = dev[target].to_numpy()
+            if not is_cls:
+                ydev = np.clip(ydev, -WINSOR, WINSOR)
             # Non-overlapping rows only, for TRAINING. Prediction and scoring
             # still run on every hour.
             ok = np.isfinite(ydev) & non_overlapping(dev["ts"], horizon)
