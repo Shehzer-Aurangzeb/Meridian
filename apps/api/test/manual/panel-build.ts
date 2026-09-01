@@ -78,6 +78,8 @@ const CTX = 400;
 /** Horizons, in 1h bars. The longest one also sets the right-edge reserve. */
 const HORIZONS = [4, 12, 24, 72];
 const MAX_HORIZON = Math.max(...HORIZONS);
+/** Barrier width, in ATRs, for the triple-barrier label. */
+const BARRIER_ATR = num('barrier-atr', 1);
 /** Trailing window for every flow z-score. Time, not sample count: the metrics
  *  are published at 5m, 1h and 8h, and a fixed sample count would mean 24 hours
  *  for one and three months for another. */
@@ -163,6 +165,39 @@ export class FlowCursor {
   }
 }
 
+/**
+ * Triple-barrier label: did price rise by `k` ATRs before it fell by `k`?
+ *
+ * Phases B and C predicted the raw forward return and scored its mean. Crypto
+ * returns are fat-tailed, so that mean is set by a handful of hours and a
+ * squared-error model spends most of its capacity fitting how VOLATILE a coin
+ * is rather than which way it goes. A barrier label asks the smaller question a
+ * model can actually learn, and asks it in units of the coin's own volatility.
+ *
+ * Returns +1 up first, -1 down first, 0 if neither barrier is touched.
+ *
+ * When one bar touches both barriers, OHLC does not record which came first.
+ * The bar's own close decides, which uses only information inside that bar and
+ * is deterministic. Dropping those rows instead would quietly delete the most
+ * volatile hours, which is a worse bias than the one it avoids.
+ */
+export function tripleBarrier(
+  forward: Candle[],
+  entry: number,
+  widthPct: number,
+): number {
+  const up = entry * (1 + widthPct);
+  const down = entry * (1 - widthPct);
+  for (const c of forward) {
+    const hitUp = c.high >= up;
+    const hitDown = c.low <= down;
+    if (hitUp && hitDown) return c.close >= entry ? 1 : -1;
+    if (hitUp) return 1;
+    if (hitDown) return -1;
+  }
+  return 0;
+}
+
 /** Percent distance from `price` to the nearest level on a side, and its shape. */
 export function nearest(
   levels: Array<{ price: number; type: string; touchCount: number; held: boolean }>,
@@ -208,6 +243,10 @@ const COLUMNS = [
   ]),
   ...FLOW_METRICS.flatMap((m) => [m, `${m}_z`, `${m}_ageMin`]),
   ...HORIZONS.map((h) => `fwd${h}h`),
+  // The forward move in units of the coin's own volatility, so a 2% move in a
+  // quiet coin and a 2% move in a wild one stop being the same observation.
+  ...HORIZONS.map((h) => `fwdVol${h}h`),
+  ...HORIZONS.map((h) => `tb${h}h`),
 ];
 
 const fmt = (x: number): string => (Number.isFinite(x) ? String(Number(x.toFixed(6))) : '');
@@ -320,6 +359,11 @@ async function runCoin(
 
     // Log returns, so horizons are additive and a +10% and a −10% are symmetric.
     const targets = HORIZONS.map((h) => Math.log(h1[i + h].close / price));
+    const atrFrac = ctx.atr / price;
+    const volTargets = targets.map((r) => (atrFrac > 0 ? r / atrFrac : NaN));
+    const barriers = HORIZONS.map((h) =>
+      atrFrac > 0 ? tripleBarrier(h1.slice(i + 1, i + h + 1), price, BARRIER_ATR * atrFrac) : NaN,
+    );
 
     write(
       [
@@ -339,6 +383,8 @@ async function runCoin(
         ...levelCols.map(fmt),
         ...flowCols.map(fmt),
         ...targets.map(fmt),
+        ...volTargets.map(fmt),
+        ...barriers.map(fmt),
       ].join(','),
     );
     rows += 1;

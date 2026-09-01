@@ -1,4 +1,4 @@
-import { FlowCursor, nearest, Series } from './panel-build';
+import { FlowCursor, nearest, Series, tripleBarrier } from './panel-build';
 import { flowAsOf, FLOW_EMBARGO_MS } from '../../src/common/replay/plan-replay';
 
 const HOUR = 3_600_000;
@@ -100,5 +100,33 @@ describe('nearest', () => {
     const got = nearest([lv(110, 'resistance')], 100, 'support');
     expect(Number.isNaN(got.distPct)).toBe(true);
     expect(Number.isNaN(got.touches)).toBe(true);
+  });
+});
+
+describe('tripleBarrier', () => {
+  const bar = (high: number, low: number, close: number) =>
+    ({ time: new Date(0), open: close, high, low, close, volume: 0 });
+
+  it('labels +1 when the upper barrier is reached first', () => {
+    expect(tripleBarrier([bar(101, 99.9, 100.5), bar(90, 89, 89)], 100, 0.01)).toBe(1);
+  });
+
+  it('labels -1 when the lower barrier is reached first', () => {
+    expect(tripleBarrier([bar(100.5, 99, 99.2), bar(120, 119, 119)], 100, 0.01)).toBe(-1);
+  });
+
+  it('labels 0 when neither barrier is reached in the window', () => {
+    expect(tripleBarrier([bar(100.5, 99.6, 100.1), bar(100.4, 99.7, 100)], 100, 0.01)).toBe(0);
+  });
+
+  it('breaks a same-bar tie on that bar own close, never on a later bar', () => {
+    // OHLC cannot say which barrier came first inside one bar. Using the close
+    // keeps the decision inside the bar; anything else would read the future.
+    expect(tripleBarrier([bar(101.5, 98.5, 100.4)], 100, 0.01)).toBe(1);
+    expect(tripleBarrier([bar(101.5, 98.5, 99.6)], 100, 0.01)).toBe(-1);
+  });
+
+  it('touches count, so a barrier reached exactly is reached', () => {
+    expect(tripleBarrier([bar(101, 100, 100.5)], 100, 0.01)).toBe(1);
   });
 });
