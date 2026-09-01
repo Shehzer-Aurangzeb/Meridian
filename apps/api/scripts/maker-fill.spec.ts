@@ -1,4 +1,4 @@
-import { monthsBetween, parseKlines, fillIndex, indexAt, simulate, Minute } from './maker-fill';
+import { monthsBetween, parseKlines, fillIndex, indexAt, simulate, daysIn, Minute } from './maker-fill';
 
 const m = (ts: number, high: number, low: number, close: number): Minute => ({ ts, high, low, close });
 const MIN = 60_000;
@@ -94,5 +94,23 @@ describe('simulate', () => {
     const long = simulate(bars, { ...sig, ts: 200 * MIN }, 15, 0)!;
     const short = simulate(bars, { ...sig, ts: 200 * MIN, side: 'sell' }, 15, 0)!;
     expect(long.grossBp).toBeCloseTo(-short.grossBp, 6);
+  });
+});
+
+describe('daysIn', () => {
+  it('lists a whole past month', () => {
+    const got = daysIn('2024-02', new Date('2026-01-01'));
+    expect(got).toHaveLength(29); // 2024 is a leap year
+    expect(got[0]).toBe('2024-02-01');
+    expect(got[28]).toBe('2024-02-29');
+  });
+
+  it('stops at today, so an unfinished month is not asked for in full', () => {
+    const got = daysIn('2026-08', new Date('2026-08-05T00:00:00Z'));
+    expect(got).toEqual(['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04']);
+  });
+
+  it('returns nothing for a month that has not started', () => {
+    expect(daysIn('2026-12', new Date('2026-08-05T00:00:00Z'))).toEqual([]);
   });
 });
