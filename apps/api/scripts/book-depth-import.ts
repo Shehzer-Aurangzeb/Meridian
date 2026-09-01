@@ -239,22 +239,22 @@ async function get(url: string, attempts = 4): Promise<Buffer | null> {
  * run again. A missing day resolves to null: Binance has real holes, and a hole
  * is a fact about the record rather than an error.
  */
-async function fetchDay(dir: string, pair: string, date: string): Promise<string | null> {
-  const name = `${pair}-bookDepth-${date}.zip`;
-  const dest = path.join(dir, name);
+export async function fetchVerified(url: string, dest: string): Promise<string | null> {
   if (fs.existsSync(dest)) return dest;
 
-  const zip = await get(`${BASE}/${pair}/${name}`);
+  const zip = await get(url);
   if (zip === null) return null;
 
   // The .CHECKSUM is "<sha256>  <filename>". Verified before the bytes are
   // trusted, because a truncated download parses as a short file rather than
   // failing, and a short file imports as a quiet hole in the series.
-  const sumFile = await get(`${BASE}/${pair}/${name}.CHECKSUM`);
+  const sumFile = await get(`${url}.CHECKSUM`);
   if (sumFile) {
     const want = sumFile.toString('utf8').trim().split(/\s+/)[0];
     const got = crypto.createHash('sha256').update(zip).digest('hex');
-    if (want !== got) throw new Error(`${name}: checksum ${got} != published ${want}`);
+    if (want !== got) {
+      throw new Error(`${path.basename(dest)}: checksum ${got} != published ${want}`);
+    }
   }
 
   fs.writeFileSync(dest, zip);
@@ -264,7 +264,11 @@ async function fetchDay(dir: string, pair: string, date: string): Promise<string
 /**
  * Download everything missing, several at a time.
  *
- * The archive is ONE FILE PER COIN PER DAY, so ten coins over 1,337 days is
+ * Takes {url, dest} rather than {pair, date}: the 1-minute kline importer needs
+ * the same retrying, checksum-verifying, resumable pool against a different URL
+ * shape, and one generic pool beats two copies of the retry logic.
+ *
+ * The bookDepth archive is ONE FILE PER COIN PER DAY, so ten coins over 1,337 days is
  * 13,362 files and 26,724 requests counting checksums. Sequentially that is
  * about five and a half hours, and every second of it is latency rather than
  * work — the CPU sits at zero.
@@ -276,9 +280,8 @@ async function fetchDay(dir: string, pair: string, date: string): Promise<string
  * ponytail: a fixed pool of eight, not a rate-limiter. S3 does not throttle at
  * this scale and the job runs once. Lower it if a future run starts seeing 503s.
  */
-async function fetchAll(
-  dir: string,
-  jobs: Array<{ pair: string; date: string }>,
+export async function fetchAll(
+  jobs: Array<{ url: string; dest: string }>,
   concurrency: number,
 ): Promise<void> {
   let next = 0;
@@ -289,7 +292,7 @@ async function fetchAll(
       const i = next;
       next += 1;
       if (i >= jobs.length) return;
-      await fetchDay(dir, jobs[i].pair, jobs[i].date);
+      await fetchVerified(jobs[i].url, jobs[i].dest);
       done += 1;
       if (done % 500 === 0) {
         const rate = done / ((Date.now() - t0) / 1000);
@@ -344,10 +347,13 @@ async function main(): Promise<void> {
   // what makes the run finish in under an hour instead of five and a half.
   if (FETCH) {
     const jobs = COINS.flatMap((c) =>
-      dates.map((date) => ({ pair: `${c.toUpperCase()}USDT`, date })),
-    ).filter((j) => !fs.existsSync(path.join(DIR, `${j.pair}-bookDepth-${j.date}.zip`)));
+      dates.map((date) => {
+        const name = `${c.toUpperCase()}USDT-bookDepth-${date}.zip`;
+        return { url: `${BASE}/${c.toUpperCase()}USDT/${name}`, dest: path.join(DIR, name) };
+      }),
+    ).filter((j) => !fs.existsSync(j.dest));
     console.log(`fetching ${jobs.length} missing files with ${CONCURRENCY} workers\n`);
-    await fetchAll(DIR, jobs, CONCURRENCY);
+    await fetchAll(jobs, CONCURRENCY);
     console.log(`\nfetch done in ${((Date.now() - t0) / 1000 / 60).toFixed(1)}m\n`);
   }
 

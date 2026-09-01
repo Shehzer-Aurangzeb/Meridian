@@ -245,15 +245,26 @@ def block_bootstrap(values: np.ndarray, times: np.ndarray, block_days=30, draws=
     return float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))
 
 
-def score_book(pred: np.ndarray, y: np.ndarray, ts: np.ndarray, horizon: int, k=3):
+def score_book(
+    pred: np.ndarray,
+    y: np.ndarray,
+    ts: np.ndarray,
+    horizon: int,
+    k=3,
+    coins: np.ndarray | None = None,
+    signals_out: str | None = None,
+):
     """D6. Long the top k coins by forecast, short the bottom k, half capital
     each leg, held `horizon` hours, never overlapping.
 
     Non-overlapping matters: overlapping holds would report the same move up to
     `horizon` times and make the trade count, and therefore the cost, a fiction.
     """
-    frame = pd.DataFrame({"p": pred, "y": y, "ts": ts}).dropna()
-    rets, times = [], []
+    frame = pd.DataFrame({"p": pred, "y": y, "ts": ts})
+    if coins is not None:
+        frame["coin"] = coins
+    frame = frame.dropna(subset=["p", "y", "ts"])
+    rets, times, picks = [], [], []
     next_free = None
     for t, grp in frame.groupby("ts", sort=True):
         if len(grp) < 2 * k:
@@ -264,6 +275,17 @@ def score_book(pred: np.ndarray, y: np.ndarray, ts: np.ndarray, horizon: int, k=
         s = grp.sort_values("p")
         rets.append((s["y"].iloc[-k:].mean() - s["y"].iloc[:k].mean()) / 2)
         times.append(t)
+        if signals_out is not None and "coin" in s:
+            # The book, one row per leg, for the fill simulator. Top k by
+            # forecast are bought and bottom k are sold, which is exactly what
+            # the return above is made of -- the two must not drift apart.
+            for c in s["coin"].iloc[-k:]:
+                picks.append((t, c, "buy", horizon))
+            for c in s["coin"].iloc[:k]:
+                picks.append((t, c, "sell", horizon))
+
+    if signals_out is not None and picks:
+        pd.DataFrame(picks, columns=["ts", "coin", "side", "horizon"]).to_csv(signals_out, index=False)
     if not rets:
         return dict(trades=0, gross_bp=np.nan, lo=np.nan, hi=np.nan)
     r = np.array(rets) * 1e4
@@ -307,6 +329,11 @@ def main() -> int:
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--shuffle", action="store_true")
+    ap.add_argument(
+        "--signals-prefix",
+        default=None,
+        help="write the book, one row per leg, for scripts/maker-fill.ts",
+    )
     args = ap.parse_args()
 
     df = load(args.panel)
@@ -364,7 +391,11 @@ def main() -> int:
             # The dev book is scored on the RAW return, never on the target the
             # model was fit to. A model can rank volatility-scaled moves well and
             # still lose money, and money is the question.
-            b = score_book(oos, dev[f"fwd{horizon}h"].to_numpy(), dev["ts"].to_numpy(), horizon, args.k)
+            b = score_book(
+                oos, dev[f"fwd{horizon}h"].to_numpy(), dev["ts"].to_numpy(), horizon, args.k,
+                coins=dev["coin"].to_numpy(),
+                signals_out=f"{args.signals_prefix}-{target}-dev.csv" if args.signals_prefix else None,
+            )
             rows.append(dict(target=target, horizon=horizon, split="dev", **b))
             print(
                 f"{target:>10} {horizon:>7}h {'dev':>8} {b['trades']:>7,} {b['gross_bp']:>9.2f} "
@@ -375,7 +406,11 @@ def main() -> int:
             ph = fit_predict(
                 xdev[ok], ydev[ok].astype(int) if is_cls else ydev[ok], xhold, is_cls
             )
-            bh = score_book(ph, hold[f"fwd{horizon}h"].to_numpy(), hold["ts"].to_numpy(), horizon, args.k)
+            bh = score_book(
+                ph, hold[f"fwd{horizon}h"].to_numpy(), hold["ts"].to_numpy(), horizon, args.k,
+                coins=hold["coin"].to_numpy(),
+                signals_out=f"{args.signals_prefix}-{target}-holdout.csv" if args.signals_prefix else None,
+            )
             rows.append(dict(target=target, horizon=horizon, split="holdout", **bh))
             print(
                 f"{target:>10} {horizon:>7}h {'HOLDOUT':>8} {bh['trades']:>7,} {bh['gross_bp']:>9.2f} "
