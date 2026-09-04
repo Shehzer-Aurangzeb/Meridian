@@ -188,3 +188,43 @@ describe('crossVenue', () => {
     expect(got.filter((x) => Number.isFinite(x))).toHaveLength(0);
   });
 });
+
+describe('venue cursor embargo', () => {
+  const HOUR = 3_600_000;
+  const series = (pairs: Array<[number, number]>): Series => ({
+    ts: Float64Array.from(pairs.map((p) => p[0])),
+    value: Float64Array.from(pairs.map((p) => p[1])),
+  });
+
+  it('reads the bar that closed AT asOf, not the one before it', () => {
+    // The bug this exists for. Venue rows are stamped at bar close, so the row
+    // for the decision bar has ts EXACTLY equal to asOf. Under the 5-minute
+    // publication embargo, `ts + 5min <= asOf` is false and the cursor silently
+    // falls back an hour. The panel then compared Binance at T against the
+    // venue at T-1h and called the difference a spread: correlation 0.995 with
+    // the one-hour return, and a mean magnitude matching it to 0.2 bp.
+    //
+    // A bar close has no publication delay -- it is known at the close, which is
+    // the same instant the panel reads Binance's own close at.
+    const asOf = 3 * HOUR;
+    const s = series([[HOUR, 100], [2 * HOUR, 200], [3 * HOUR, 300]]);
+
+    const embargoed = new FlowCursor(s);
+    embargoed.advance(asOf);
+    expect(embargoed.last()).toBe(200); // an hour stale, which was the bug
+
+    const venue = new FlowCursor(s, 0);
+    venue.advance(asOf);
+    expect(venue.last()).toBe(300);
+  });
+
+  it('still refuses a bar stamped after asOf', () => {
+    // Zero embargo is not "read anything". A bar that closes later has not
+    // happened yet.
+    const s = series([[3 * HOUR, 300], [4 * HOUR, 400]]);
+    const c = new FlowCursor(s, 0);
+    c.advance(3 * HOUR);
+    expect(c.last()).toBe(300);
+    expect(c.ageMinutes(3 * HOUR)).toBe(0);
+  });
+});

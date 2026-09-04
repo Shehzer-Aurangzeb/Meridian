@@ -110,6 +110,26 @@ const FLOW_METRICS = [
  * interest is ~1 month, and the open-interest endpoint ignores `begin` on its
  * own and hands back today's rows whatever window is asked for.
  */
+/**
+ * Venue rows carry NO publication embargo, and that is not a relaxation.
+ *
+ * `FLOW_EMBARGO_MS` models the delay between Binance stamping a
+ * `/futures/data/` reading and serving it. A bar close has no such delay: it is
+ * known at the close, which is the same instant the panel already reads
+ * Binance's own `close` at.
+ *
+ * Applying the 5-minute embargo here was a real bug and it is worth keeping the
+ * symptom. Venue rows are stamped at bar close, which IS `asOf`, so
+ * `ts + 5min <= asOf` was false and the cursor fell back to the PREVIOUS hour.
+ * The panel then compared Binance at T against OKX at T-1h, and the resulting
+ * "spread" was the one-hour return wearing a different name: correlation 0.995
+ * with |1h return|, and a mean magnitude of 51.3 bp against the return's 51.1.
+ *
+ * It would not have looked like a bug in a result table. It would have looked
+ * like a strong, stable, brand-new signal.
+ */
+const VENUE_EMBARGO_MS = 0;
+
 const VENUE_METRICS = [
   'okxClose',
   'bybitClose',
@@ -405,10 +425,11 @@ async function runCoin(
 
   const flow = await loadFlow(prisma, coin);
   const cursors = new Map(
-    [...FLOW_METRICS, ...VENUE_METRICS].map((m) => [
-      m,
-      new FlowCursor(flow.get(m) ?? { ts: new Float64Array(), value: new Float64Array() }),
-    ]),
+    [...FLOW_METRICS, ...VENUE_METRICS].map((m) => {
+      const series = flow.get(m) ?? { ts: new Float64Array(), value: new Float64Array() };
+      const isVenue = (VENUE_METRICS as readonly string[]).includes(m);
+      return [m, new FlowCursor(series, isVenue ? VENUE_EMBARGO_MS : undefined)] as const;
+    }),
   );
 
   // Levels only move when a bar on their own timeframe closes. Recomputing them
