@@ -1,4 +1,4 @@
-import { rank, spearman, neweyWestSe, blockBootstrapMean, normalCdf, mean, rankPersistence } from './phase-b';
+import { rank, spearman, neweyWestSe, blockBootstrapMean, normalCdf, mean, rankPersistence, NOT_A_FEATURE } from './phase-b';
 
 describe('rank', () => {
   it('averages tied ranks, which is what makes it Spearman', () => {
@@ -128,5 +128,23 @@ describe('rankPersistence', () => {
       }),
     );
     expect(Math.abs(rankPersistence(panelOf(rows, hours), 'f', 24))).toBeLessThan(0.3);
+  });
+});
+
+describe('NOT_A_FEATURE', () => {
+  it('excludes every target, not just the plain forward return', () => {
+    // The regression: /^fwd\d+h$/ matched fwd4h and missed fwdVol4h and tb4h,
+    // so the Phase D targets were tested as features and fwdVol4h "predicted"
+    // fwd4h at |t| = 571.8 -- a target predicting itself.
+    for (const c of ['fwd4h', 'fwd72h', 'fwdVol4h', 'fwdVol72h', 'tb4h', 'tb72h']) {
+      expect(NOT_A_FEATURE(c)).toBe(true);
+    }
+  });
+
+  it('excludes keys and staleness, and keeps real features', () => {
+    for (const c of ['coin', 'ts', 'close', 'premium_ageMin']) expect(NOT_A_FEATURE(c)).toBe(true);
+    for (const c of ['rsi', 'adx', 'premium', 'premium_z', 'pxSpreadOkxBp', 'oiShareBybit']) {
+      expect(NOT_A_FEATURE(c)).toBe(false);
+    }
   });
 });

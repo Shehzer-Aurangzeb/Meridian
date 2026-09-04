@@ -102,7 +102,18 @@ export function rankPersistence(panel: Panel, feature: string, lagHours: number)
 
 /** Columns that are never features: keys, the price, staleness, and the targets. */
 export const NOT_A_FEATURE = (c: string): boolean =>
-  c === 'coin' || c === 'ts' || c === 'close' || c.endsWith('_ageMin') || /^fwd\d+h$/.test(c);
+  c === 'coin' ||
+  c === 'ts' ||
+  c === 'close' ||
+  c.endsWith('_ageMin') ||
+  // Every target, not just the plain forward return. `/^fwd\d+h$/` matched
+  // `fwd4h` and missed `fwdVol4h` and `tb4h`, so the volatility-scaled returns
+  // and barrier labels added for Phase D were silently tested AS FEATURES.
+  // `fwdVol4h` then "predicted" `fwd4h` at |t| = 571.8, which is a target
+  // predicting itself. Prefix matching rather than a shape, so a target named
+  // any other way is still excluded.
+  c.startsWith('fwd') ||
+  c.startsWith('tb');
 
 // ── statistics ───────────────────────────────────────────────────────────
 
