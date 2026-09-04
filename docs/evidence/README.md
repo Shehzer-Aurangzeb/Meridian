@@ -37,13 +37,19 @@ does not replace them.
 | 12 | [`PHASE_C_COMBINE.md`](PHASE_C_COMBINE.md) | the seven combined, ridge, purged K-fold | 1.01 bp against 14 bp; same as shuffled |
 | 13 | [`PHASE_D_NONLINEAR.md`](PHASE_D_NONLINEAR.md) | gradient-boosted trees, barrier labels, 160 features, holdout | 0.34 bp — real, above noise, a third of the fee |
 | 14 | [`STAGE0_MAKER_FILL.md`](STAGE0_MAKER_FILL.md) | would a resting limit order fill, on 1-minute bars | fills 88–92%, **gross is negative**: −8.20 bp over 3.1 years |
+| 15 | [`CROSS_VENUE_IC.md`](CROSS_VENUE_IC.md) *(pre-reg: [`CROSS_VENUE_PREREG.md`](CROSS_VENUE_PREREG.md))* | **the first non-Binance inputs** — OKX/Bybit price spread, dispersion, funding spread, OI share | 9 of 20 clear \|t\| > 3.0 at up to 9.77, **0 of 9 clear the money bar** |
 
 Test 14 is the one that closes the fee argument. The orders fill, and fill
 favourably rather than adversely. The gross they fill into is negative over the
 longer sample, and a cheaper fee multiplies a negative number by one.
 
+Test 15 is the first to state a money bar in the pre-registration rather than a
+t-stat, because tests 11 to 14 established that a significant IC and a payable
+edge are different things. It cleared the statistical bar nine times over and
+failed the money bar nine times out of nine.
+
 Roughly **550,000 observations across the first thirteen tests, plus a 320,000-row
-panel across the last four. Eighteen directional tests. Nothing has cleared its
+panel across the last five. Nineteen directional tests. Nothing has cleared its
 pre-registered bar.**
 
 ---
@@ -119,10 +125,9 @@ which has now been executed in full.
 
 ## What has still never been tested
 
-- **Any venue except Binance.** Every one of the 160 columns in the Phase D
-  panel is Binance-only. Cross-exchange price dispersion, funding spread and
-  open-interest share are free, reach back to 2023 on OKX and Bybit (OKX funding
-  excepted — ~3 months), and have never been measured.
+- ~~**Any venue except Binance.**~~ Closed 4 Sept 2026 by test 15. OKX and Bybit
+  price, funding and open interest are collected from 2023-01-01 and measured.
+  Real information, unpayable.
 - **Anything forward-looking.** Nothing in the panel is a market expectation.
   Deribit implied volatility and skew are free, and cover BTC and ETH only.
 - **Trade-level order flow.** `aggTrades` is free but ~440 GB, and

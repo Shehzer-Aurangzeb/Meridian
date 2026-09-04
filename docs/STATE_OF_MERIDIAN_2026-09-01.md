@@ -102,7 +102,7 @@ sign-in. Reads the API. Filtering, paging and stats are server-side.
 
 # Part 2 — Everything that has been tested
 
-**Eighteen directional tests. Not one has cleared its pre-registered bar.**
+**Nineteen directional tests. Not one has cleared its pre-registered bar.**
 
 ## 2.1 The original strategy (tests 1–10, to 30 Aug 2026)
 
@@ -177,9 +177,18 @@ Look-ahead is handled by `completedAsOf` (candles) and `flowAsOf` (flow rows,
 own timeframe closes — an identity, not an approximation, and it turns 96,000
 calls per coin into 43,000.
 
-Verified on landing: staleness p50 is 5 min for the 5-minute metrics, 60 for
-premium, 240 for funding — each exactly half its own publication interval, which
-is what an honest embargoed read looks like.
+Verified on landing: staleness p50 is 5 min for the 5-minute metrics and 60 for
+premium — half each publication interval, which is what an honest embargoed read
+looks like.
+
+**Corrected 4 Sept.** The same sentence originally said 240 for funding and
+called it half its interval too. Funding settles 8-hourly on the hour, so with
+the 5-minute embargo the age at a bar closing at hour H cycles `480, 60, 120,
+180, 240, 300, 360, 420` as H mod 8 runs 0 to 7 — the 480 being the settlement
+hour itself, correctly held back. The median of that cycle is 270, not 240, and
+Binance stamps `fundingTime` about 29 ms off the hour so 35.7% of ages are not
+whole minutes. `scripts/venue-check.py` now asserts the cycle directly, which is
+a stronger statement than any median: the cycle IS the embargo.
 
 ## 2.4 Phase B — does any single feature predict? (30 Aug)
 
@@ -310,6 +319,32 @@ Three things worth keeping:
 
 Full record: [`evidence/STAGE0_MAKER_FILL.md`](evidence/STAGE0_MAKER_FILL.md).
 
+## 2.8 Cross-venue dispersion — the first non-Binance inputs (4 Sept)
+
+`pnpm --filter api venue-backfill` then `phase-b`. OKX and Bybit price, funding
+and open interest, 1,005,804 rows, 2023-01-01 onward, all ten coins. Five derived
+features: the two price spreads against Binance, the dispersion across all three
+venues, the funding spread, and Bybit's share of notional open interest.
+
+Pre-registered in [`evidence/CROSS_VENUE_PREREG.md`](evidence/CROSS_VENUE_PREREG.md)
+**before the panel was rebuilt**, and it is the first pre-registration here to
+state a bar in basis points rather than t-stats — because tests 11 to 14
+established that a significant IC and a payable edge are different things.
+
+**Nine of twenty clear |t| > 3.0 with the bootstrap agreeing and the persistence
+gate passed, against 0.054 expected by chance.** Top is `pxSpreadOkxBp` @4h at
+|t| = **9.77**, the second-largest t-stat this project has measured.
+
+**Zero of nine clear the money bar.** Best is `pxSpreadOkxBp` @24h at 5.59 bp
+with an interval of [1.40, 10.38] — which contains the 4.79 bp it had to beat —
+and neighbours across horizons of 1.10, 2.08, 5.59, 2.80. A spike, not a pattern.
+
+`oiShareBybit` reached |t| = 4.13 and was **rejected by the persistence gate at
+0.80**: Bybit's share of a coin's open interest is a stable venue preference, not
+a forecast. Same trap as raw `openInterest` in Phase B, caught by the same gate.
+
+Full record: [`evidence/CROSS_VENUE_IC.md`](evidence/CROSS_VENUE_IC.md).
+
 ---
 
 # Part 3 — Where it fails, precisely
@@ -341,7 +376,11 @@ most trades. Real, above noise, roughly a third of the fee.
 **6. A cheaper fee cannot rescue it, because the gross is negative.** Stage 0:
 −8.20 bp over 3.1 years, interval entirely below zero.
 
-**7. And the two canonical slow edges were already dead.** Weekly cross-sectional
+**7. Data from other venues does not rescue it either.** Cross-venue price
+dislocation is genuine information at |t| = 9.77 and is worth one to two basis
+points against a fourteen basis point fee.
+
+**8. And the two canonical slow edges were already dead.** Weekly cross-sectional
 momentum is worse than random risk-adjusted; weekly funding is a coin flip.
 
 **The honest summary: there is a small, real amount of directional information in
@@ -370,6 +409,18 @@ takerBuySellRatio5m     4,742,283   2020-09-01   2026-08-27
 topTraderAccountRatio   4,192,671   2020-09-01   2026-08-28
 topTraderPositionRatio  4,193,033   2020-09-01   2026-08-28
 ```
+
+Plus **cross-venue, added 4 Sept 2026** — the only non-Binance data here:
+
+```
+bybitClose              322,100   2023-01-01 -> 2026-09-04
+bybitOpenInterest       322,100   2023-01-01 -> 2026-09-04
+okxClose                322,090   2023-01-01 -> 2026-09-04
+bybitFundingRate         40,270   2023-01-01 -> 2026-09-04
+```
+
+Verified against the live APIs by `pnpm --filter api venue-reconcile`: 7,175 rows
+over 30 days across five coins, **worst mismatch 0.000 bp, zero orphans.**
 
 Plus, on disk: **13,338 bookDepth day-files** (2023-01-01 →) and **440 1-minute
 kline month/day files, 677 MB** (2023-01 →).
@@ -481,20 +532,24 @@ prints its masked target URL before writing.
 Stage 0 measured it. The orders fill (88–92%) and fill favourably. The gross they
 fill into is negative over the longer sample.
 
-## 6.2 Road 2 — data this panel does not contain: **open, not started**
+## 6.2 Road 2 — data this panel does not contain
 
-Ranked by orthogonality per unit of effort:
+**1. Cross-exchange dispersion — DONE 4 Sept 2026, and it fails.** Collected,
+reconciled at 0.000 bp, measured against a pre-registered money bar. Nine of
+twenty tests clear |t| > 3.0 at up to 9.77; zero of nine clear the money bar. The
+information is real and worth one to two basis points.
+[`evidence/CROSS_VENUE_IC.md`](evidence/CROSS_VENUE_IC.md).
 
-1. **Cross-exchange dispersion.** Everything in 160 columns is Binance-only.
-   Price and OI from OKX and Bybit, funding from Bybit, all free, all 2023+.
-   Builds: price dispersion across venues, signed spread vs Binance, funding
-   spread, Binance's share of total OI, and how that share moves. **~1 day for
-   the collector, ~half a day to rebuild the panel and re-run B–D.**
-2. **Deribit implied volatility and skew.** Free, and the only *forward-looking*
-   input available — nothing in the panel is. But only BTC and ETH have liquid
-   options: 2 of 10 coins.
-3. **`aggTrades` order flow.** Free but ~440 GB, and `takerBuySellRatio5m` is
-   already a coarse version of it. Lowest ratio.
+**2. Deribit implied volatility and skew — open, not started.** Free, and the
+only *forward-looking* input available: nothing in the panel is a market
+expectation, and every feature tested so far is a description of what already
+happened. Only BTC and ETH have liquid options, so 2 of 10 coins, which means it
+cannot be a cross-sectional feature on this universe — it would have to be tested
+as a time-series or regime input, which is a different construction from
+everything in Phases A–D.
+
+**3. `aggTrades` order flow — open, lowest ratio.** Free but ~440 GB, and
+`takerBuySellRatio5m` is already a coarse version of it.
 
 Ruled out: Glassnode / CryptoQuant (predictive metrics paywalled), Coinglass
 liquidations (paid; Binance killed the free endpoint), social sentiment
@@ -505,6 +560,13 @@ tail bleeding 0.436%/week).
 −8.20 bp gross over 3.1 years. New data must turn a negative into something that
 also covers 3.6 bp. That is "the current feature set carries nothing and the new
 data carries the whole thing", not "add a little more signal".
+
+Cross-venue was the best candidate on that list and it produced the
+second-largest t-stat in the project's history while moving one to two basis
+points. That is the clearest statement available of what this panel's problem
+is: **the constraint has not been finding information. It has been finding
+information large enough to pay a fee**, and nine tests at |t| > 3 that move
+1 bp say the two are close to unrelated here.
 
 ## 6.3 Deliberately parked
 
