@@ -29,7 +29,8 @@
     "phase-b": "npx ts-node --transpile-only test/manual/phase-b.ts",
     "phase-c": "npx ts-node --transpile-only test/manual/phase-c.ts",
     "maker-fill": "npx ts-node --transpile-only scripts/maker-fill.ts",
-    "venue-backfill": "npx ts-node --transpile-only scripts/venue-backfill.ts"
+    "venue-backfill": "npx ts-node --transpile-only scripts/venue-backfill.ts",
+    "venue-reconcile": "npx ts-node --transpile-only scripts/venue-reconcile.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
