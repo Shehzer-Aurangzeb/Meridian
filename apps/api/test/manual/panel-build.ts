@@ -98,6 +98,25 @@ const FLOW_METRICS = [
   'bookDepthNotional',
 ] as const;
 
+/**
+ * Venue series loaded but never emitted raw.
+ *
+ * `okxClose` on its own is a price: non-stationary, and cross-sectionally it is
+ * a coin label rather than a signal — the Phase B persistence gate would drop it
+ * on sight. What carries information is the GAP between venues, so these are
+ * loaded to build the derived columns below and nothing else.
+ *
+ * OKX supplies price only. Its funding history is ~3 months and its open
+ * interest is ~1 month, and the open-interest endpoint ignores `begin` on its
+ * own and hands back today's rows whatever window is asked for.
+ */
+const VENUE_METRICS = [
+  'okxClose',
+  'bybitClose',
+  'bybitOpenInterest',
+  'bybitFundingRate',
+] as const;
+
 /** One metric's history for one coin, ascending by ts, split for tight memory. */
 export interface Series {
   ts: Float64Array;
@@ -219,6 +238,75 @@ export function nearest(
   };
 }
 
+/**
+ * The five cross-venue readings, from three prices, two funding rates and two
+ * open interests.
+ *
+ * These are the only columns in the panel that are not Binance-only, which is
+ * the entire reason they exist: Phases B through D measured the Binance feature
+ * set at roughly a third of a retail fee, with a gross that goes negative over
+ * 3.1 years, so what is needed is a different phenomenon rather than a better
+ * fit to the same one.
+ *
+ * Spreads are in basis points so a $80,000 coin and a $0.50 coin are on the
+ * same scale — a raw price difference would rank the ten coins by their price
+ * and nothing else, which is the static-tilt trap the Phase B persistence gate
+ * exists to catch.
+ *
+ * Open-interest share is built from NOTIONAL on both sides, not from the raw
+ * figures. Both venues report open interest in base units, and each is
+ * multiplied by ITS OWN price — a coin trading a few basis points apart across
+ * venues barely moves the share, but using one venue's price for both would
+ * fold the price spread into a leverage measurement. `openInterestValue` is not
+ * used because it is deliberately absent from the panel: it is open interest
+ * times price and every consumer already holds the price.
+ *
+ * Every input can be NaN — a venue can be missing an hour, and OKX has real
+ * gaps — so each output is guarded independently rather than the whole row
+ * being dropped. One missing venue must not delete the readings the others
+ * still support.
+ */
+export function crossVenue(
+  binancePx: number,
+  okxPx: number,
+  bybitPx: number,
+  binanceFunding: number,
+  bybitFunding: number,
+  binanceOi: number,
+  bybitOi: number,
+): number[] {
+  const bp = (a: number, b: number): number =>
+    Number.isFinite(a) && Number.isFinite(b) && b > 0 ? ((a - b) / b) * 1e4 : NaN;
+
+  const spreadOkx = bp(okxPx, binancePx);
+  const spreadBybit = bp(bybitPx, binancePx);
+
+  // Population sd across the venues that reported, in bp of the mean. Two
+  // venues is enough for a dispersion; one is not.
+  const pxs = [binancePx, okxPx, bybitPx].filter((x) => Number.isFinite(x) && x > 0);
+  let dispersion = NaN;
+  if (pxs.length >= 2) {
+    const mu = pxs.reduce((a, x) => a + x, 0) / pxs.length;
+    const varr = pxs.reduce((a, x) => a + (x - mu) ** 2, 0) / pxs.length;
+    dispersion = (Math.sqrt(varr) / mu) * 1e4;
+  }
+
+  const fundSpread =
+    Number.isFinite(bybitFunding) && Number.isFinite(binanceFunding)
+      ? bybitFunding - binanceFunding
+      : NaN;
+
+  const bybitNotional = bybitOi * bybitPx;
+  const binanceNotional = binanceOi * binancePx;
+  const total = binanceNotional + bybitNotional;
+  const oiShare =
+    Number.isFinite(total) && total > 0 && Number.isFinite(bybitNotional)
+      ? bybitNotional / total
+      : NaN;
+
+  return [spreadOkx, spreadBybit, dispersion, fundSpread, oiShare];
+}
+
 const COLUMNS = [
   'coin',
   'ts',
@@ -242,6 +330,12 @@ const COLUMNS = [
     `res_${tf}_held`,
   ]),
   ...FLOW_METRICS.flatMap((m) => [m, `${m}_z`, `${m}_ageMin`]),
+  // Cross-venue. Everything above this line is Binance-only.
+  'pxSpreadOkxBp',
+  'pxSpreadBybitBp',
+  'pxDispersionBp',
+  'fundSpreadBybit',
+  'oiShareBybit',
   ...HORIZONS.map((h) => `fwd${h}h`),
   // The forward move in units of the coin's own volatility, so a 2% move in a
   // quiet coin and a 2% move in a wild one stop being the same observation.
@@ -253,7 +347,7 @@ const fmt = (x: number): string => (Number.isFinite(x) ? String(Number(x.toFixed
 
 async function loadFlow(prisma: PrismaClient, coin: string): Promise<Map<string, Series>> {
   const out = new Map<string, Series>();
-  for (const metric of FLOW_METRICS) {
+  for (const metric of [...FLOW_METRICS, ...VENUE_METRICS]) {
     // Raw SQL: Prisma materialises 500k objects per metric otherwise, and this
     // runs ten times per coin.
     const rows = await prisma.$queryRawUnsafe<Array<{ ts: Date; value: number }>>(
@@ -311,7 +405,10 @@ async function runCoin(
 
   const flow = await loadFlow(prisma, coin);
   const cursors = new Map(
-    FLOW_METRICS.map((m) => [m, new FlowCursor(flow.get(m) ?? { ts: new Float64Array(), value: new Float64Array() })]),
+    [...FLOW_METRICS, ...VENUE_METRICS].map((m) => [
+      m,
+      new FlowCursor(flow.get(m) ?? { ts: new Float64Array(), value: new Float64Array() }),
+    ]),
   );
 
   // Levels only move when a bar on their own timeframe closes. Recomputing them
@@ -356,6 +453,16 @@ async function runCoin(
       c.advance(asOf);
       flowCols.push(c.last(), c.z(), c.ageMinutes(asOf));
     }
+    for (const m of VENUE_METRICS) cursors.get(m)!.advance(asOf);
+    const venueCols = crossVenue(
+      price,
+      cursors.get('okxClose')!.last(),
+      cursors.get('bybitClose')!.last(),
+      cursors.get('fundingRate')!.last(),
+      cursors.get('bybitFundingRate')!.last(),
+      cursors.get('openInterest')!.last(),
+      cursors.get('bybitOpenInterest')!.last(),
+    );
 
     // Log returns, so horizons are additive and a +10% and a −10% are symmetric.
     const targets = HORIZONS.map((h) => Math.log(h1[i + h].close / price));
@@ -382,6 +489,7 @@ async function runCoin(
         ctx.qqe.color === 'green' ? '1' : ctx.qqe.color === 'red' ? '0' : '',
         ...levelCols.map(fmt),
         ...flowCols.map(fmt),
+        ...venueCols.map(fmt),
         ...targets.map(fmt),
         ...volTargets.map(fmt),
         ...barriers.map(fmt),

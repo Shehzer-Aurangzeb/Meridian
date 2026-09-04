@@ -1,4 +1,4 @@
-import { FlowCursor, nearest, Series, tripleBarrier } from './panel-build';
+import { FlowCursor, nearest, Series, tripleBarrier, crossVenue } from './panel-build';
 import { flowAsOf, FLOW_EMBARGO_MS } from '../../src/common/replay/plan-replay';
 
 const HOUR = 3_600_000;
@@ -128,5 +128,63 @@ describe('tripleBarrier', () => {
 
   it('touches count, so a barrier reached exactly is reached', () => {
     expect(tripleBarrier([bar(101, 100, 100.5)], 100, 0.01)).toBe(1);
+  });
+});
+
+describe('crossVenue', () => {
+  const N = NaN;
+
+  it('signs the spread and scales it to basis points', () => {
+    // Bybit 10 bp above Binance, OKX 10 bp below.
+    const [okx, bybit] = crossVenue(100, 99.9, 100.1, N, N, N, N);
+    expect(okx).toBeCloseTo(-10, 6);
+    expect(bybit).toBeCloseTo(10, 6);
+  });
+
+  it('puts an $80,000 coin and a $0.50 coin on the same scale', () => {
+    // The whole reason spreads are in bp: a raw price difference would rank the
+    // ten coins by their price and nothing else, which is the static tilt the
+    // Phase B persistence gate exists to catch.
+    const big = crossVenue(80_000, 80_008, N, N, N, N, N)[0];
+    const small = crossVenue(0.5, 0.50005, N, N, N, N, N)[0];
+    expect(big).toBeCloseTo(small, 6);
+  });
+
+  it('needs two venues for a dispersion, not one', () => {
+    expect(Number.isNaN(crossVenue(100, N, N, N, N, N, N)[2])).toBe(true);
+    expect(crossVenue(100, 101, N, N, N, N, N)[2]).toBeGreaterThan(0);
+  });
+
+  it('keeps the readings the surviving venues still support', () => {
+    // OKX has real gaps. One missing venue must not delete Bybit's spread.
+    const [okx, bybit, disp] = crossVenue(100, N, 100.1, N, N, N, N);
+    expect(Number.isNaN(okx)).toBe(true);
+    expect(bybit).toBeCloseTo(10, 6);
+    expect(disp).toBeGreaterThan(0);
+  });
+
+  it('builds the open-interest share from notional on both sides', () => {
+    // Binance 100 units at 100 = 10,000. Bybit 300 units at 100 = 30,000.
+    // Bybit's share is 30,000 / 40,000.
+    expect(crossVenue(100, N, 100, N, N, 100, 300)[4]).toBeCloseTo(0.75, 10);
+  });
+
+  it('uses each venue own price for its own notional', () => {
+    // Same contract counts, Bybit priced 1% higher: its notional share must
+    // rise slightly rather than stay put.
+    const same = crossVenue(100, N, 100, N, N, 100, 100)[4];
+    const richer = crossVenue(100, N, 101, N, N, 100, 100)[4];
+    expect(same).toBeCloseTo(0.5, 10);
+    expect(richer).toBeGreaterThan(same);
+  });
+
+  it('subtracts funding rather than ratioing it, so a zero is safe', () => {
+    expect(crossVenue(100, N, N, 0.0001, 0.0003, N, N)[3]).toBeCloseTo(0.0002, 12);
+    expect(crossVenue(100, N, N, 0, 0, N, N)[3]).toBe(0);
+  });
+
+  it('returns NaN rather than a number when a side is missing', () => {
+    const got = crossVenue(100, N, N, N, N, N, N);
+    expect(got.filter((x) => Number.isFinite(x))).toHaveLength(0);
   });
 });

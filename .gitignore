@@ -64,6 +64,7 @@ docs/evidence/*
 !docs/evidence/PHASE_C_COMBINE.md
 !docs/evidence/PHASE_D_NONLINEAR.md
 !docs/evidence/STAGE0_MAKER_FILL.md
+!docs/evidence/CROSS_VENUE_PREREG.md
 !docs/evidence/README.md
 
 # The current plan. Everything else under active/ is a working note.
