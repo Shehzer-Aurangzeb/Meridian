@@ -395,10 +395,19 @@ kline month/day files, 677 MB** (2023-01 →).
 | | 1h price | funding | open interest |
 |---|---|---|---|
 | Binance | have it | 2020+ | 2020+ |
-| OKX | 2023-01 ✓ | **~3 months only** | 2023-01 ✓ |
+| OKX | 2023-01 ✓ | **~3 months only** | **~1 month only** |
 | Bybit | 2023-01 ✓ | 2023-01 ✓ | 2023-01 ✓ |
 
-Not yet collected. This is the entirety of road 2 below.
+**Corrected 3 Sept 2026.** This table first said OKX open interest reached
+2023-01. It does not, and the way it looked as though it did is worth keeping:
+the endpoint ignores `begin` on its own and returns the most recent rows
+whatever window you ask for. Counting rows says "100 rows, works fine". Reading
+the timestamps says every one of them is from today. Only `begin` AND `end`
+together filter, and that combination returns nothing before roughly a month
+ago. The first probe counted rows.
+
+So OKX contributes **price only** to a 2023-start panel. Bybit contributes
+price, funding and open interest.
 
 ---
 

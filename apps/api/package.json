@@ -28,7 +28,8 @@
     "panel-build": "npx ts-node --transpile-only test/manual/panel-build.ts",
     "phase-b": "npx ts-node --transpile-only test/manual/phase-b.ts",
     "phase-c": "npx ts-node --transpile-only test/manual/phase-c.ts",
-    "maker-fill": "npx ts-node --transpile-only scripts/maker-fill.ts"
+    "maker-fill": "npx ts-node --transpile-only scripts/maker-fill.ts",
+    "venue-backfill": "npx ts-node --transpile-only scripts/venue-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
