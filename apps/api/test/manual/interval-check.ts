@@ -65,7 +65,7 @@ function main(): void {
   const width = ci.hi - ci.lo;
 
   // Config on every line of output, because a number whose configuration is
-  // lost is not a result (docs/STATE_OF_PLAY.md §14c).
+  // lost is not a result (docs/archive/STATE_OF_PLAY.md §14c).
   console.log(
     `config  csv=${CSV} bar=${BAR}R block-days=${BLOCK_DAYS} draws=${DRAWS} seed=${SEED}`,
   );

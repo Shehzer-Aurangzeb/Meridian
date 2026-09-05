@@ -174,35 +174,33 @@ export class MeridianStack extends Stack {
       ],
     });
 
-    // ── The flow collector ──────────────────────────────────────────────
-    // Once a day, at an hour the analysis schedule does not use so the two
-    // never share a cold start.
+    // ── The flow collector — SWITCHED OFF 5 September 2026 ─────────────
     //
-    // Binance keeps roughly 30 days of open interest, taker volume and the
-    // long/short ratio, so unlike the analysis schedule this one IS worth
-    // retrying — a failed run is not made up by the next one on its own.
+    // There was a daily rule here that collected eight futures-flow metrics
+    // into `FlowSample`. It is gone, and the reason is not cost.
     //
-    // It asks for several days every time, not just yesterday. Re-reading what
-    // we already hold costs nothing (the rows are keyed and skipped on insert)
-    // and means a run missed for any reason repairs itself.
+    // `FlowSample` reached 29.4 million rows and had ZERO production consumers.
+    // Nothing in `src/` ever read one — only research scripts did. Nineteen
+    // pre-registered tests have now been run against that data and none cleared
+    // its bar; the strongest result, cross-venue price dislocation at |t| = 9.77,
+    // is worth one to two basis points against a fourteen basis point fee. See
+    // `docs/evidence/README.md`.
     //
-    // The window is NOT set here. It used to be `days: 30`, which silently beat
-    // the service's own default — so the constant was the number a reader would
-    // change and the event was the number that governed. Omitting it leaves
-    // exactly one: `DEFAULT_BACKFILL_DAYS`, which carries the timeout arithmetic
-    // beside it. `CollectEvent.days` stays optional for a manual one-off.
-    new events.Rule(this, 'FlowCollectionSchedule', {
-      description: `Save futures flow for ${SCHEDULED_SYMBOLS.length} coins daily`,
-      schedule: events.Schedule.cron({ minute: '30', hour: '3' }),
-      targets: [
-        new targets.LambdaFunction(api, {
-          event: events.RuleTargetInput.fromObject({
-            collect: { symbols: SCHEDULED_SYMBOLS },
-          }),
-          retryAttempts: 2,
-        }),
-      ],
-    });
+    // Turning it off is nearly free to reverse. Six of the eight metrics are
+    // republished by `data.binance.vision` back to 2021-12, and `fundingRate`
+    // and `premium` have years of history on their live endpoints, so all eight
+    // minus one can be refetched to any depth whenever they are wanted again.
+    //
+    // The exception is `takerBuySellRatio1h`, which has ~30 days of live
+    // retention and no archive column — the one series that could not have been
+    // recovered. The 9,350 rows Neon held (2026-07-28 to 2026-09-05) were copied
+    // into the local database before this rule was removed. It is also the only
+    // correct source for an hourly taker feature: averaging the 5-minute ratios
+    // is 13.9% off at the median and 67.3% at worst.
+    //
+    // `FlowCollectorService` and the lambda's `collect` handler both stay. They
+    // are what `scripts/flow-backfill.ts` uses, and they are how a manual
+    // one-off would be run. Nothing invokes them on a schedule any more.
 
     // ── CI deploy role ──────────────────────────────────────────────────
     // GitHub Actions assumes this role using an OIDC token it signs for each

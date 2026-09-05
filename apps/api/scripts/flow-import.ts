@@ -136,7 +136,7 @@ export const coinOf = (file: string): string =>
   path.basename(file).split('-')[0].replace(/USDT$/, '');
 
 /** Read one .zip holding exactly one CSV. Avoids a dependency for a stored file. */
-function unzipSingle(file: string): string {
+export function unzipSingle(file: string): string {
   const buf = fs.readFileSync(file);
   // End-of-central-directory -> first local header. These archives hold one
   // entry, deflated, which is the only case this needs to handle.

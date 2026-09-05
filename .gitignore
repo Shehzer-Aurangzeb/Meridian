@@ -46,6 +46,41 @@ coverage/
 #
 # Everything else here (STATE_OF_PLAY.md, the playbook PDF, handover notes)
 # stays local exactly as before.
+#
+# The exceptions must be repeated per directory. A pattern only matches one
+# path segment, and git does not descend into an ignored directory at all — so
+# `!docs/*_AB.md` stopped matching the moment those files moved into
+# docs/evidence/, and five tracked files silently became deletions.
 docs/*
-!docs/*_AB.md
 !docs/ROADMAP.md
+!docs/README.md
+!docs/STATE_OF_MERIDIAN_*.md
+!docs/BRIEFING_FOR_REVIEW.md
+!docs/BRIEFING_PROMPT.md
+
+# The evidence: pre-registrations, and the index that says how each one landed.
+!docs/evidence/
+docs/evidence/*
+!docs/evidence/*_AB.md
+!docs/evidence/PHASE_B_IC.md
+!docs/evidence/PHASE_C_COMBINE.md
+!docs/evidence/PHASE_D_NONLINEAR.md
+!docs/evidence/STAGE0_MAKER_FILL.md
+!docs/evidence/CROSS_VENUE_PREREG.md
+!docs/evidence/CROSS_VENUE_IC.md
+!docs/evidence/README.md
+
+# The current plan. Everything else under active/ is a working note.
+# docs/active/ is gone as of 1 Sept 2026 — both documents in it were finished
+# and moved to archive/. RESEARCH_PLAN was tracked and public, so the exception
+# follows it to its new path rather than silently untracking it.
+!docs/archive/
+docs/archive/*
+!docs/archive/RESEARCH_PLAN_*.md
+
+# Python bytecode from the research venv.
+__pycache__/
+*.pyc
+
+# Research venv (numpy/pandas/scikit-learn). Pinned in research/requirements.txt.
+.venv-research/

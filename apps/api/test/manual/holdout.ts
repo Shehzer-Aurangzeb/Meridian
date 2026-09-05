@@ -45,6 +45,16 @@ export interface Row {
   structure: string;
   status: string;
   netR: number;
+  /**
+   * Result BEFORE costs, and the cost that was charged. Optional because the
+   * older CSVs this file also reads do not carry them.
+   *
+   * Kept so a caller can re-derive the result at a different fee without
+   * re-running the walk: `netR(k) = r - costR * k`, where k = 1 is the fee the
+   * run was scored at. Nothing about which trades were TAKEN changes with k.
+   */
+  r?: number;
+  costR?: number;
 }
 
 /**
@@ -416,6 +426,11 @@ export function load(path: string, tier: string = 'PLAN'): Row[] {
   const [iCoin, iTier, iDir, iStruct, iTime, iStatus, iNet] = [
     'coin', 'tier', 'direction', 'structure', 'time', 'status', 'netR',
   ].map(idx);
+  // Optional: absent in the older CSVs, so missing means "not available"
+  // rather than zero — a cost of zero would silently make every trade free.
+  const iR = head.indexOf('r');
+  const iCost = head.indexOf('costR');
+
   return lines
     .slice(1)
     .map((l) => l.split(','))
@@ -427,6 +442,8 @@ export function load(path: string, tier: string = 'PLAN'): Row[] {
       structure: c[iStruct],
       status: c[iStatus],
       netR: Number(c[iNet]),
+      ...(iR >= 0 ? { r: Number(c[iR]) } : {}),
+      ...(iCost >= 0 ? { costR: Number(c[iCost]) } : {}),
     }));
 }
 

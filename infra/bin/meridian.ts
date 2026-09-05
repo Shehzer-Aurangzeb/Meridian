@@ -9,7 +9,7 @@ import { MeridianStack } from '../lib/meridian-stack';
  *
  * Region matters more than usual here: `api.binance.com` returns HTTP 451 to
  * US IP ranges. Verify from the region you intend to use BEFORE deploying —
- * see docs/DEPLOYMENT_PLAN.md. Override with:
+ * see docs/archive/DEPLOYMENT_PLAN.md. Override with:
  *
  *   cdk deploy -c region=eu-central-1 -c corsOrigins=https://your.vercel.app
  */

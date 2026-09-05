@@ -33,6 +33,31 @@ describe('toPair', () => {
   });
 });
 
+describe('the collector covers the archive', () => {
+  it('collects every archive metric forward, except the one it can derive', () => {
+    // The bug this locks down: `topTraderAccountRatio` and
+    // `topTraderPositionRatio` were in the archive from 2021-12-01 and in no
+    // MetricSpec, so both series ended at the archive's last day (2026-08-28).
+    // A feature built on either could be measured over history and then never
+    // run live. Nothing failed; the columns just stopped.
+    const collected = new Set(METRICS.map((m) => m.metric));
+    const missing = ARCHIVE_METRICS.map((a) => a.metric).filter((m) => !collected.has(m));
+
+    // `openInterestValue` is open interest times price, and every consumer
+    // already holds the price. Deriving it costs nothing; fetching it would
+    // double the openInterestHist page count.
+    expect(missing).toEqual(['openInterestValue']);
+  });
+
+  it('sends no interval parameter for an endpoint that has no bucket', () => {
+    // fundingRate publishes on its 8-hour settlement clock. Sending
+    // `undefined: undefined` would put a literal "undefined" key on the query.
+    expect(spec('fundingRate').intervalParam).toBeUndefined();
+    expect(spec('fundingRate').period).toBeUndefined();
+    expect(spec('openInterest').intervalParam).toBe('period');
+  });
+});
+
 describe('parsers', () => {
   it('reads the named field out of the /futures/data/ shape', () => {
     expect(spec('openInterest').parse({ timestamp: 1000, sumOpenInterest: '42.5' })).toEqual({
@@ -112,15 +137,20 @@ describe('FlowCollectorService.collect', () => {
   const NOW = 10_000_000_000;
   const RECENT = NOW - 3_600_000;
 
-  const rowsFor = (path: string, times: number[]) =>
-    path.includes('premiumIndexKlines')
-      ? times.map((t) => [t, '1', '2', '0', '1.5'])
-      : times.map((t) => ({
-          timestamp: t,
-          sumOpenInterest: '10',
-          longShortRatio: '2',
-          buySellRatio: '3',
-        }));
+  // Three response shapes, because the endpoints do not agree on one: klines are
+  // arrays, fundingRate stamps `fundingTime`, everything else `timestamp`.
+  const rowsFor = (path: string, times: number[]) => {
+    if (path.includes('premiumIndexKlines')) return times.map((t) => [t, '1', '2', '0', '1.5']);
+    if (path.includes('fundingRate')) {
+      return times.map((t) => ({ fundingTime: t, fundingRate: '0.0001' }));
+    }
+    return times.map((t) => ({
+      timestamp: t,
+      sumOpenInterest: '10',
+      longShortRatio: '2',
+      buySellRatio: '3',
+    }));
+  };
 
   it('stores the bare coin, not the trading pair', async () => {
     mockedGet.mockImplementation(async (url: string) => ({
@@ -134,6 +164,25 @@ describe('FlowCollectorService.collect', () => {
     expect(new Set(written.map((w) => w.symbol))).toEqual(new Set(['BTC']));
     // ...but Binance was asked for the pair.
     expect(mockedGet.mock.calls[0][1]?.params.symbol).toBe('BTCUSDT');
+  });
+
+  it('fetches only the named metrics, and refuses a name it does not know', async () => {
+    // A long-window backfill must not re-fetch the three metrics the bulk
+    // archive already provides at 5-minute resolution — over years that is
+    // hundreds of pages per coin to re-store rows the database holds.
+    mockedGet.mockImplementation(async (url: string) => ({ data: rowsFor(url, [RECENT]) }));
+    const { prisma, written } = fakePrisma();
+    const service = new FlowCollectorService(prisma);
+
+    await service.collect(['BTC'], 1, NOW, ['fundingRate', 'premium']);
+
+    expect(new Set(written.map((w) => w.metric))).toEqual(new Set(['fundingRate', 'premium']));
+    expect(mockedGet).toHaveBeenCalledTimes(2);
+
+    // A typo must not silently collect nothing and report success.
+    await expect(service.collect(['BTC'], 1, NOW, ['fundingrate'])).rejects.toThrow(
+      /no metric matches/,
+    );
   });
 
   it('stops paging when a full page does not move older', async () => {
