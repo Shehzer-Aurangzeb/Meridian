@@ -55,6 +55,8 @@ docs/*
 !docs/ROADMAP.md
 !docs/README.md
 !docs/STATE_OF_MERIDIAN_*.md
+!docs/BRIEFING_FOR_REVIEW.md
+!docs/BRIEFING_PROMPT.md
 
 # The evidence: pre-registrations, and the index that says how each one landed.
 !docs/evidence/

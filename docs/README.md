@@ -9,6 +9,7 @@ everything superseded is moved to `archive/` instead.
 | you want | read |
 |---|---|
 | **everything: what runs, what was tested, where it fails** | [`STATE_OF_MERIDIAN_2026-09-01.md`](STATE_OF_MERIDIAN_2026-09-01.md) |
+| to hand this project to an outside reviewer | [`BRIEFING_FOR_REVIEW.md`](BRIEFING_FOR_REVIEW.md) + [`BRIEFING_PROMPT.md`](BRIEFING_PROMPT.md) |
 | the individual experiments and their bars | [`evidence/README.md`](evidence/README.md) |
 | what is parked, and why | [`ROADMAP.md`](ROADMAP.md) |
 | how the app is built | the state document above, then the code |
@@ -43,6 +44,7 @@ published.
 - `docs/ROADMAP.md`
 - `docs/README.md` (this file)
 - `docs/STATE_OF_MERIDIAN_*.md`
+- `docs/BRIEFING_FOR_REVIEW.md` and `docs/BRIEFING_PROMPT.md`
 - `docs/evidence/*_AB.md`, `docs/evidence/README.md`, and the four phase records
   (`PHASE_B_IC.md`, `PHASE_C_COMBINE.md`, `PHASE_D_NONLINEAR.md`,
   `STAGE0_MAKER_FILL.md`)
