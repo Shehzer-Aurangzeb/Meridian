@@ -51,7 +51,7 @@ say that.
 **Local and Neon are not replicas.** All research reads local; the collector
 writes Neon. Merging to `main` is the deploy.
 
-## 1.2 The two scheduled jobs
+## 1.2 The scheduled jobs
 
 **Analysis — every 8 hours (00:00, 08:00, 16:00 UTC), 10 coins.**
 `BTC ETH SOL BNB XRP ADA AVAX LINK DOT LTC`. Thirty analyses a day.
@@ -60,10 +60,17 @@ writes Neon. Merging to `main` is the deploy.
 The 8-hour spacing is measured, not chosen: price reaches a zone in a median of
 3h, 82% within 12h, 100% within 24h (582 trades).
 
-**Flow collection — daily 03:30 UTC.** `retryAttempts: 2`, because several
-Binance flow endpoints keep only ~30 days and a missed run is *not* made up by
-the next one. Rows are keyed `(symbol, metric, ts)` so re-reading costs nothing
-and the window deliberately overlaps.
+**Flow collection — SWITCHED OFF 5 September 2026.** It ran daily at 03:30 UTC
+and wrote eight futures-flow metrics into `FlowSample`. Removed because the table
+reached 29.4 million rows with **zero production consumers** and nineteen tests
+against that data cleared no bars.
+
+Nearly free to reverse: six of the eight metrics are republished by
+`data.binance.vision` back to 2021-12, and `fundingRate` and `premium` have years
+of live history. The exception was `takerBuySellRatio1h` — ~30 days of retention,
+no archive column — and Neon's 9,350 rows (2026-07-28 to 2026-09-05) were copied
+to local before the rule was removed. `FlowCollectorService` and the lambda's
+`collect` handler both stay; nothing invokes them on a schedule.
 
 ## 1.3 The live analysis pipeline
 
@@ -126,11 +133,17 @@ paths (`/analysis/complete`, `/analysis/multi-timeframe`, `/analysis/quick`,
 `/analysis/bias/{coin}`, `/analysis/ai-analyze`, `/analysis-coordinator/*`, …)
 that **no longer exist on the backend at all**. It is a stale spec. Ignore it.
 
-**`FlowSample` is write-only in production.** The collector writes to it daily;
-**nothing in `src/` ever reads it.** 28.4 million rows with zero production
-consumers. Only research scripts read them. This is either a large missed
-opportunity or a reason to switch the collector off, and it is a fair thing to
-have an opinion about.
+**`FlowSample` was write-only in production, and the collector is now off.**
+Nothing in `src/` ever read a row of it — 29.4 million rows, zero production
+consumers, only research scripts. The daily rule was removed on 5 Sept 2026.
+
+**You are welcome to disagree with that call.** It is nearly free to reverse:
+six of the eight metrics are republished by `data.binance.vision` back to
+2021-12, and `fundingRate` and `premium` have years of live history, so the data
+can be refetched to any depth. Only `takerBuySellRatio1h` was perishable — ~30
+days retention, no archive column — and the 9,350 rows that existed were copied
+to local first. That one is also the only correct source for an hourly taker
+feature, because averaging the 5-minute ratios is 13.9% off at the median.
 
 ## 1.6 Size, for calibration
 
@@ -446,8 +459,11 @@ Concretely, in rough priority order:
    have liquid options, so it cannot be a cross-sectional feature on this
    universe at all. `aggTrades` is free but ~440 GB and partly duplicates
    `takerBuySellRatio5m`.
-6. **Should the collector be switched off?** 29.4M rows, zero production
-   consumers, and every feature built on it has failed.
+6. **Was switching the collector off the right call?** It was turned off on
+   5 Sept 2026 — 29.4M rows, zero production consumers, and every feature built
+   on it failed. Reversible, and the one perishable series was preserved first.
+   If you think a specific metric there is worth keeping alive, say which and
+   what you would do with it.
 7. **If the honest answer is "there is no edge here for a retail participant",
    say so** — and tell us what end state A looks like instead: what would make
    the analysis trustworthy and useful without predicting returns?

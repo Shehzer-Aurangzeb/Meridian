@@ -40,7 +40,7 @@ load at cold start.
 
 ## 1.2 What the schedule does
 
-Two cron rules, both hitting the same Lambda with a JSON event shape that
+**One** cron rule now, hitting the Lambda with a JSON event shape that
 `lambda.ts` inspects to tell a cron run from an HTTP request.
 
 **Analysis — every 8 hours, `0/8` UTC (00:00, 08:00, 16:00), 10 coins.**
@@ -51,11 +51,17 @@ The 8-hour spacing is measured, not chosen: price reaches a zone in a median of
 §14h). An analysis older than a day is finished. `retryAttempts: 0` — a failed
 run is not worth retrying because the next one produces a fresher analysis.
 
-**Flow collection — daily at 03:30 UTC.** `retryAttempts: 2`, because unlike
-analysis a missed run is *not* made up by the next one: several Binance flow
-endpoints keep only ~30 days. It deliberately re-asks for several days each run
-so a missed run repairs itself; rows are keyed on `(symbol, metric, ts)` so
-re-reading costs nothing.
+**Flow collection — SWITCHED OFF 5 September 2026.** It ran daily at 03:30 UTC
+and wrote eight futures-flow metrics into `FlowSample`. Removed because the table
+reached 29.4 million rows with **zero production consumers** and nineteen tests
+against that data cleared no bars.
+
+Nearly free to reverse: six of the eight metrics are republished by
+`data.binance.vision` back to 2021-12, and `fundingRate` and `premium` have years
+of live history. The exception was `takerBuySellRatio1h` — ~30 days of retention,
+no archive column — and Neon's 9,350 rows (2026-07-28 to 2026-09-05) were copied
+to local before the rule was removed. `FlowCollectorService` and the lambda's
+`collect` handler both stay; nothing invokes them on a schedule.
 
 ## 1.3 The analysis pipeline, end to end
 
