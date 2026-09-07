@@ -110,3 +110,28 @@ model FlowSample {
   @@id([symbol, metric, ts])
   @@index([metric, ts])
 }
+
+/// Resting order-book notional in one price shell, for one coin, in one bucket.
+///
+/// The archive publishes CUMULATIVE depth at +-1..+-5% of mid; `shell` holds the
+/// INCREMENTAL band between two of those, so shell 3 is the notional resting in
+/// (2%, 3%] and nothing below it. Five shells per side per bucket.
+///
+/// This is the shape `FlowSample`'s three bookDepth scalars threw away, and the
+/// reason a separate table exists rather than more metric labels: a heatmap
+/// needs the profile, and a (metric, ts) key cannot carry one without encoding
+/// the shell into the metric name.
+///
+/// `ts` is the END of the 5-minute bucket, matching the bookDepth rows in
+/// `FlowSample` — a bucket stamped at its start is readable before it finished.
+model BookProfile {
+  symbol String
+  ts     DateTime
+  /// 1..5, the upper bound of the shell in percent from mid.
+  shell       Int
+  bidNotional Float
+  askNotional Float
+
+  @@id([symbol, ts, shell])
+  @@index([symbol, ts])
+}

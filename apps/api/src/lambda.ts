@@ -97,9 +97,21 @@ async function runScheduled(event: ScheduledEvent): Promise<{
   const saved: string[] = [];
   const failed: Record<string, string> = {};
 
+  // One cross-section for the whole run. The expected-move tilt standardises
+  // each coin against the others in the SAME hour, so pricing the universe once
+  // is both ten times cheaper and the only way every coin in a run is measured
+  // against the same cross-section.
+  let universe: Awaited<ReturnType<typeof analyzer.priceUniverse>> | undefined;
+  try {
+    universe = await analyzer.priceUniverse(event.scheduled.symbols);
+  } catch (err) {
+    // A missing cone costs the state report, not the run.
+    universe = undefined;
+  }
+
   for (const symbol of event.scheduled.symbols) {
     try {
-      const analysis = await analyzer.analyze(symbol);
+      const analysis = await analyzer.analyze(symbol, universe);
       const { id } = await persistence.persistAnalysis(analysis);
       saved.push(`${symbol}:${id}`);
     } catch (err) {

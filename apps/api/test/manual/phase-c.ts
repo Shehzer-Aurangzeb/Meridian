@@ -106,7 +106,7 @@ export function solveRidge(a: number[][], b: number[], lambda: number): number[]
 
 // ── the design matrix ────────────────────────────────────────────────────
 
-interface Design {
+export interface Design {
   features: string[];
   /** rows[i] = one (hour, coin) observation, already cross-sectionally standardised. */
   x: Float64Array;

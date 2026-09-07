@@ -6,7 +6,6 @@ import { SqueezeBreakoutModule } from '../squeeze-breakout/squeeze-breakout.modu
 import { AnalysisCoordinatorModule } from '../analysis-coordinator/analysis-coordinator.module';
 import { AiModule } from '../ai/ai.module';
 import { AnalysisModule } from '../analysis/analysis.module';
-import { RiskManagementModule } from '../risk-management/risk-management.module';
 import { FlowModule } from '../flow/flow.module';
 
 /**
@@ -22,7 +21,6 @@ import { FlowModule } from '../flow/flow.module';
     AnalysisCoordinatorModule,
     AiModule,
     AnalysisModule,
-    RiskManagementModule,
     FlowModule,
   ],
   exports: [
@@ -33,7 +31,6 @@ import { FlowModule } from '../flow/flow.module';
     AnalysisCoordinatorModule,
     AiModule,
     AnalysisModule,
-    RiskManagementModule,
     FlowModule,
   ],
 })

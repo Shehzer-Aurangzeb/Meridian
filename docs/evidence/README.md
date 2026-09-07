@@ -38,6 +38,7 @@ does not replace them.
 | 13 | [`PHASE_D_NONLINEAR.md`](PHASE_D_NONLINEAR.md) | gradient-boosted trees, barrier labels, 160 features, holdout | 0.34 bp — real, above noise, a third of the fee |
 | 14 | [`STAGE0_MAKER_FILL.md`](STAGE0_MAKER_FILL.md) | would a resting limit order fill, on 1-minute bars | fills 88–92%, **gross is negative**: −8.20 bp over 3.1 years |
 | 15 | [`CROSS_VENUE_IC.md`](CROSS_VENUE_IC.md) *(pre-reg: [`CROSS_VENUE_PREREG.md`](CROSS_VENUE_PREREG.md))* | **the first non-Binance inputs** — OKX/Bybit price spread, dispersion, funding spread, OI share | 9 of 20 clear \|t\| > 3.0 at up to 9.77, **0 of 9 clear the money bar** |
+| 16 | [`MAGNITUDE_GATE.md`](MAGNITUDE_GATE.md) | **the size of the move, not its sign** — trade direction only when predicted \|move\| is large | the size model **works** and is coin-specific; direction inside it is still −13.26 bp net |
 
 Test 14 is the one that closes the fee argument. The orders fill, and fill
 favourably rather than adversely. The gross they fill into is negative over the
@@ -48,8 +49,17 @@ t-stat, because tests 11 to 14 established that a significant IC and a payable
 edge are different things. It cleared the statistical bar nine times over and
 failed the money bar nine times out of nine.
 
+Test 16 is the last of the conditional-selection family — "the signal is weak on
+average but strong when X" — after conviction (test 12) and a cheaper fill
+(test 14). It is also the only test in the ledger with a **positive** finding:
+the magnitude model predicts the size of the next 4-hour move, monotonically and
+coin-specifically, confirmed against a shuffle control on a holdout it had not
+touched. That skill does not reach the P&L — shuffling the magnitude forecast
+made the book slightly *better* — which is the sharpest statement of the
+project's result: size and direction are unrelated here.
+
 Roughly **550,000 observations across the first thirteen tests, plus a 320,000-row
-panel across the last five. Nineteen directional tests. Nothing has cleared its
+panel across the last six. Twenty directional tests. Nothing has cleared its
 pre-registered bar.**
 
 ---

@@ -5,47 +5,18 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as ecr_assets from 'aws-cdk-lib/aws-ecr-assets';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import * as events from 'aws-cdk-lib/aws-events';
-import * as targets from 'aws-cdk-lib/aws-events-targets';
+// `aws-events` and `aws-events-targets` went with the two schedules this stack
+// used to carry. Both are re-added when End State A has something worth running
+// on a timer.
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
-/**
- * Coins the scheduled run analyses.
- *
- * BTC and ETH as the majors, plus eight long-standing large caps chosen to
- * span different sectors — L1s, an oracle, a payments coin — rather than the
- * top eight by market cap. Highly correlated coins produce highly correlated
- * analyses, which is less information for the same cost.
- *
- * All ten verified to return a full 250-candle 12h history on Binance, which
- * is what the regime leg needs for its bandwidth percentile.
- *
- * Easy swaps if you want them: DOGE, ATOM, NEAR, ARB, OP, UNI, AAVE — all
- * checked and available.
- */
-const SCHEDULED_SYMBOLS = [
-  'BTC', 'ETH',
-  'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'LTC',
-];
-
-/**
- * How often the schedule fires. Every 8 hours — 00:00, 08:00, 16:00 UTC.
- *
- * The measured constraint (STATE_OF_PLAY.md 14h, 582 trades): price reaches
- * a zone in a median of 3h, 82% within 12h, 100% within 24h. So an analysis
- * older than a day is finished, and 8h spacing keeps every run well inside
- * that window while producing 30 analyses a day across ten coins.
- *
- * Going wider costs something specific: at 12h spacing, roughly half of what
- * you open will already have filled or stopped. That is still fine for the
- * forward-test record — the outcome badge says what happened — but worse for
- * deciding whether to take a trade now.
- *
- * Crypto trades 24/7, so there is no session to align to.
- */
-const SCHEDULE_HOURS = '0/8';
+// SCHEDULED_SYMBOLS and SCHEDULE_HOURS were removed with the analysis schedule
+// on 5 September 2026. The ten-coin universe and the measured basis for the
+// 8-hour spacing (price reaches a zone in a median of 3h, 82% within 12h) are
+// recorded in docs/BRIEFING_FOR_REVIEW.md 1.2, so nothing is lost by not
+// keeping them as unused constants here.
 
 export interface MeridianStackProps extends StackProps {
   /** Where the frontend is served from, for CORS. */
@@ -154,25 +125,34 @@ export class MeridianStack extends Stack {
       integration: new HttpLambdaIntegration('ApiIntegration', api),
     });
 
-    // ── The schedule ────────────────────────────────────────────────────
-    // Six times a day, every four hours. The event is a constant JSON object
-    // of our own shape — Lambda events are just JSON, and `lambda.ts` checks
-    // for this shape to tell a cron run from an HTTP request.
-    new events.Rule(this, 'AnalysisSchedule', {
-      description: `Analyse ${SCHEDULED_SYMBOLS.length} coins every 8 hours`,
-      schedule: events.Schedule.cron({ minute: '0', hour: SCHEDULE_HOURS }),
-      targets: [
-        new targets.LambdaFunction(api, {
-          event: events.RuleTargetInput.fromObject({
-            scheduled: { symbols: SCHEDULED_SYMBOLS },
-          }),
-          // A failed scheduled run is not worth retrying: four hours later
-          // the next one produces a fresher analysis anyway, and a retry
-          // would re-analyse the symbols that already succeeded.
-          retryAttempts: 0,
-        }),
-      ],
-    });
+    // ── The analysis schedule — SWITCHED OFF 5 September 2026 ──────────
+    //
+    // There was a rule here that ran `AnalyzeService` against ten coins every
+    // eight hours and saved the result to `CoordinatorRun`. It is gone because
+    // the thing it was measuring has been cancelled.
+    //
+    // Those runs were the live forward test of the trade planner: a zone, an
+    // entry ladder, a stop and targets, scored later by `OutcomeScorerService`
+    // in R-multiples. Twenty pre-registered tests have now closed the
+    // directional programme — the planner loses at zero fee (−0.0476R
+    // resolved), and the twentieth test showed that even correctly forecasting
+    // the SIZE of the next move does not make its direction payable. See
+    // `docs/evidence/README.md` and `docs/evidence/MAGNITUDE_GATE.md`.
+    //
+    // Continuing to record would have kept accumulating evidence about a
+    // product that will not ship, and every row written after the decision
+    // would have had to be excluded from anything later anyway.
+    //
+    // THE RECORD WAS PRESERVED FIRST. 843 rows spanning 2026-08-09 to
+    // 2026-09-06, all scored, 488 carrying a net R — dumped from Neon to
+    // `~/meridian-archive/coordinator-run-20260905.sql` before this rule was
+    // removed. Ending the series was a decision; losing it would have been an
+    // accident.
+    //
+    // The lambda's scheduled-event handler stays, and so does `AnalyzeService`.
+    // Nothing invokes them on a schedule any more. Meridian's next scheduled
+    // job belongs to End State A, and it will save calibrated state rather than
+    // trade plans — see `docs/PRODUCT_LAYERS.md`.
 
     // ── The flow collector — SWITCHED OFF 5 September 2026 ─────────────
     //

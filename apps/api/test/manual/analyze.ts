@@ -37,6 +37,7 @@ import { BinanceService } from '../../src/market-data/market-data.service';
 import { CacheTelemetryService } from '../../src/market-data/cache-telemetry.service';
 import { ANALYSIS_TIMEFRAME } from '../../src/common/constants/timeframes';
 import { AnalyzeService } from '../../src/analysis-coordinator/analyze.service';
+import { ExpectedMoveService } from '../../src/expected-move/expected-move.service';
 import { logRun } from '../../src/common/run-log';
 import {
   ATR_TIMEFRAME,
@@ -102,6 +103,7 @@ async function main() {
     ),
     new LevelMapService(binance, new SupportResistanceService(), indicators),
     new TradePlanService(),
+    new ExpectedMoveService(binance, indicators),
   );
 
   const startedAt = Date.now();
