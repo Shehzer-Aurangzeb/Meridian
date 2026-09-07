@@ -1,8 +1,5 @@
-import { DashboardIcon } from '@/assets/icons/dashboard-icon';
 import { AnalysisIcon } from '@/assets/icons/analysis-icon';
 import { HistoryIcon } from '@/assets/icons/history-icon';
-import { AlertIcon } from '@/assets/icons/alert-icon';
-import { StrategiesIcon } from '@/assets/icons/strategies-icon';
 import { ComponentType, SVGProps } from 'react';
 import { isRouteEnabled } from './feature-flags';
 
@@ -18,20 +15,24 @@ export interface NavSection {
   items: NavItem[];
 }
 
+/**
+ * Two pages, because the product makes two kinds of statement.
+ *
+ * Dashboard, Analysis, History, Alerts and Strategies retired on 6 September
+ * 2026 with the trade planner they displayed. They showed entry ladders, stops,
+ * targets and R-multiples for a programme that twenty pre-registered tests
+ * closed.
+ *
+ * The map says what the market is doing. The calibration page says how well
+ * every number on it has actually done — and three of its four entries are
+ * outputs that failed their bars and are published as nulls.
+ */
 const FULL_NAVIGATION: NavSection[] = [
   {
     label: 'Workspace',
     items: [
-      { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
-      { href: '/analysis', label: 'Analysis', icon: AnalysisIcon },
-      { href: '/history', label: 'History', icon: HistoryIcon },
-      { href: '/alerts', label: 'Alerts', icon: AlertIcon, badge: 3 },
-    ],
-  },
-  {
-    label: 'Library',
-    items: [
-      { href: '/strategies', label: 'Strategies', icon: StrategiesIcon },
+      { href: '/map', label: 'Map', icon: AnalysisIcon },
+      { href: '/calibration', label: 'Calibration', icon: HistoryIcon },
     ],
   },
 ];
