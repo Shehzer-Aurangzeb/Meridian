@@ -126,11 +126,11 @@ const FEATURES = [
   'dist20wHigh',
   'dist20wLow',
 ] as const;
-type Feature = (typeof FEATURES)[number];
+export type Feature = string;
 
 // ── panel ────────────────────────────────────────────────────────────────
 
-interface Panel {
+export interface Panel {
   coins: string[];
   /** Weekly CLOSE timestamps, ascending. The decision instant. */
   times: number[];
@@ -212,7 +212,7 @@ export function extremes(c: Candle[], i: number, n: number): { hi: number; lo: n
  * One request: 400 weekly bars is under the 1500-bar cap, and none of these ten
  * perps listed earlier than 2019.
  */
-async function weeklyCandles(coin: string, limit: number): Promise<Candle[]> {
+export async function weeklyCandles(coin: string, limit: number): Promise<Candle[]> {
   const { data } = await axios.get<Array<Array<string | number>>>(
     'https://fapi.binance.com/fapi/v1/klines',
     {
@@ -230,7 +230,7 @@ async function weeklyCandles(coin: string, limit: number): Promise<Candle[]> {
   }));
 }
 
-interface Row {
+export interface Row {
   closeMs: number;
   values: Map<string, number>;
 }
@@ -304,7 +304,7 @@ async function buildCoin(
   return rows;
 }
 
-function assemble(byCoin: Map<string, Row[]>): Panel {
+export function assemble(byCoin: Map<string, Row[]>): Panel {
   const coins = [...byCoin.keys()].sort();
   const timeSet = new Set<number>();
   for (const rows of byCoin.values()) for (const r of rows) timeSet.add(r.closeMs);
@@ -358,7 +358,7 @@ function assemble(byCoin: Map<string, Row[]>): Panel {
 
 // ── measurement ──────────────────────────────────────────────────────────
 
-interface Result {
+export interface Result {
   feature: Feature;
   horizon: number;
   n: number;
@@ -373,7 +373,7 @@ interface Result {
 }
 
 /** One cross-sectional Spearman per week, between two columns of the panel. */
-function icSeries(
+export function icSeries(
   panel: Panel,
   x: Float64Array,
   y: Float64Array,
@@ -407,7 +407,7 @@ function icSeries(
  * 30-day lag. The lag here is a single week, because a weekly bar's decision is
  * remade weekly and that is the horizon at which the ordering has to move.
  */
-function persistence(panel: Panel, f: Float64Array, lagWeeks: number): number {
+export function persistence(panel: Panel, f: Float64Array, lagWeeks: number): number {
   const nC = panel.coins.length;
   const rs: number[] = [];
   for (let ti = 0; ti + lagWeeks < panel.times.length; ti += 1) {
@@ -428,7 +428,7 @@ function persistence(panel: Panel, f: Float64Array, lagWeeks: number): number {
   return rs.length === 0 ? NaN : mean(rs);
 }
 
-function measure(panel: Panel, feature: Feature, horizon: number): Result {
+export function measure(panel: Panel, feature: Feature, horizon: number): Result {
   const f = panel.data.get(feature)!;
   const y = panel.data.get(`fwd${horizon}w`)!;
   const series = icSeries(panel, f, y);
@@ -489,7 +489,7 @@ export function weightsAt(
   return w;
 }
 
-interface Priced {
+export interface Priced {
   /** Gross simple return per holding period, in basis points, per week held. */
   rows: Array<{ time: number; value: number }>;
   grossBp: number;
@@ -505,7 +505,7 @@ interface Priced {
  * hold. The series is overlapping — a hold is opened every week — which is
  * exactly what the 30-week block bootstrap is there to handle.
  */
-function price(
+export function price(
   panel: Panel,
   feature: Feature,
   horizon: number,
@@ -550,7 +550,7 @@ function price(
 }
 
 /** Reassign forward returns among the coins present in each week. */
-function permuted(panel: Panel, horizon: number, rng: () => number): Float64Array {
+export function permuted(panel: Panel, horizon: number, rng: () => number): Float64Array {
   const nC = panel.coins.length;
   const y = Float64Array.from(panel.data.get(`fwd${horizon}w`)!);
   for (let ti = 0; ti < panel.times.length; ti += 1) {

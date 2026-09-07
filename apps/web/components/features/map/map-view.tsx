@@ -1,170 +1,291 @@
 'use client';
 
+import { Explain, EXPLAIN } from '@/components/ui/explain';
 import type { MarketMap } from '@/types/map';
 import { ExpectedMoveCone } from './expected-move-cone';
 import { WithheldNote } from './withheld-note';
 
-const REGIME_COPY: Record<MarketMap['regime'] extends null ? never : NonNullable<MarketMap['regime']>['state'], string> = {
-  COMPRESSION: 'the recent price range is narrow compared with this coin’s own history',
-  TRENDING: 'price has been moving persistently in one direction',
-  MEAN_REVERSION: 'price has been drifting sideways',
-};
+/**
+ * Market states in the reader's words, not the model's.
+ *
+ * The backend labels are COMPRESSION / TRENDING / MEAN_REVERSION. None of those
+ * is a phrase a non-trader can act on, and "mean reversion" in particular reads
+ * as a prediction that price will return somewhere. The headline says what is
+ * happening; the sentence says what it means; the tooltip carries the rest.
+ */
+const STATE_COPY = {
+  COMPRESSION: {
+    title: 'Quiet',
+    line: 'The price has been unusually still. Quiet stretches often end in a big move — this does not say which way.',
+    explain: EXPLAIN.quiet,
+  },
+  TRENDING: {
+    title: 'Moving one way',
+    line: 'The price has been travelling persistently in one direction rather than drifting.',
+    explain: EXPLAIN.trending,
+  },
+  MEAN_REVERSION: {
+    title: 'Drifting sideways',
+    line: 'The price has been wandering up and down without going anywhere in particular.',
+    explain: EXPLAIN.bouncing,
+  },
+} as const;
+
+const asMoney = (x: number): string =>
+  x.toLocaleString('en-US', { maximumFractionDigits: x > 100 ? 0 : 2 });
+
+/** A section: plain title, one line saying what it shows, then the data. */
+function Section({
+  title,
+  blurb,
+  children,
+}: {
+  title: string;
+  blurb: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-12 first:mt-0">
+      <h2 className="font-antonio text-[22px] font-semibold uppercase tracking-headline text-text-primary">
+        {title}
+      </h2>
+      <p className="mb-5 mt-1.5 max-w-2xl text-[14px] leading-relaxed text-text-secondary">
+        {blurb}
+      </p>
+      {children}
+    </section>
+  );
+}
 
 /**
  * The map screen.
  *
- * ─── The design standard this is held to ─────────────────────────────────
- * If a screenshot of this page could be mistaken for a trade idea, it has
- * failed. There are therefore no arrows, no entry markers, no target lines and
- * no colour that codes for up or down — the cone is one colour and symmetric,
- * zones are neutral bands, and depth is grey.
+ * ─── It answers three questions, in this order ───────────────────────────
+ *   1. Is the market calm or stormy?      the expected move — largest, first
+ *   2. What is it doing right now?        state and key levels — secondary
+ *   3. Where are the traps?               waiting orders — tertiary
  *
- * Green-for-support and red-for-resistance would be conventional and would
- * quietly encode a direction, so both are the same colour and the label says
- * which is which.
+ * ─── And it must never look like a trade idea ────────────────────────────
+ * No arrows, no entry markers, no target lines. The move bands are one colour
+ * and symmetric. Levels above and below the price share a colour, because
+ * green-for-up and red-for-down quietly encodes a call — the label says which
+ * is which instead. Gold is the only accent; amber marks an absence.
  */
 export function MapView({ map }: { map: MarketMap }) {
+  const state = map.regime ? STATE_COPY[map.regime.state] : null;
+
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-100">
+    <div>
+      <header className="border-b border-border/40 pb-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h1 className="font-antonio text-display-sm font-semibold uppercase tracking-headline text-text-primary">
             {map.symbol}
-            <span className="ml-3 font-mono text-lg text-neutral-400">{map.spot}</span>
+            <span className="ml-4 font-mono text-[22px] font-normal tracking-normal text-text-secondary">
+              {asMoney(map.spot)}
+            </span>
           </h1>
-          <p className="mt-1 text-xs text-neutral-500">
-            A description of the market. Not a forecast of direction.
-          </p>
+          <time className="font-mono text-[12px] text-text-tertiary">
+            {new Date(map.asOf).toISOString().replace('T', ' ').slice(0, 16)} UTC
+          </time>
         </div>
-        <time className="font-mono text-xs text-neutral-600">
-          {new Date(map.asOf).toISOString().replace('T', ' ').slice(0, 16)}Z
-        </time>
+        <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-text-secondary">
+          This page describes what the market is doing. It never says which way the
+          price will go — that was tested twenty times and it could not be done.
+        </p>
       </header>
 
-      {/* ── how big, never which way ── */}
+      {/* ── 1. Is the market calm or stormy? ── */}
       {map.expectedMove ? (
-        <section>
-          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Expected move
-          </h2>
-          <div className="grid gap-3 md:grid-cols-3">
-            {Object.entries(map.expectedMove.horizons).map(([h, band]) => (
-              <ExpectedMoveCone key={h} spot={map.spot} horizon={h} band={band} />
+        <Section
+          title="How big a move to expect"
+          blurb={
+            <>
+              How far the price is likely to travel from here, up{' '}
+              <em className="not-italic text-text-primary">or</em> down. The bands are
+              deliberately even on both sides:{' '}
+              <Explain term={EXPLAIN.expectedMove}>this is about size, not direction</Explain>.
+            </>
+          }
+        >
+          <div className="grid gap-4 md:grid-cols-3">
+            {Object.entries(map.expectedMove.horizons).map(([hours, band]) => (
+              <ExpectedMoveCone key={hours} spot={map.spot} hours={hours} band={band} />
             ))}
           </div>
-          <p className="mt-2 text-xs text-neutral-600">{map.expectedMove.note}</p>
-        </section>
+        </Section>
       ) : null}
 
-      {/* ── what state, and for how long ── */}
-      {map.regime ? (
-        <section className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
-          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Regime
-          </h2>
-          <p className="text-sm text-neutral-200">
-            <span className="font-medium">{map.regime.state.replace('_', ' ').toLowerCase()}</span>
-            {' — '}
-            {REGIME_COPY[map.regime.state]}.
-          </p>
-          <p className="mt-1 text-sm text-neutral-400">
-            Held for {map.regime.ageHours} hours
-            {map.regime.ageTruncated ? ' at least — the data starts there' : ''}.
-          </p>
-          <p className="mt-2 font-mono text-[10px] text-neutral-600">{map.regime.reason}</p>
-          <div className="mt-3">
-            <WithheldNote label="Chance it ends within 24h" probability={map.regime.exitWithin24h} />
+      {/* ── 2. What is the market doing right now? ── */}
+      {map.regime && state ? (
+        <Section
+          title="Market state"
+          blurb={
+            <>
+              What kind of market this is at the moment, and{' '}
+              <Explain term={EXPLAIN.stateAge}>how long it has been that way</Explain>.
+            </>
+          }
+        >
+          <div className="rounded border border-border/40 bg-surface p-6">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <Explain term={state.explain}>
+                <span className="font-antonio text-[26px] font-semibold uppercase tracking-headline text-text-primary">
+                  {state.title}
+                </span>
+              </Explain>
+              <span className="font-mono text-[15px] text-text-secondary">
+                for {map.regime.ageHours} hours
+                {map.regime.ageTruncated ? ' or more' : ''}
+              </span>
+            </div>
+            <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-text-secondary">
+              {state.line}
+            </p>
+            <div className="mt-5 border-t border-border/40 pt-4">
+              <WithheldNote
+                label="Chance this ends in the next 24 hours"
+                probability={map.regime.exitWithin24h}
+              />
+            </div>
           </div>
-        </section>
+        </Section>
       ) : null}
 
-      {/* ── zones: geometry, and nothing implied by it ── */}
-      <section>
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-          Price zones
-        </h2>
+      <Section
+        title="Key price levels"
+        blurb={
+          <>
+            Prices where the market has turned around before. Drawn from past highs and
+            lows —{' '}
+            <Explain term={EXPLAIN.keyLevels}>not from a prediction</Explain>.
+          </>
+        }
+      >
         {map.zones.length === 0 ? (
-          <p className="text-sm text-neutral-500">None found on the current charts.</p>
+          <p className="text-[14px] text-text-tertiary">
+            No clear levels on the charts right now.
+          </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {map.zones.map((z, i) => (
               <div
                 key={`${z.center}-${i}`}
-                className="rounded-lg border border-neutral-800 bg-neutral-950 p-3"
+                className="rounded border border-border/40 bg-surface p-5"
               >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-mono text-sm text-neutral-200">
-                    {z.low.toFixed(2)} – {z.high.toFixed(2)}
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <span className="font-mono text-[16px] text-text-primary">
+                    {asMoney(z.low)} – {asMoney(z.high)}
                   </span>
-                  <span className="text-xs text-neutral-500">
-                    {z.type} · {z.distancePercent.toFixed(2)}% from price
-                    {z.shell === null ? ' · beyond depth data' : ` · shell ${z.shell}`}
+                  <span className="text-[13px] text-text-secondary">
+                    {z.type === 'support' ? 'below' : 'above'} today&rsquo;s price, by{' '}
+                    {Math.abs(z.distancePercent).toFixed(2)}%
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-neutral-600">
-                  built from {z.sources.join(' + ')}
+                <p className="mt-1.5 text-[12px] text-text-tertiary">
+                  <Explain term={EXPLAIN.multipleSignals}>
+                    found by {z.sources.length} {z.sources.length === 1 ? 'method' : 'methods'}
+                  </Explain>
+                  <span className="ml-1">— {z.sources.join(', ')}</span>
                 </p>
-                <div className="mt-2">
-                  <WithheldNote label="Chance it holds" probability={z.bounceWithin4h} />
+                <div className="mt-4 border-t border-border/40 pt-3">
+                  <WithheldNote label="Chance the price turns here" probability={z.bounceWithin4h} />
                 </div>
               </div>
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
-      {/* ── resting depth, relative to this coin ── */}
+      {/* ── 3. Where are the traps? ── */}
       {map.liquidity ? (
-        <section className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
-          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Resting order-book depth
-          </h2>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-neutral-600">
-                <th className="pb-1 font-normal">from price</th>
-                <th className="pb-1 text-right font-normal">bids</th>
-                <th className="pb-1 text-right font-normal">vs its own history</th>
-                <th className="pb-1 text-right font-normal">asks</th>
-                <th className="pb-1 text-right font-normal">vs its own history</th>
-              </tr>
-            </thead>
-            <tbody className="font-mono text-neutral-300">
-              {map.liquidity.shells.map((s) => (
-                <tr key={s.shell} className="border-t border-neutral-900">
-                  <td className="py-1">{s.shell - 1}–{s.shell}%</td>
-                  <td className="py-1 text-right">{(s.bidNotional / 1e6).toFixed(1)}M</td>
-                  <td className="py-1 text-right text-neutral-500">{s.bidPercentile.toFixed(0)}th</td>
-                  <td className="py-1 text-right">{(s.askNotional / 1e6).toFixed(1)}M</td>
-                  <td className="py-1 text-right text-neutral-500">{s.askPercentile.toFixed(0)}th</td>
+        <Section
+          title="Where big orders are waiting"
+          blurb={
+            <>
+              Buy and sell orders already sitting on the exchange.{' '}
+              <Explain term={EXPLAIN.bigOrders}>
+                A lot of them at one price can slow the price down when it arrives
+              </Explain>
+              . Every figure is{' '}
+              <Explain term={EXPLAIN.comparedToPast}>compared with this coin&rsquo;s own last 90 days</Explain>.
+            </>
+          }
+        >
+          <div className="overflow-x-auto rounded border border-border/40 bg-surface p-6">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-left text-text-tertiary">
+                  <th className="pb-2 font-normal">
+                    <Explain term={EXPLAIN.distanceBand}>Distance from price</Explain>
+                  </th>
+                  <th className="pb-2 text-right font-normal">Buy orders</th>
+                  <th className="pb-2 text-right font-normal">vs its own past</th>
+                  <th className="pb-2 text-right font-normal">Sell orders</th>
+                  <th className="pb-2 text-right font-normal">vs its own past</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-2 text-xs text-neutral-600">
-            Percentiles are against this coin’s own last 90 days, so “thin” means thin for it.
-            Coverage: {map.liquidity.coverage}.
-          </p>
-        </section>
+              </thead>
+              <tbody className="text-text-primary">
+                {map.liquidity.shells.map((s) => (
+                  <tr key={s.shell} className="border-t border-border/40">
+                    <td className="py-2 font-mono">
+                      {s.shell - 1}–{s.shell}%
+                    </td>
+                    <td className="py-2 text-right font-mono">
+                      ${(s.bidNotional / 1e6).toFixed(1)}M
+                    </td>
+                    <td className="py-2 text-right text-text-secondary">
+                      {describePercentile(s.bidPercentile)}
+                    </td>
+                    <td className="py-2 text-right font-mono">
+                      ${(s.askNotional / 1e6).toFixed(1)}M
+                    </td>
+                    <td className="py-2 text-right text-text-secondary">
+                      {describePercentile(s.askPercentile)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-4 text-[12px] leading-relaxed text-text-tertiary">
+              We can only see orders within 5% of today&rsquo;s price. Past that, this
+              system has no information at all — which is not the same as there being
+              nothing there.
+            </p>
+          </div>
+        </Section>
       ) : null}
 
-      {/* ── what this page refuses to say ── */}
-      <section className="rounded-lg border border-neutral-800/60 bg-neutral-900/30 p-4">
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-          What this does not tell you
+      <section className="mt-12 rounded border border-border/40 bg-surface-hover/40 p-6">
+        <h2 className="font-antonio text-[18px] font-semibold uppercase tracking-headline text-text-primary">
+          What this page does not tell you
         </h2>
-        <ul className="space-y-1 text-xs leading-relaxed text-neutral-500">
+        <ul className="mt-3 space-y-1.5 text-[13px] leading-relaxed text-text-secondary">
           {map.disclaimers.map((d) => (
-            <li key={d}>· {d}</li>
+            <li key={d}>{d}</li>
           ))}
         </ul>
         <a
           href="/calibration"
-          className="mt-3 inline-block text-xs text-sky-600 hover:text-sky-400"
+          className="mt-4 inline-block text-[13px] text-gold-ink underline underline-offset-2 hover:text-text-primary"
         >
-          How accurate has each number been? →
+          See how accurate each number has been
         </a>
       </section>
     </div>
   );
+}
+
+/**
+ * A percentile as a sentence.
+ *
+ * "12th percentile" means nothing to someone who does not already know. "Thinner
+ * than usual" is the same fact in words they can act on, and the exact figure is
+ * still there for anyone who wants it.
+ */
+function describePercentile(p: number): string {
+  if (p <= 15) return `unusually thin (${p.toFixed(0)}%)`;
+  if (p <= 35) return `thinner than usual (${p.toFixed(0)}%)`;
+  if (p < 65) return `about normal (${p.toFixed(0)}%)`;
+  if (p < 85) return `thicker than usual (${p.toFixed(0)}%)`;
+  return `unusually thick (${p.toFixed(0)}%)`;
 }

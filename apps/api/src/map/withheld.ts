@@ -15,33 +15,36 @@ import { MIN_SAMPLE_FOR_PROBABILITY } from '../calibration/calibration';
 export const ZONE_BOUNCE_WITHHELD: Withheld = {
   value: null,
   reason:
-    'Not published. Measured on the 182-day holdout, the zone-bounce forecast was ' +
-    'honest (ECE 1.13 points) and carried no information: its Brier score was worse ' +
-    'than always quoting the base rate, and all twelve bucket keys predicted within ' +
-    '3.7 points of each other against a 75.8% base rate. Zone type, confluence count ' +
-    'and regime say nothing about whether a level holds. Shelf thickness was tested ' +
-    'separately and also failed.',
+    'We tested this over six months of history the model had never seen. The forecast ' +
+    'was honest — when it said 75%, it happened about 75% of the time — but it was the ' +
+    'same 75% in every situation. Whether a level was above or below the price, how ' +
+    'many methods found it, and what state the market was in made no difference: every ' +
+    'answer landed within 4 points of the long-run average of 75.8%. A number that ' +
+    'never changes tells you nothing you did not already know. We also checked whether ' +
+    'a wall of waiting buy orders behind a level made it more likely to hold. It did not.',
   evidence: 'docs/evidence/LAYER2_CALIBRATION.md, docs/evidence/LAYER3_LIQUIDITY.md',
 };
 
 export const REGIME_EXIT_WITHHELD: Withheld = {
   value: null,
   reason:
-    'Not published. Expected calibration error was 5.06 points against a bar of 5.00. ' +
-    'It beats the base rate on Brier, so it is informative, but every TRENDING bucket ' +
-    'under 48 hours exited 5 to 11 points more often in the holdout than the fitted ' +
-    'table expected — trends were less persistent than in training. The bar was not ' +
-    'renegotiated after the result.',
+    'This one nearly worked, and unlike the others it does carry real information. But ' +
+    'when we checked it against six months the model had never seen, its promises were ' +
+    'off by 5.1 points where we had decided in advance to allow 5. The reason is that ' +
+    'the market changed character: trends broke down 5 to 11 points more often in the ' +
+    'test period than in the years we learned from. We set that limit before seeing the ' +
+    'result and did not move it afterwards.',
   evidence: 'docs/evidence/LAYER2_CALIBRATION.md',
 };
 
 export const UNWIND_LIFT_WITHHELD: Withheld = {
   value: null,
   reason:
-    'Not published. Conditional on extreme crowding, a 5% adverse move within 24 hours ' +
-    'followed 11.7% of the time against an 11.1% base rate, with a 95% interval of ' +
-    '[7.5%, 19.4%] that contains the base rate. 103 matches over 6 blocks, so the ' +
-    'sample was adequate and the lift is simply absent.',
+    'We looked for occasions when an unusual number of traders were betting the same ' +
+    'way, and asked how often a sharp 5% fall followed within a day. It happened 11.7% ' +
+    'of the time — against 11.1% of the time in ordinary conditions. That difference is ' +
+    'well inside the margin of error. We had 103 such occasions spread across six ' +
+    'months, so this is not a shortage of evidence: the warning simply is not there.',
   evidence: 'docs/evidence/LAYER3_LIQUIDITY.md',
 };
 
@@ -54,11 +57,11 @@ export const UNWIND_LIFT_WITHHELD: Withheld = {
  */
 export const MAP_DISCLAIMERS: string[] = [
   'This map describes the market. It does not forecast direction, and no field in it is a trade signal.',
-  'Twenty pre-registered tests found no directional edge in this data that survives a 14 bp round trip.',
-  'The expected-move cone is a SIZE forecast: how far price is likely to travel, not which way.',
-  'Order-book depth is published only to +-5% of mid. Beyond that, this system has no data at all.',
-  'Liquidation data is unavailable. Falling open interest is the footprint of forced unwinding, seen after the fact.',
-  'Base rates are for ten liquid majors and need not hold elsewhere.',
+  'Twenty tests, each with its target set in advance, found nothing that predicts direction well enough to cover trading costs.',
+  'The expected move is about SIZE: how far the price is likely to travel, not which way.',
+  'We can only see waiting orders within 5% of the current price. Beyond that, this system has no information at all.',
+  'We cannot see forced sell-offs as they happen. We only see the traces they leave behind, afterwards.',
+  'These figures come from ten large, heavily traded coins and need not hold for smaller ones.',
 ];
 
 /**
@@ -78,8 +81,9 @@ export function publish(
     return {
       value: null,
       reason:
-        `Not published: ${n.toLocaleString()} observations is below the ${MIN_SAMPLE_FOR_PROBABILITY} ` +
-        'required. Effective sample size on this data runs one to two orders of magnitude below the raw count.',
+        `Based on only ${n.toLocaleString()} real cases, where we require at least ` +
+        `${MIN_SAMPLE_FOR_PROBABILITY}. Market data repeats itself far more than a raw count suggests, ` +
+        'so a few hundred observations carry much less evidence than they appear to.',
       evidence: 'docs/PRODUCT_LAYERS.md',
     };
   }

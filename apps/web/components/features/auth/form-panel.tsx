@@ -17,7 +17,7 @@ import { useLogin } from '@/lib/hooks/use-auth';
  */
 function safeNext(value: string | null): string {
   if (!value || value[0] !== '/' || value[1] === '/' || value[1] === '\\') {
-    return '/dashboard';
+    return '/map';
   }
   return value;
 }

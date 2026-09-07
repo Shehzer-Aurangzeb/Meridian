@@ -36,7 +36,8 @@
     "venue-backfill": "npx ts-node --transpile-only scripts/venue-backfill.ts",
     "venue-reconcile": "npx ts-node --transpile-only scripts/venue-reconcile.ts",
     "weekly-direction": "npx ts-node --transpile-only test/manual/weekly-direction.ts",
-    "onchain-direction": "npx ts-node --transpile-only test/manual/onchain-direction.ts"
+    "onchain-direction": "npx ts-node --transpile-only test/manual/onchain-direction.ts",
+    "midcap-direction": "npx ts-node --transpile-only test/manual/midcap-direction.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

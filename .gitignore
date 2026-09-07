@@ -76,6 +76,7 @@ docs/evidence/*
 !docs/evidence/LAYER2_CALIBRATION.md
 !docs/evidence/LAYER3_LIQUIDITY.md
 !docs/evidence/LAYER4_SURFACE.md
+!docs/evidence/MIDCAP_DIRECTION.md
 !docs/evidence/README.md
 
 # The current plan. Everything else under active/ is a working note.
