@@ -62,7 +62,7 @@ function IconButton({
 
 function Breadcrumbs() {
   const pathname = usePathname();
-  const pageTitle = PAGE_TITLES[pathname] || 'Dashboard';
+  const pageTitle = PAGE_TITLES[pathname] ?? 'Market map';
 
   return (
     <div className="text-xs tracking-[0.14em] uppercase font-medium">

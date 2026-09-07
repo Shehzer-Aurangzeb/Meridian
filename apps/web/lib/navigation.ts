@@ -55,10 +55,7 @@ export const NAVIGATION: NavSection[] = getNavigation();
 export const NAV_ITEMS = NAVIGATION.flatMap((section) => section.items);
 
 export const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Dashboard',
-  '/analysis': 'Analysis',
-  '/history': 'History',
-  '/alerts': 'Alerts',
-  '/strategies': 'Strategies',
+  '/map': 'Market map',
+  '/calibration': 'How accurate is this?',
   '/settings': 'Settings',
 };

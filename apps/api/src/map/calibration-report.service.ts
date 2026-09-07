@@ -37,10 +37,15 @@ export class CalibrationReportService {
     {
       output: 'expected-move-cone',
       status: 'PUBLISHED',
-      bar: 'Coverage within 3 points of nominal at 50/80/90%, on a 182-day holdout.',
+      bar:
+        'When we say a move stays within a range 50, 80 or 90% of the time, it has to ' +
+        'actually happen that often — within 3 points either way — over six months the ' +
+        'model had never seen.',
       measured:
-        '4h: 51.4 / 80.4 / 90.7.  12h: 50.6 / 81.1 / 91.1.  24h: 50.0 / 81.5 / 91.9. ' +
-        'Nine of nine inside the bar, worst deviation 1.9 points.',
+        'Over the next 4 hours we were right 51.4%, 80.4% and 90.7% of the time against ' +
+        'promises of 50, 80 and 90%. Over 12 hours: 50.6%, 81.1%, 91.1%. Over 24 hours: ' +
+        '50.0%, 81.5%, 91.9%. Nine checks out of nine passed, and the worst was off by ' +
+        'only 1.9 points.',
       curve: [
         { predicted: 0.5, realised: 0.514, n: 43640 },
         { predicted: 0.8, realised: 0.804, n: 43640 },
@@ -49,33 +54,39 @@ export class CalibrationReportService {
       fittedAt: '2026-09-06',
       evidence: 'docs/evidence/LAYER2_CALIBRATION.md',
       note:
-        'The bands run slightly wide at every level, so the cone is a touch conservative ' +
-        'at the tails. That is the safer direction to err and it is inside the bar.',
+        'The ranges come out slightly wider than they strictly need to be, so the product ' +
+        'errs towards caution. That is the safer way to be wrong, and it is well inside ' +
+        'what we allowed.',
     },
     {
       output: 'zone-bounce-4h',
       status: 'WITHHELD',
-      bar: 'ECE under 5 points AND a Brier score better than always quoting the base rate.',
+      bar:
+        'Two things at once: the promises had to be off by under 5 points, AND the number ' +
+        'had to beat simply quoting the long-run average every time.',
       measured:
-        'ECE 1.13 points — honest. Brier 0.18375 against a base-rate 0.18369 — WORSE. ' +
-        'All twelve bucket keys predicted between 73.0% and 76.7%, a spread of 3.7 points ' +
-        'against a 75.8% base rate, so the whole holdout fell in one reliability bucket.',
+        'The promises were off by only 1.1 points, so the number was honest. But it never ' +
+        'moved: across every situation we checked, the answer stayed between 73.0% and ' +
+        '76.7% — a spread of under 4 points around a long-run average of 75.8%. It was ' +
+        'very slightly worse than just quoting that average.',
       curve: [{ predicted: 0.746, realised: 0.758, n: 6029 }],
       fittedAt: '2026-09-06',
       evidence: 'docs/evidence/LAYER2_CALIBRATION.md',
       note:
-        'A model that only ever emits the base rate is perfectly calibrated and useless. ' +
-        'That is what this is, and the Brier condition exists to catch it. Shelf thickness ' +
-        'was tested separately in Layer 3 and also carried nothing.',
+        'A forecast that always answers with the long-run average is perfectly honest and ' +
+        'completely useless, and that is exactly what this turned out to be. The second ' +
+        'half of the test exists to catch precisely this. We also checked whether a wall ' +
+        'of waiting buy orders behind a level helped predict it. It did not.',
     },
     {
       output: 'regime-exit-24h',
       status: 'WITHHELD',
-      bar: 'ECE under 5 points.',
+      bar: 'The promises had to be off by under 5 points.',
       measured:
-        'ECE 5.06 points. Brier 0.2416 against a base-rate 0.2440, so it IS informative — ' +
-        'but every TRENDING bucket under 48h exited 5 to 11 points more often in the ' +
-        'holdout than the fitted table expected.',
+        'They were off by 5.1 points — just past the line. This one does beat the long-run ' +
+        'average, so it genuinely knows something. But in the test period, markets that ' +
+        'had been moving one way stopped doing so 5 to 11 points more often than the ' +
+        'years we learned from would suggest.',
       curve: [
         { predicted: 0.463, realised: 0.548, n: 14992 },
         { predicted: 0.565, realised: 0.534, n: 19049 },
@@ -86,27 +97,30 @@ export class CalibrationReportService {
       fittedAt: '2026-09-06',
       evidence: 'docs/evidence/LAYER2_CALIBRATION.md',
       note:
-        'Trends were markedly less persistent in the holdout than in training. This is ' +
-        'calibration decay, not a pipeline defect, and the bar was not renegotiated after ' +
-        'the result. The open question is refit cadence.',
+        'The market simply behaved differently in the test period than in the years the ' +
+        'model learned from. Nothing is broken; the world moved. We set the limit before ' +
+        'seeing the result and did not move it afterwards, so this stays unpublished until ' +
+        'a fresher fit clears it.',
     },
     {
       output: 'unwind-lift-24h',
       status: 'WITHHELD',
       bar:
-        'Conditional adverse rate above the base rate by an interval excluding zero, ' +
-        'with at least 100 matches over at least 4 distinct 30-day blocks.',
+        'A sharp fall had to follow crowded conditions clearly more often than it follows ' +
+        'ordinary ones — with at least 100 such occasions, spread over at least four ' +
+        'separate months rather than bunched into one.',
       measured:
-        '103 matches over 6 blocks, so the sample condition passed. Conditional rate ' +
-        '11.7% against an 11.1% base rate, 95% interval [7.5%, 19.4%] — which contains ' +
-        'the base rate.',
+        'We found 103 occasions spread across six months, so there was plenty to look at. ' +
+        'A sharp fall followed 11.7% of the time, against 11.1% of the time in ordinary ' +
+        'conditions. Allowing for chance, the true figure could be anywhere from 7.5% to ' +
+        '19.4% — a range that comfortably includes the ordinary rate.',
       curve: null,
       fittedAt: '2026-09-06',
       evidence: 'docs/evidence/LAYER3_LIQUIDITY.md',
       note:
-        'Crowded positioning does not measurably raise the chance of a sharp fall on this ' +
-        'data. No liquidation feed exists, so a cascade claim would be uncheckable in ' +
-        'principle as well as unsupported in fact.',
+        'On this data, a crowd of traders leaning the same way does not measurably raise ' +
+        'the chance of a sharp fall. We also cannot see forced sell-offs directly, so a ' +
+        'warning about them would be unverifiable even if the pattern had been there.',
     },
   ];
 
@@ -114,9 +128,10 @@ export class CalibrationReportService {
     return {
       entries: CalibrationReportService.ENTRIES,
       summary:
-        'One of four outputs is published as a probability. The other three were measured, ' +
-        'failed their pre-registered bars, and are served as nulls with the reason attached. ' +
-        'Calibration decays; every entry carries the date its table was fitted.',
+        'One of these four numbers passed its test and is shown in the product. The other ' +
+        'three were measured, failed, and are left blank on purpose — with the reason ' +
+        'given here. Every check has a date, because a number that was accurate two years ' +
+        'ago need not still be accurate now.',
     };
   }
 

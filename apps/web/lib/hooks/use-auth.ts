@@ -17,7 +17,7 @@ export function useSession() {
 }
 
 /** `next` must already be validated as a same-origin path by the caller. */
-export function useLogin(next = '/dashboard') {
+export function useLogin(next = '/map') {
   const queryClient = useQueryClient();
   const router = useRouter();
 

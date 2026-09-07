@@ -9,7 +9,7 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 
 function Brand() {
   return (
-    <Link href="/dashboard" className="flex items-center gap-3 px-7 pb-9 no-underline">
+    <Link href="/map" className="flex items-center gap-3 px-7 pb-9 no-underline">
       <div className="relative w-7 h-7 rounded-full border-[1.5px] border-gold shrink-0">
         <div 
           className="absolute inset-[5px] rounded-full bg-gold"

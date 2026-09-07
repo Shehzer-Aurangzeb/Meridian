@@ -42,7 +42,9 @@ describe('contract: n < 200 returns null', () => {
   it('explains the refusal rather than returning a bare null', () => {
     const p = publish(0.71, 10, '2026-09-06');
     if (isPublished(p)) throw new Error('should not be published');
-    expect(p.reason).toContain('below the 200');
+    // The rule, in whatever words: it names the shortfall and the minimum.
+    expect(p.reason).toContain('10');
+    expect(p.reason).toContain(String(MIN_SAMPLE_FOR_PROBABILITY));
     expect(p.evidence).toBeTruthy();
   });
 });
@@ -77,9 +79,21 @@ describe('contract: the three withheld outputs stay withheld', () => {
   });
 
   it('states the measurement, not just that it failed', () => {
-    expect(ZONE_BOUNCE_WITHHELD.reason).toContain('Brier');
-    expect(REGIME_EXIT_WITHHELD.reason).toContain('5.06');
+    // The numbers, in words a non-trader can check. The jargon versions —
+    // "Brier", "ECE 5.06", "conditional base rate" — were removed on
+    // 7 September 2026: these strings render on the calibration screen, and the
+    // person reading them is not a trader.
+    expect(ZONE_BOUNCE_WITHHELD.reason).toContain('75.8%');
+    expect(REGIME_EXIT_WITHHELD.reason).toContain('5.1 points');
     expect(UNWIND_LIFT_WITHHELD.reason).toContain('11.1%');
+  });
+
+  it('says it in plain English, with no jargon a reader would have to look up', () => {
+    const forbidden = /\bECE\b|\bBrier\b|holdout|bucket key|\bbps?\b|percentile|nominal/i;
+    for (const w of [ZONE_BOUNCE_WITHHELD, REGIME_EXIT_WITHHELD, UNWIND_LIFT_WITHHELD]) {
+      expect(w.reason).not.toMatch(forbidden);
+    }
+    for (const d of MAP_DISCLAIMERS) expect(d).not.toMatch(forbidden);
   });
 });
 
@@ -152,8 +166,11 @@ describe('contract: the conditional endpoint warns on thin or clustered evidence
 describe('contract: the map carries what it does not claim', () => {
   it('ships disclaimers with the payload, not as a frontend footer', () => {
     expect(MAP_DISCLAIMERS.some((d) => /does not forecast direction/i.test(d))).toBe(true);
-    expect(MAP_DISCLAIMERS.some((d) => /\+-5%|5% of mid/i.test(d))).toBe(true);
-    expect(MAP_DISCLAIMERS.some((d) => /[Ll]iquidation data is unavailable/.test(d))).toBe(true);
+    // The LIMIT must be stated, in whatever wording. Matching exact phrasing
+    // here is what made these tests fail when the copy was put into plain
+    // English, which is the wrong thing for a contract test to police.
+    expect(MAP_DISCLAIMERS.some((d) => /5% of the current price|5% of mid/i.test(d))).toBe(true);
+    expect(MAP_DISCLAIMERS.some((d) => /forced sell-offs|liquidation/i.test(d))).toBe(true);
   });
 });
 
@@ -178,7 +195,11 @@ describe('contract: the calibration page reports failures as prominently as the 
     }
   });
 
-  it('says plainly that three of four failed', () => {
-    expect(report.summary).toContain('One of four');
+  it('says plainly that most of them failed', () => {
+    // Checks the CLAIM, not the wording. Pinning exact phrasing here is what
+    // made these tests fail when the copy was rewritten in plain English, and a
+    // contract test should not police prose.
+    expect(report.summary).toMatch(/one of (these )?four/i);
+    expect(report.summary).toMatch(/three .*(failed|blank)/i);
   });
 });

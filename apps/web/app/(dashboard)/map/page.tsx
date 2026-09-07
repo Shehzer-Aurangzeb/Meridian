@@ -7,16 +7,18 @@ import { fetchApi } from '@/lib/api/client';
 import type { MarketMap } from '@/types/map';
 
 const SYMBOL_PATTERN = /^[A-Z0-9]{2,15}$/;
+/** The ten the model was fitted on. Anything else is not calibrated for. */
+const COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'LTC'];
 
 function MapContent() {
   const params = useSearchParams();
-  const [coin, setCoin] = useState(params.get('coin')?.toUpperCase() ?? 'BTC');
+  const initial = params.get('coin')?.toUpperCase();
+  const [coin, setCoin] = useState(initial && SYMBOL_PATTERN.test(initial) ? initial : 'BTC');
   const [map, setMap] = useState<MarketMap | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!SYMBOL_PATTERN.test(coin)) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -36,27 +38,49 @@ function MapContent() {
   }, [coin]);
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
-      <div className="mb-6">
-        <input
-          value={coin}
-          onChange={(e) => setCoin(e.target.value.toUpperCase())}
-          placeholder="BTC"
-          aria-label="Coin"
-          className="w-32 rounded border border-neutral-800 bg-neutral-950 px-3 py-1.5 font-mono text-sm text-neutral-100"
-        />
+    <div className="mx-auto max-w-5xl px-8 py-10">
+      {/* A fixed list, not a free-text box: the model was fitted on these ten
+          coins and is not calibrated for anything else, so offering a text
+          field would invite a question the product cannot answer honestly. */}
+      <div className="mb-8 flex flex-wrap gap-2">
+        {COINS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCoin(c)}
+            aria-current={c === coin ? 'true' : undefined}
+            className={
+              c === coin
+                ? 'rounded-sm bg-gold px-3 py-1.5 font-mono text-[13px] text-gold-ink'
+                : 'rounded-sm border border-border/60 px-3 py-1.5 font-mono text-[13px] text-text-secondary hover:border-gold/60 hover:text-text-primary'
+            }
+          >
+            {c}
+          </button>
+        ))}
       </div>
 
-      {loading ? <p className="text-sm text-neutral-500">Reading the market…</p> : null}
-      {error ? <p className="text-sm text-amber-600">{error}</p> : null}
-      {map && !loading ? <MapView map={map} /> : null}
+      {loading ? (
+        <p className="text-[14px] text-text-tertiary">Reading the market…</p>
+      ) : null}
+
+      {error ? (
+        <div className="rounded border border-amber/40 bg-surface p-6">
+          <p className="text-[14px] text-text-primary">This page could not load its data.</p>
+          <p className="mt-1.5 font-mono text-[12px] text-text-tertiary">{error}</p>
+        </div>
+      ) : null}
+
+      {map && !loading && !error ? <MapView map={map} /> : null}
     </div>
   );
 }
 
 export default function MapPage() {
   return (
-    <Suspense fallback={<p className="p-8 text-sm text-neutral-500">Loading…</p>}>
+    <Suspense
+      fallback={<p className="px-8 py-10 text-[14px] text-text-tertiary">Loading…</p>}
+    >
       <MapContent />
     </Suspense>
   );

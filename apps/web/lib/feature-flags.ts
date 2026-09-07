@@ -9,32 +9,26 @@ function parseFeatureFlag(value: string | undefined, defaultValue: boolean): boo
  * which is worse than one that says it is not ready.
  */
 export const FEATURES = {
-  DASHBOARD: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_DASHBOARD, true),
-
-  ANALYSIS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ANALYSIS, true),
-  HISTORY: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_HISTORY, true),
-
-  // Mock array in the component. Needs somewhere to persist a per-user list,
-  // and this is a single-password app with no user table.
-  WATCHLIST: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_WATCHLIST, false),
-
-  // No backend at all.
-  ALERTS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_ALERTS, false),
-  STRATEGIES: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_STRATEGIES, false),
+  MAP: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_MAP, true),
+  CALIBRATION: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_CALIBRATION, true),
   SETTINGS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_SETTINGS, false),
 } as const;
 
-/** Keep in sync with ROUTE_FEATURE_MAP in middleware.ts, which cannot import this. */
+/**
+ * Keep in sync with ROUTE_FEATURE_MAP in middleware.ts, which cannot import this.
+ *
+ * DASHBOARD, ANALYSIS, HISTORY, ALERTS and STRATEGIES were removed on
+ * 7 September 2026 with the pages they gated. A flag for a route that no longer
+ * exists is worse than no flag: it redirected anyone who typed the address to
+ * another address that also no longer existed.
+ */
 export const ROUTE_FEATURE_MAP: Record<string, keyof typeof FEATURES> = {
-  '/dashboard': 'DASHBOARD',
-  '/analysis': 'ANALYSIS',
-  '/history': 'HISTORY',
-  '/alerts': 'ALERTS',
-  '/strategies': 'STRATEGIES',
+  '/map': 'MAP',
+  '/calibration': 'CALIBRATION',
   '/settings': 'SETTINGS',
 };
 
-/** Matches on the first segment, so /history/<id> follows /history. */
+/** Matches on the first segment, so /map/<symbol> follows /map. */
 export function isRouteEnabled(route: string): boolean {
   const feature = ROUTE_FEATURE_MAP[`/${route.split('/')[1]}`];
   if (!feature) return true;
