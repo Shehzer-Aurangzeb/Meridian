@@ -57,6 +57,8 @@ docs/*
 !docs/STATE_OF_MERIDIAN_*.md
 !docs/BRIEFING_FOR_REVIEW.md
 !docs/BRIEFING_PROMPT.md
+!docs/END_STATE_A_DESIGN.md
+!docs/PRODUCT_LAYERS.md
 
 # The evidence: pre-registrations, and the index that says how each one landed.
 !docs/evidence/
@@ -68,6 +70,12 @@ docs/evidence/*
 !docs/evidence/STAGE0_MAKER_FILL.md
 !docs/evidence/CROSS_VENUE_PREREG.md
 !docs/evidence/CROSS_VENUE_IC.md
+!docs/evidence/MAGNITUDE_GATE.md
+!docs/evidence/LAYER0_BOOK_PROFILE.md
+!docs/evidence/LAYER1_BARS.md
+!docs/evidence/LAYER2_CALIBRATION.md
+!docs/evidence/LAYER3_LIQUIDITY.md
+!docs/evidence/LAYER4_SURFACE.md
 !docs/evidence/README.md
 
 # The current plan. Everything else under active/ is a working note.

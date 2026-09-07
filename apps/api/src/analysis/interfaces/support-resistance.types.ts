@@ -6,7 +6,13 @@ import { Timeframe } from '../../common/constants/timeframes';
 export interface SupportResistanceLevel {
   price: number;
   type: 'support' | 'resistance';
-  strength: number; // 1-5, how many times tested
+  // `strength`, a 1-5 score, was removed on 5 Sept 2026. It was an assigned
+  // number wearing the clothes of a measured one, and it is the construct that
+  // produced this project's worst production defect: thresholds named
+  // MIN_TESTS were compared against it, so "minimum 3 touches" silently meant
+  // "score of at least 3" for ~14% of levels. Zone confidence is a MEASURED
+  // frequency from now on and is attached downstream, not computed here.
+  // See docs/PRODUCT_LAYERS.md Layer 2.
   timeframe: Timeframe;
   lastTested: Date;
   held: boolean; // Did it hold or break?
@@ -70,12 +76,7 @@ export const SR_DEFAULTS = {
   // never read it — it scans every candle handed in, and the window is chosen by
   // the CALLER via `CANDLE_LIMITS`. The one script that read it now owns it.
   SWING_LOOKBACK: 2, // Bars to look back/forward for swing detection
-  STRENGTH_THRESHOLDS: {
-    WEAK: 2,
-    MODERATE: 3,
-    STRONG: 4,
-    VERY_STRONG: 5,
-  },
+  // STRENGTH_THRESHOLDS went with the 1-5 score it fed. See SupportResistanceLevel.
 } as const;
 
 /**

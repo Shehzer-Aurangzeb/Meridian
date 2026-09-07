@@ -263,13 +263,9 @@ export class SupportResistanceService {
     // Check if level held (price didn't close beyond it)
     const held = this.checkIfLevelHeld(cluster, candles);
 
-    // Calculate strength (1-5 based on touch count)
-    const strength = this.calculateLevelStrength(cluster, held);
-
     return {
       price: cluster.price,
       type: cluster.type,
-      strength,
       timeframe,
       lastTested,
       held,
@@ -305,41 +301,6 @@ export class SupportResistanceService {
       );
       return !broken;
     }
-  }
-
-  /**
-   * Calculate level strength (1-5)
-   * Based on touch count and whether it held
-   */
-  private calculateLevelStrength(cluster: ClusteredLevel, held: boolean): number {
-    const { count } = cluster;
-    const { STRENGTH_THRESHOLDS } = SR_DEFAULTS;
-
-    let strength: number;
-
-    if (count >= STRENGTH_THRESHOLDS.VERY_STRONG) {
-      strength = 5;
-    } else if (count >= STRENGTH_THRESHOLDS.STRONG) {
-      strength = 4;
-    } else if (count >= STRENGTH_THRESHOLDS.MODERATE) {
-      strength = 3;
-    } else if (count >= STRENGTH_THRESHOLDS.WEAK) {
-      strength = 2;
-    } else {
-      strength = 1;
-    }
-
-    // Bonus for holding
-    if (held && strength < 5) {
-      strength += 0.5;
-    }
-
-    // Penalty for breaking
-    if (!held && strength > 1) {
-      strength -= 0.5;
-    }
-
-    return Math.round(strength);
   }
 
   /**

@@ -2,38 +2,38 @@ import { Module } from '@nestjs/common';
 import { MarketDataModule } from '../market-data/market-data.module';
 import { IndicatorsModule } from '../indicators/indicators.module';
 import { MarketRegimeModule } from '../market-regime/market-regime.module';
-import { SqueezeBreakoutModule } from '../squeeze-breakout/squeeze-breakout.module';
-import { AnalysisCoordinatorModule } from '../analysis-coordinator/analysis-coordinator.module';
 import { AiModule } from '../ai/ai.module';
 import { AnalysisModule } from '../analysis/analysis.module';
-import { RiskManagementModule } from '../risk-management/risk-management.module';
+import { ExpectedMoveModule } from '../expected-move/expected-move.module';
+import { LiquidityModule } from '../liquidity/liquidity.module';
 import { FlowModule } from '../flow/flow.module';
 
 /**
- * ServicesModule - Convenience module that re-exports all feature modules
- * Can be used to import all services at once
+ * Convenience module re-exporting the feature modules.
+ *
+ * `SqueezeBreakoutModule` and `AnalysisCoordinatorModule` went with the trade
+ * planner on 6 September 2026. `MapModule` is not re-exported here — it owns
+ * the controllers and is imported directly by `AppModule`.
  */
 @Module({
   imports: [
     MarketDataModule,
     IndicatorsModule,
     MarketRegimeModule,
-    SqueezeBreakoutModule,
-    AnalysisCoordinatorModule,
     AiModule,
     AnalysisModule,
-    RiskManagementModule,
+    ExpectedMoveModule,
+    LiquidityModule,
     FlowModule,
   ],
   exports: [
     MarketDataModule,
     IndicatorsModule,
     MarketRegimeModule,
-    SqueezeBreakoutModule,
-    AnalysisCoordinatorModule,
     AiModule,
     AnalysisModule,
-    RiskManagementModule,
+    ExpectedMoveModule,
+    LiquidityModule,
     FlowModule,
   ],
 })

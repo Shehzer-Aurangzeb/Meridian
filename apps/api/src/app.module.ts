@@ -4,6 +4,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { MapModule } from './map/map.module';
 import { ServicesModule } from './services/services.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './controllers/health.controller';
@@ -44,6 +45,7 @@ class AppController {
 
     // ServicesModule re-exports all feature modules
     ServicesModule,
+    MapModule,
     PrismaModule,
   ],
   controllers: [AppController, HealthController, AuthController],

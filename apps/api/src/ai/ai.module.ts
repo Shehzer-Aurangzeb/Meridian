@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { AnalystNarrationService } from './analyst-narration.service';
+import { MapNarrationService } from './map-narration.service';
 
 @Module({
-  providers: [AnalystNarrationService],
-  exports: [AnalystNarrationService],
+  providers: [MapNarrationService],
+  exports: [MapNarrationService],
 })
 export class AiModule {}

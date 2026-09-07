@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '@/lib/api/client';
-import type { HealthResponse } from '@/types/analyses';
+import type { HealthResponse } from '@/types/health';
 import { queryKeys } from './query-keys';
 
 /** Works signed out, which tells "API is down" from "session expired". */

@@ -57,7 +57,6 @@ export function configureApp(
       .addTag('health', 'Health check endpoints')
       .addTag('auth', 'Login and credential check')
       .addTag('analyses', 'Run, list and read saved analyses')
-      .addTag('risk-management', 'Risk management calculations')
       .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
       .addBearerAuth()
       .build();

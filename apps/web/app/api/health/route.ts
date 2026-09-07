@@ -1,5 +1,5 @@
 import { backendFetch, proxy } from '@/lib/api/server';
-import type { HealthResponse } from '@/types/analyses';
+import type { HealthResponse } from '@/types/health';
 
 // Reads no cookie, so Next would otherwise try to prerender this at build
 // time against a backend that is not running.

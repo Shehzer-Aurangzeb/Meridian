@@ -60,7 +60,10 @@ describe('lambda handler', () => {
     const { handler } = await import('./lambda');
 
     const res = (await handler(
-      event('GET', '/analyses'),
+      // A route that exists and is guarded. `/analyses` used to be this test's
+      // subject; it retired with the trade planner, and a 404 would pass for
+      // the wrong reason.
+      event('GET', '/map/BTC'),
       context,
       () => undefined,
     )) as { statusCode: number };

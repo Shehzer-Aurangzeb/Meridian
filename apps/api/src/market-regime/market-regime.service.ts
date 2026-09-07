@@ -7,6 +7,22 @@ import {
   MarketRegime,
   MarketRegimeResult,
 } from './interfaces/market-regime.types';
+import { classifyWithHysteresis, REGIME_HYSTERESIS } from './regime-hysteresis';
+import { TIMEFRAME_MS } from '../common/replay/plan-replay';
+import { Timeframe } from '../common/constants/timeframes';
+
+/** The current regime and how long it has held. */
+export interface RegimeState {
+  regime: MarketRegime;
+  /** Bars the label has held, including the current one. */
+  ageBars: number;
+  /** The same age in hours, from the timeframe of the series. */
+  ageHours: number;
+  /** True when the age ran back to the start of the data and may be longer. */
+  ageTruncated: boolean;
+  reason: string;
+  bandWidthPercentile: number;
+}
 
 /**
  * Decides what kind of market this is, which then decides which approach the
@@ -50,6 +66,69 @@ export class MarketRegimeService {
     private readonly indicatorsService: IndicatorsService,
   ) {}
 
+  /**
+   * The regime AND its age, derived by replaying the label forward across the
+   * candles in the context.
+   *
+   * Age is computed rather than remembered. The alternative — storing the last
+   * label and counting runs since — needs state that survives a restart, a gap
+   * in the schedule and a redeploy, and is wrong in a different way after each
+   * of them. Replaying is deterministic: the same candles always give the same
+   * age, and a missed run costs nothing.
+   *
+   * That also makes the hysteresis honest. The dead band only means something
+   * if the previous label was itself produced by the dead band, and a
+   * forward walk is the only way to guarantee that.
+   *
+   * Cost is one ADX pass per bar, which is O(n^2) over the window. At the 250
+   * candles this is called with, that is ~62,000 operations — cheaper than the
+   * fetch that produced them.
+   */
+  classifySeries(context: IndicatorContext): RegimeState | null {
+    const { candles, closes, highs, lows, bandWidthSeries, timeframe } = context;
+    const lookback = REGIME_HYSTERESIS.bandWidthLookback;
+    if (bandWidthSeries.length < lookback + 2) return null;
+
+    // bandWidthSeries drops the Bollinger warm-up, so it is shorter than the
+    // candles. Line them up by their common right edge, never by index 0.
+    const offset = closes.length - bandWidthSeries.length;
+
+    const labels: MarketRegime[] = [];
+    let previous: MarketRegime | null = null;
+    let last: ReturnType<typeof classifyWithHysteresis> | null = null;
+
+    for (let k = lookback; k < bandWidthSeries.length; k += 1) {
+      const bar = k + offset;
+      const adx = this.indicatorsService.calculateADX(
+        highs.slice(0, bar + 1) as number[],
+        lows.slice(0, bar + 1) as number[],
+        closes.slice(0, bar + 1) as number[],
+      );
+      if (!Number.isFinite(adx.adx)) continue;
+      const history = bandWidthSeries.slice(k - lookback, k) as number[];
+      last = classifyWithHysteresis(bandWidthSeries[k], adx.adx, history, previous);
+      previous = last.regime;
+      labels.push(last.regime);
+    }
+
+    if (last === null || labels.length === 0) return null;
+
+    let ageBars = 1;
+    for (let i = labels.length - 2; i >= 0 && labels[i] === last.regime; i -= 1) ageBars += 1;
+
+    const ms = TIMEFRAME_MS[timeframe as Timeframe] ?? TIMEFRAME_MS['1h'];
+    return {
+      regime: last.regime,
+      ageBars,
+      ageHours: (ageBars * ms) / 3_600_000,
+      // The label may well have held before the data started; saying "72h" when
+      // the window only covers 72h would be asserting something unmeasured.
+      ageTruncated: ageBars === labels.length,
+      reason: last.reason,
+      bandWidthPercentile: last.bandWidthPercentile,
+    };
+  }
+
   /** Fetches its own data first. Use the version below if you already have it. */
   async classifyMarketRegime(
     symbol: string,
@@ -77,8 +156,21 @@ export class MarketRegimeService {
    *   1. quieter than 85% of its own history  -> COMPRESSION
    *   2. trend strength above 25              -> TRENDING
    *   3. otherwise                            -> MEAN_REVERSION
+   *
+   * `previous` turns the thresholds into dead bands — see `regime-hysteresis.ts`
+   * for why, and for the measurements that sized them. Passing null gives the
+   * un-hysteretic answer, which is the right thing at the start of a series and
+   * the wrong thing everywhere else: without it the label flickers, and Bar 1c
+   * measured a median run of nine hours with 16.8% of runs lasting one or two.
+   *
+   * Callers that want the label AND its age should use `classifySeries`, which
+   * derives both from the candles rather than needing state carried between
+   * runs.
    */
-  classifyFromContext(context: IndicatorContext): MarketRegimeResult {
+  classifyFromContext(
+    context: IndicatorContext,
+    previous: MarketRegime | null = null,
+  ): MarketRegimeResult {
     const { symbol, timeframe, candles, bandWidth, bandWidthSeries, adx, rsi, atr, bollingerBands } =
       context;
 
@@ -108,44 +200,46 @@ export class MarketRegimeService {
 
     let bandWidthPercentile: number | null = null;
     let bandWidthThreshold: number;
-    let isCompressed: boolean;
+    let regime: MarketRegime;
+    let reason: string;
 
     if (hasReliableHistory) {
-      bandWidthPercentile = this.indicatorsService.percentileRank(
+      const decision = classifyWithHysteresis(
         bandWidth,
+        adx.adx,
         historical as number[],
+        previous,
       );
+      bandWidthPercentile = decision.bandWidthPercentile;
+      regime = decision.regime;
+      reason = decision.reason;
+
       const sorted = [...historical].sort((a, b) => a - b);
       const idx = Math.max(
         0,
         Math.min(
           sorted.length - 1,
-          Math.floor(MarketRegimeService.COMPRESSION_PERCENTILE * (sorted.length - 1)),
+          Math.floor((REGIME_HYSTERESIS.compressionEnterPct / 100) * (sorted.length - 1)),
         ),
       );
       bandWidthThreshold = sorted[idx];
-      isCompressed = bandWidth <= bandWidthThreshold;
     } else {
+      // Too little history for a percentile, so no dead band either — there is
+      // nothing to measure the band against. Stated in the reason rather than
+      // silently applying a different rule.
       bandWidthThreshold = MarketRegimeService.COMPRESSION_FALLBACK_PCT;
-      isCompressed = bandWidth < MarketRegimeService.COMPRESSION_FALLBACK_PCT;
-    }
-
-    let regime: MarketRegime;
-    let reason: string;
-
-    if (isCompressed) {
-      regime = 'COMPRESSION';
-      reason = hasReliableHistory
-        ? `BB width ${bandWidth.toFixed(3)}% at ${bandWidthPercentile?.toFixed(1)}th percentile ` +
-          `(<= 15th, cutoff ${bandWidthThreshold.toFixed(3)}%) measured over ${historical.length} samples`
-        : `BB width ${bandWidth.toFixed(3)}% < ${MarketRegimeService.COMPRESSION_FALLBACK_PCT}% ` +
-          `(percentile needs ${lookback} samples, only ${historical.length} available)`;
-    } else if (adx.adx > MarketRegimeService.ADX_TREND_THRESHOLD) {
-      regime = 'TRENDING';
-      reason = `ADX ${adx.adx.toFixed(2)} > ${MarketRegimeService.ADX_TREND_THRESHOLD} (+DI ${adx.pdi.toFixed(2)}, -DI ${adx.mdi.toFixed(2)})`;
-    } else {
-      regime = 'MEAN_REVERSION';
-      reason = `ADX ${adx.adx.toFixed(2)} <= ${MarketRegimeService.ADX_TREND_THRESHOLD} and BB width not compressed`;
+      if (bandWidth < MarketRegimeService.COMPRESSION_FALLBACK_PCT) {
+        regime = 'COMPRESSION';
+        reason =
+          `BB width ${bandWidth.toFixed(3)}% < ${MarketRegimeService.COMPRESSION_FALLBACK_PCT}% ` +
+          `(percentile needs ${lookback} samples, only ${historical.length} available — no hysteresis)`;
+      } else if (adx.adx > REGIME_HYSTERESIS.adxEnter) {
+        regime = 'TRENDING';
+        reason = `ADX ${adx.adx.toFixed(2)} > ${REGIME_HYSTERESIS.adxEnter} (+DI ${adx.pdi.toFixed(2)}, -DI ${adx.mdi.toFixed(2)})`;
+      } else {
+        regime = 'MEAN_REVERSION';
+        reason = `ADX ${adx.adx.toFixed(2)} <= ${REGIME_HYSTERESIS.adxEnter} and BB width not compressed`;
+      }
     }
 
     return {
