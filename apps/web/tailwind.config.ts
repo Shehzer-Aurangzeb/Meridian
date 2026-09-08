@@ -26,6 +26,7 @@ const config: Config = {
         gold: {
           DEFAULT: 'rgb(var(--gold) / <alpha-value>)',
           ink: 'rgb(var(--gold-ink) / <alpha-value>)',
+          contrast: 'rgb(var(--gold-contrast) / <alpha-value>)',
           dark: 'rgb(var(--gold-dark) / <alpha-value>)',
           soft: 'rgb(var(--gold) / 0.18)',
         },

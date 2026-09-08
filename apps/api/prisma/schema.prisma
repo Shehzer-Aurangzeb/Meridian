@@ -10,7 +10,7 @@ generator client {
 }
 
 model TradeAnalysis {
-  id         String   @id @default(cuid())
+  id         String @id @default(cuid())
   coin       String
   timeframe  String
   entryPrice Float
@@ -19,15 +19,15 @@ model TradeAnalysis {
   tp3        Float
   stopLoss   Float
   leverage   Int
-  suggestion String   // LONG, SHORT, WAIT
-  reasoning  String   @db.Text
+  suggestion String // LONG, SHORT, WAIT
+  reasoning  String @db.Text
 
   // Indicator values at time of analysis
-  rsiValue  Float?
-  bbUpper   Float?
-  bbMiddle  Float?
-  bbLower   Float?
-  atrValue  Float?
+  rsiValue Float?
+  bbUpper  Float?
+  bbMiddle Float?
+  bbLower  Float?
+  atrValue Float?
 
   // Metadata
   priceAtAnalysis Float
@@ -39,7 +39,7 @@ model TradeAnalysis {
 }
 
 model CoordinatorRun {
-  id              String   @id @default(cuid())
+  id              String  @id @default(cuid())
   symbol          String
   timeframe       String
   regime          String
@@ -66,7 +66,7 @@ model CoordinatorRun {
   outcomePayload Json?
   /// Null means "score me" — including a row whose candles would not load,
   /// so a failed fetch is retried instead of frozen as a verdict.
-  scoredAt DateTime?
+  scoredAt       DateTime?
 
   /// How the saved statement resolved. Kept: it is the resolution machinery,
   /// not a trade field.
@@ -75,7 +75,7 @@ model CoordinatorRun {
   /// were dropped on 6 September 2026 — they described R-multiples for trades
   /// the system no longer plans. The 843-row forward-test record was dumped to
   /// `~/meridian-archive/coordinator-run-20260905.sql` first.
-  outcome          String?
+  outcome String?
 
   @@index([symbol, createdAt])
   /// The list pages on (createdAt, id) and orders by createdAt DESC.
@@ -121,8 +121,8 @@ model FlowSample {
 /// `ts` is the END of the 5-minute bucket, matching the bookDepth rows in
 /// `FlowSample` — a bucket stamped at its start is readable before it finished.
 model BookProfile {
-  symbol String
-  ts     DateTime
+  symbol      String
+  ts          DateTime
   /// 1..5, the upper bound of the shell in percent from mid.
   shell       Int
   bidNotional Float
@@ -130,4 +130,52 @@ model BookProfile {
 
   @@id([symbol, ts, shell])
   @@index([symbol, ts])
+}
+
+/// One coin from one batch put to an outside analyst, and how it resolved.
+///
+/// `batchId` groups the coins asked together. It is the unit of evidence: ten
+/// coins asked at one moment share a market and are close to one observation,
+/// so every readout bootstraps over batches rather than rows.
+model SimTrade {
+  id      String @id @default(cuid())
+  batchId String
+  symbol  String
+
+  /// TAKE or SKIP. A SKIP still carries a plan — see docs/SIM_PROMPT.md.
+  verdict   String
+  direction String
+  entry     Float
+  stop      Float
+  /// [{ price, weightPercent }], summing to 100.
+  targets   Json
+  /// The analyst's own words. Never parsed, only displayed.
+  rationale String?
+
+  /// The map exactly as it was shown. Frozen: a foreign key would let this
+  /// drift when the map code changes, and then it stops being evidence.
+  mapSnapshot     Json
+  spotAtDecision  Float
+  /// True when the analyst said it fetched data beyond the snapshot.
+  usedOutsideData Boolean @default(false)
+
+  /// When the decision was made. The scoring window starts at the first bar
+  /// opening at or after this.
+  decidedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  /// Written by the scorer, never on a read path.
+  outcome    String?
+  grossR     Float?
+  netR       Float?
+  targetsHit Int?
+  barsHeld   Int?
+  filledAt   DateTime?
+  /// Null means "score me", including a row whose candles would not load, so a
+  /// failed fetch is retried rather than frozen as a verdict.
+  scoredAt   DateTime?
+
+  @@index([batchId])
+  @@index([symbol, decidedAt])
+  @@index([scoredAt])
 }

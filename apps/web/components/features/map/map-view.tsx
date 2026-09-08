@@ -182,10 +182,16 @@ export function MapView({ map }: { map: MarketMap }) {
                   </span>
                 </div>
                 <p className="mt-1.5 text-[12px] text-text-tertiary">
-                  <Explain term={EXPLAIN.multipleSignals}>
-                    found by {z.sources.length} {z.sources.length === 1 ? 'method' : 'methods'}
-                  </Explain>
-                  <span className="ml-1">— {z.sources.join(', ')}</span>
+                  {z.sources.length === 0 ? (
+                    'How this level was found was not recorded.'
+                  ) : (
+                    <>
+                      <Explain term={EXPLAIN.multipleSignals}>
+                        found by {z.sources.length} {z.sources.length === 1 ? 'method' : 'methods'}
+                      </Explain>
+                      <span className="ml-1">— {z.sources.join(', ')}</span>
+                    </>
+                  )}
                 </p>
                 <div className="mt-4 border-t border-border/40 pt-3">
                   <WithheldNote label="Chance the price turns here" probability={z.bounceWithin4h} />

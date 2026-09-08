@@ -59,6 +59,8 @@ docs/*
 !docs/BRIEFING_PROMPT.md
 !docs/END_STATE_A_DESIGN.md
 !docs/PRODUCT_LAYERS.md
+!docs/SIM_JOURNAL_PLAN.md
+!docs/SIM_PROMPT.md
 
 # The evidence: pre-registrations, and the index that says how each one landed.
 !docs/evidence/

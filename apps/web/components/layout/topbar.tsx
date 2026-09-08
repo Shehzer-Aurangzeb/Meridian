@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { PAGE_TITLES } from '@/lib/navigation';
+import { pageTitleFor } from '@/lib/navigation';
 import { SearchIcon } from '@/assets/icons/search-icon';
 import { MenuIcon } from '@/assets/icons/menu-icon';
 
@@ -62,7 +62,7 @@ function IconButton({
 
 function Breadcrumbs() {
   const pathname = usePathname();
-  const pageTitle = PAGE_TITLES[pathname] ?? 'Market map';
+  const pageTitle = pageTitleFor(pathname);
 
   return (
     <div className="text-xs tracking-[0.14em] uppercase font-medium">

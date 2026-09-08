@@ -32,6 +32,8 @@ const FULL_NAVIGATION: NavSection[] = [
     label: 'Workspace',
     items: [
       { href: '/map', label: 'Map', icon: AnalysisIcon },
+      { href: '/log', label: 'Log a batch', icon: AnalysisIcon },
+      { href: '/history', label: 'Journal', icon: HistoryIcon },
       { href: '/calibration', label: 'Calibration', icon: HistoryIcon },
     ],
   },
@@ -54,8 +56,15 @@ export const NAVIGATION: NavSection[] = getNavigation();
 
 export const NAV_ITEMS = NAVIGATION.flatMap((section) => section.items);
 
+/** Matched on the first segment, so /history/<id> follows /history. */
+export function pageTitleFor(pathname: string): string {
+  return PAGE_TITLES[`/${pathname.split('/')[1]}`] ?? 'Meridian';
+}
+
 export const PAGE_TITLES: Record<string, string> = {
   '/map': 'Market map',
+  '/log': 'Log a batch',
+  '/history': 'Journal',
   '/calibration': 'How accurate is this?',
   '/settings': 'Settings',
 };

@@ -20,7 +20,7 @@
  * worse than a rule that makes the wrong call impossible to phrase.
  */
 import * as fs from 'fs';
-import { makeRng } from './rng';
+import { mean, blockBootstrap, blockBootstrapDiff } from '../../src/common/stats/block-bootstrap';
 import { aggregate, scoreRow } from '../../src/common/replay/trade-scoring';
 
 const args = process.argv.slice(2);
@@ -88,128 +88,12 @@ export const ARMS: Record<string, (r: Row) => boolean> = {
 
 // ── stats ───────────────────────────────────────────────────────────────
 
-export const mean = (xs: number[]): number =>
-  xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
-
-const quantile = (xs: number[], p: number): number => {
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor(p * (s.length - 1))];
-};
-
-/**
- * Block bootstrap over calendar time.
- *
- * Trade-level resampling assumes independence, and ten coins inside one week
- * are closer to one observation than to forty. Drawing whole time blocks —
- * every coin's trades inside that block together — keeps whatever market-wide
- * move the block contained instead of averaging it away. It is the widest of
- * the three resampling schemes tried, and the honest one.
- */
-export function blockBootstrap(
-  points: Array<{ time: number; value: number }>,
-  blockDays: number,
-  b: number,
-  seed: number,
-): { lo: number; hi: number; blocks: number; pPositive: number } {
-  if (points.length === 0) return { lo: NaN, hi: NaN, blocks: 0, pPositive: NaN };
-  const rng = makeRng(seed);
-  const t0 = Math.min(...points.map((r) => r.time));
-  const ms = blockDays * 86_400_000;
-  const byBlock = new Map<number, number[]>();
-  for (const r of points) {
-    const k = Math.floor((r.time - t0) / ms);
-    const bucket = byBlock.get(k);
-    if (bucket) bucket.push(r.value);
-    else byBlock.set(k, [r.value]);
-  }
-  const blocks = [...byBlock.values()];
-
-  const draws: number[] = [];
-  for (let i = 0; i < b; i += 1) {
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j < blocks.length; j += 1) {
-      const pick = blocks[Math.floor(rng() * blocks.length)];
-      for (const v of pick) {
-        sum += v;
-        count += 1;
-      }
-    }
-    if (count > 0) draws.push(sum / count);
-  }
-  return {
-    lo: quantile(draws, 0.025),
-    hi: quantile(draws, 0.975),
-    blocks: blocks.length,
-    pPositive: draws.filter((x) => x > 0).length / draws.length,
-  };
-}
-
-/**
- * The same block bootstrap, on the DIFFERENCE between two arms.
- *
- * Not two calls to `blockBootstrap` with the intervals subtracted. That treats
- * the arms as independent when both are drawn from the same weeks of the same
- * market, so it over-states the width — and the width is the whole answer here.
- * A draw picks a block and takes BOTH arms' trades from it, so a week that was
- * kind to the strategy was kind to the control in the same draw.
- *
- * Blocks are keyed off a shared `t0` across both arms, or the two series would
- * be cut on different boundaries and "the same block" would mean two things.
- *
- * A draw where either arm ended up with no trades is skipped rather than
- * counted as a zero difference — no trades is not a result of zero.
- */
-export function blockBootstrapDiff(
-  a: Array<{ time: number; value: number }>,
-  b: Array<{ time: number; value: number }>,
-  blockDays: number,
-  draws: number,
-  seed: number,
-): { lo: number; hi: number; blocks: number; pPositive: number; point: number } {
-  const empty = { lo: NaN, hi: NaN, blocks: 0, pPositive: NaN, point: NaN };
-  if (a.length === 0 || b.length === 0) return empty;
-
-  const rng = makeRng(seed);
-  const t0 = Math.min(...a.map((r) => r.time), ...b.map((r) => r.time));
-  const ms = blockDays * 86_400_000;
-  const keyOf = (t: number): number => Math.floor((t - t0) / ms);
-
-  // Every block either series touches, so a block present in only one arm still
-  // gets drawn — and contributes to that arm alone, which is the truth about it.
-  const byBlock = new Map<number, { a: number[]; b: number[] }>();
-  const put = (arm: 'a' | 'b', rows: typeof a): void => {
-    for (const r of rows) {
-      const k = keyOf(r.time);
-      let cell = byBlock.get(k);
-      if (!cell) byBlock.set(k, (cell = { a: [], b: [] }));
-      cell[arm].push(r.value);
-    }
-  };
-  put('a', a);
-  put('b', b);
-  const blocks = [...byBlock.values()];
-
-  const out: number[] = [];
-  for (let i = 0; i < draws; i += 1) {
-    let sumA = 0, nA = 0, sumB = 0, nB = 0;
-    for (let j = 0; j < blocks.length; j += 1) {
-      const pick = blocks[Math.floor(rng() * blocks.length)];
-      for (const v of pick.a) { sumA += v; nA += 1; }
-      for (const v of pick.b) { sumB += v; nB += 1; }
-    }
-    if (nA > 0 && nB > 0) out.push(sumA / nA - sumB / nB);
-  }
-  if (out.length === 0) return empty;
-
-  return {
-    lo: quantile(out, 0.025),
-    hi: quantile(out, 0.975),
-    blocks: blocks.length,
-    pPositive: out.filter((x) => x > 0).length / out.length,
-    point: mean(a.map((r) => r.value)) - mean(b.map((r) => r.value)),
-  };
-}
+export {
+  mean,
+  quantile,
+  blockBootstrap,
+  blockBootstrapDiff,
+} from '../../src/common/stats/block-bootstrap';
 
 export interface Profile {
   n: number;
