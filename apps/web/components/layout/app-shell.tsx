@@ -89,29 +89,24 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Desktop layout with sidebar */}
-      <div className="hidden md:grid md:grid-cols-[260px_1fr]">
-        <Sidebar />
+      {/* `children` is rendered ONCE. It used to appear twice — a desktop
+          branch and a mobile branch, one of them hidden by CSS — which mounted
+          every page twice: two sets of hooks, two fetches, and two independent
+          copies of any form state. A hidden chart also measures zero width, so
+          its candles collapse against the right edge. */}
+      <div className="md:grid md:grid-cols-[260px_1fr]">
+        <Sidebar className="max-md:hidden" />
         <main className="min-w-0">
-          <Topbar />
+          <Topbar onMenuClick={handleMenuOpen} />
           {/* The shell owns page padding — pages add none. Five of them used
               to add `p-5 md:p-8 lg:p-10` on top of this, which is how history
               ended up with 80px of gutter on a desktop. */}
-          <div className="max-w-content-max mx-auto px-5 md:px-8 py-8 md:py-10 pb-24">
+          <div className="mx-auto max-w-content-max px-5 py-8 pb-16 md:px-8 md:py-10 md:pb-24">
             {children}
           </div>
         </main>
       </div>
 
-      {/* Mobile layout without sidebar */}
-      <div className="md:hidden">
-        <Topbar onMenuClick={handleMenuOpen} />
-        <main className="px-5 py-8 pb-16">
-          {children}
-        </main>
-      </div>
-
-      {/* Mobile sidebar drawer */}
       <MobileSidebar isOpen={mobileMenuOpen} onClose={handleMenuClose} />
     </div>
   );

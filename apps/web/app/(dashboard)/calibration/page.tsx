@@ -29,7 +29,7 @@ export default function CalibrationPage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl px-8 py-10">
+      <div className="mx-auto max-w-3xl">
         <div className="rounded border border-amber/40 bg-surface p-6">
           <p className="text-[14px] text-text-primary">This page could not load its data.</p>
           <p className="mt-1.5 font-mono text-[12px] text-text-tertiary">{error}</p>
@@ -39,13 +39,13 @@ export default function CalibrationPage() {
   }
 
   if (!report) {
-    return <p className="px-8 py-10 text-[14px] text-text-tertiary">Loading…</p>;
+    return <p className="text-[14px] text-text-tertiary">Loading…</p>;
   }
 
   const published = report.entries.filter((e) => e.status === 'PUBLISHED');
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-3xl">
       <header className="border-b border-border/40 pb-6">
         <h1 className="font-antonio text-display-sm font-semibold uppercase tracking-headline text-text-primary">
           How accurate is this?

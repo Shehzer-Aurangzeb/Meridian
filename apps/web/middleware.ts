@@ -23,12 +23,15 @@ const FEATURES = {
   MAP: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_MAP, true),
   CALIBRATION: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_CALIBRATION, true),
   SETTINGS: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_SETTINGS, false),
+  JOURNAL: parseFeatureFlag(process.env.NEXT_PUBLIC_FEATURE_JOURNAL, true),
 };
 
 const ROUTE_FEATURE_MAP: Record<string, keyof typeof FEATURES> = {
   '/map': 'MAP',
   '/calibration': 'CALIBRATION',
   '/settings': 'SETTINGS',
+  '/log': 'JOURNAL',
+  '/history': 'JOURNAL',
 };
 
 const SIGN_IN = '/sign-in';

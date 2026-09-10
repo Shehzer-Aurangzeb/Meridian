@@ -52,13 +52,12 @@ coverage/
 # `!docs/*_AB.md` stopped matching the moment those files moved into
 # docs/evidence/, and five tracked files silently became deletions.
 docs/*
-!docs/ROADMAP.md
 !docs/README.md
-!docs/STATE_OF_MERIDIAN_*.md
-!docs/BRIEFING_FOR_REVIEW.md
-!docs/BRIEFING_PROMPT.md
+!docs/STATE.md
 !docs/END_STATE_A_DESIGN.md
 !docs/PRODUCT_LAYERS.md
+!docs/SIM_PROMPT.md
+!docs/FRONTEND_AUDIT.md
 
 # The evidence: pre-registrations, and the index that says how each one landed.
 !docs/evidence/
@@ -86,6 +85,12 @@ docs/evidence/*
 !docs/archive/
 docs/archive/*
 !docs/archive/RESEARCH_PLAN_*.md
+# Archived on 9 Sept 2026. These were tracked at the root and stay tracked:
+# archiving a document must not also unpublish it.
+!docs/archive/ROADMAP.md
+!docs/archive/STATE_OF_MERIDIAN_*.md
+!docs/archive/BRIEFING_FOR_REVIEW.md
+!docs/archive/SIM_JOURNAL_PLAN.md
 
 # Python bytecode from the research venv.
 __pycache__/

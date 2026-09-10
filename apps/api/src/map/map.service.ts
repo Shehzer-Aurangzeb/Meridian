@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
 import { MarketRegimeService } from '../market-regime/market-regime.service';
@@ -26,6 +28,22 @@ const CONE_COVERAGE: Record<number, { p50: number; p80: number; p90: number }> =
 };
 const CONE_FITTED_AT = '2026-09-06';
 
+const HOUR_MS = 3_600_000;
+
+/** Open time of the hourly bar a moment falls in. The reading's identity. */
+export const barTimeFor = (at: number): Date =>
+  new Date(Math.floor(at / HOUR_MS) * HOUR_MS);
+
+/**
+ * The universe, in one canonical form.
+ *
+ * Sorted and de-duplicated so the same set asked for in a different order is
+ * the same key rather than a second reading. Part of the key because the cone
+ * is standardised across whichever coins were priced together.
+ */
+export const universeKeyFor = (universe: string[] | undefined, coin: string): string =>
+  Array.from(new Set((universe ?? [coin]).map((s) => s.toUpperCase()))).sort().join(',');
+
 /**
  * Assembles the market map: one call, one payload.
  *
@@ -45,6 +63,7 @@ export class MapService {
   private readonly logger = new Logger(MapService.name);
 
   constructor(
+    private readonly prisma: PrismaService,
     private readonly binance: BinanceService,
     private readonly indicators: IndicatorsService,
     private readonly regime: MarketRegimeService,
@@ -52,6 +71,57 @@ export class MapService {
     private readonly expectedMove: ExpectedMoveService,
     private readonly liquidity: LiquidityService,
   ) {}
+
+  /**
+   * The reading for this hour, computed once.
+   *
+   * `build` used to run on every page load, so a refresh could return a
+   * different reading from the one a journal entry was recorded against, with
+   * no way to tell a moved market from a reloaded page. A reading is a function
+   * of closed bars, so it is computed once per hourly bar and stored.
+   *
+   * A failed write is logged and swallowed: a caching table must never be the
+   * reason a page cannot render.
+   */
+  async read(symbol: string, universe?: string[], now = Date.now()): Promise<MarketMap> {
+    const coin = symbol.toUpperCase();
+    const universeKey = universeKeyFor(universe, coin);
+    const barTime = barTimeFor(now);
+    const key = { symbol_universeKey_barTime: { symbol: coin, universeKey, barTime } };
+
+    const cached = await this.prisma.marketReading
+      .findUnique({ where: key })
+      .catch((err: unknown) => {
+        this.logger.warn(`${coin}: reading lookup failed — ${(err as Error).message}`);
+        return null;
+      });
+    if (cached) return cached.payload as unknown as MarketMap;
+
+    const fresh = await this.build(coin, universe);
+
+    try {
+      await this.prisma.marketReading.create({
+        data: {
+          symbol: coin,
+          universeKey,
+          barTime,
+          payload: fresh as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (err) {
+      // Two requests in the same hour race here. The unique constraint means
+      // one loses, and the loser wants the winner's reading rather than its
+      // own — otherwise the two callers disagree about the same hour.
+      if ((err as { code?: string }).code === 'P2002') {
+        const won = await this.prisma.marketReading.findUnique({ where: key });
+        if (won) return won.payload as unknown as MarketMap;
+      } else {
+        this.logger.warn(`${coin}: reading not stored — ${(err as Error).message}`);
+      }
+    }
+
+    return fresh;
+  }
 
   async build(symbol: string, universe?: string[]): Promise<MarketMap> {
     const coin = symbol.toUpperCase();

@@ -2,11 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { BinanceService } from '../market-data/market-data.service';
 import { IndicatorsService } from '../indicators/indicators.service';
 import { ConditionQuery, ConditionResult } from './map.types';
+import { MIN_BLOCKS } from '../common/stats/block-bootstrap';
 
 /** Matches below this cannot support a reading, whatever their spread. */
 export const MIN_MATCHES = 100;
-/** Distinct 30-day blocks the matches must span. */
-export const MIN_BLOCKS = 4;
+/**
+ * Distinct 30-day blocks the matches must span.
+ *
+ * Re-exported rather than re-declared: the same threshold guards the journal's
+ * readout, and two copies are two places for it to drift.
+ */
+export { MIN_BLOCKS } from '../common/stats/block-bootstrap';
 const BLOCK_MS = 30 * 86_400_000;
 
 export interface Analogue {
