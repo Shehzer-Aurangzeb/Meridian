@@ -165,33 +165,35 @@ export function useBatch() {
         );
 
         const byCoin = new Map(got.rows.map((r) => [r.symbol, r]));
-        const filled: string[] = [];
-        const incomplete: string[] = [];
 
-        setDrafts((prev) =>
-          prev.map((d) => {
-            const row = byCoin.get(d.symbol);
-            if (!row) return d;
-            const next = applyRow(d, row);
-            filled.push(d.symbol);
-            // Says which rows still need a person, so nothing is saved blind.
-            if (
-              next.entry.trim() === '' ||
-              next.stop.trim() === '' ||
-              next.targets.every((t) => t.price.trim() === '')
-            ) {
-              incomplete.push(d.symbol);
-            }
-            return next;
-          }),
-        );
+        // Built here rather than inside the setDrafts updater. An updater must
+        // be pure: React StrictMode runs it twice in development, which counted
+        // every filled coin twice when this pushed to arrays as a side effect.
+        const next = drafts.map((d) => {
+          const row = byCoin.get(d.symbol);
+          return row ? applyRow(d, row) : d;
+        });
+        setDrafts(next);
 
-        return { filled, missing: got.missing, incomplete };
+        const touched = next.filter((d) => byCoin.has(d.symbol));
+        return {
+          filled: touched.map((d) => d.symbol),
+          missing: got.missing,
+          // Says which rows still need a person, so nothing is saved blind.
+          incomplete: touched
+            .filter(
+              (d) =>
+                d.entry.trim() === '' ||
+                d.stop.trim() === '' ||
+                d.targets.every((t) => t.price.trim() === ''),
+            )
+            .map((d) => d.symbol),
+        };
       } finally {
         setParsing(false);
       }
     },
-    [applyRow],
+    [applyRow, drafts],
   );
 
   const update = useCallback((symbol: string, patch: Partial<Draft>) => {

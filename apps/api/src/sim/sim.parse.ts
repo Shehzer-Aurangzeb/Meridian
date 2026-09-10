@@ -11,7 +11,14 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
  * afterwards.
  */
 
-const MODEL = 'gemini-2.5-flash';
+/**
+ * Overridable because Google retires models out from under a running key:
+ * gemini-2.5-flash started answering 404 with "no longer available to new
+ * users", which looks like a broken endpoint rather than a dead model.
+ */
+// `??` is wrong here: an unset key in a .env file arrives as an empty string,
+// not undefined, which built a URL with no model in it.
+const MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash';
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const TIMEOUT_MS = 60_000;
 /** Long enough for ten coins of prose, short enough to reject a pasted book. */
