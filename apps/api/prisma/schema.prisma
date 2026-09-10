@@ -179,3 +179,34 @@ model SimTrade {
   @@index([symbol, decidedAt])
   @@index([scoredAt])
 }
+
+/// One computed reading of the map, kept so the same hour returns the same
+/// answer.
+///
+/// The map used to be rebuilt on every page load, which meant a refresh could
+/// hand back a different reading from the one a journal entry was recorded
+/// against — and nothing could tell whether the market had moved or the page
+/// had merely been reloaded. A reading is now computed once per closed hourly
+/// bar and served from here until the next one closes.
+model MarketReading {
+  id     String @id @default(cuid())
+  symbol String
+
+  /// The coins priced together, sorted and joined. Part of the key because the
+  /// expected-move cone is standardised across whichever coins were present:
+  /// the same coin priced alone is a different number, not a cached one.
+  universeKey String
+
+  /// Open time of the hourly bar this was built on. The reading is a function
+  /// of closed bars, so this is what makes two requests in the same hour the
+  /// same reading rather than two coincidentally similar ones.
+  barTime DateTime
+
+  /// The MarketMap exactly as served.
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([symbol, universeKey, barTime])
+  @@index([symbol, barTime])
+}

@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   for (const coin of coins) {
     try {
       // The whole universe, so the cone carries its cross-sectional tilt.
-      const map = await mapService.build(coin, coins);
+      const map = await mapService.read(coin, coins);
       blocks.push(
         [
           `${'='.repeat(72)}`,

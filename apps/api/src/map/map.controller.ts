@@ -36,17 +36,17 @@ export class MapController {
     @Param('symbol') symbol: string,
     @Query('universe') universe?: string,
   ): Promise<MarketMap> {
-    return this.map.build(symbol, universe ? universe.split(',') : undefined);
+    return this.map.read(symbol, universe ? universe.split(',') : undefined);
   }
 
   @Get(':symbol/zones')
   async zones(@Param('symbol') symbol: string): Promise<MarketMap['zones']> {
-    return (await this.map.build(symbol)).zones;
+    return (await this.map.read(symbol)).zones;
   }
 
   @Get(':symbol/regime')
   async regime(@Param('symbol') symbol: string): Promise<MarketMap['regime']> {
-    return (await this.map.build(symbol)).regime;
+    return (await this.map.read(symbol)).regime;
   }
 
   @Get(':symbol/liquidity')
