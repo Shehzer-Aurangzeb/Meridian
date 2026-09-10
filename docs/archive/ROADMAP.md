@@ -1,5 +1,18 @@
 # Meridian — roadmap and parked work
 
+> **SUPERSEDED — archived 9 September 2026.**
+>
+> Sections 1 and 2 were already declared superseded inside the document itself.
+> Section 3 ("deliberately parked") catalogues defects in the trade planner —
+> `aggregate()`, the entry ladder, the cooldown, the cost model — and that code
+> no longer exists, so those items are moot rather than parked.
+>
+> What survives is the methodology: §5 (discipline that carries forward), §7
+> (the 0.318R resolution constraint) and §8 (the flow archive and its coverage
+> holes). Those are the sections worth reading.
+>
+> For what runs today, read [`../STATE.md`](../STATE.md).
+
 Written 25 Aug 2026.
 
 `docs/` is ignored by git except for named exceptions, because the repo is

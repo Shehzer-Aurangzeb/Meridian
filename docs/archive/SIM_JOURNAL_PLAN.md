@@ -1,5 +1,12 @@
 # Meridian — the simulated trade journal
 
+> **DELIVERED — archived 9 September 2026.**
+>
+> All seven phases passed and shipped in commit `456aa62`. Kept because each
+> phase records the bar it had to clear *before* the work started, and the
+> measured evidence after — which is the only thing that makes "it passed"
+> mean anything.
+
 Written 8 September 2026, the day after the frontend rewrite. Companion to
 [`PRODUCT_LAYERS.md`](PRODUCT_LAYERS.md), which describes the market mapper this
 sits on top of.

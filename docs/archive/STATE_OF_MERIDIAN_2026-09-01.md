@@ -1,5 +1,15 @@
 # The state of Meridian — 1 September 2026
 
+> **SUPERSEDED — archived 9 September 2026.**
+>
+> This describes the directional trade-planner system, which was retired in
+> commit `a2056ff` and replaced by the market-state mapper. The architecture,
+> the test ledger and the failure analysis in here are still accurate *as a
+> record of what was true on 1 September 2026*, and it remains the fullest
+> account of the nineteen directional tests.
+>
+> For what runs today, read [`../STATE.md`](../STATE.md).
+
 Everything that runs, everything that has been tested, and exactly where it
 fails. Written after Phases A–D and the maker-fill test closed out the last
 open research question.

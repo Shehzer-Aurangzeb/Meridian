@@ -20,8 +20,16 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'meridian-theme';
+export const STORAGE_KEY = 'meridian-theme';
 const VALID_THEMES: Theme[] = ['light', 'dark', 'system'];
+
+/**
+ * Runs before first paint, from a blocking script in the document head, so the
+ * page never renders in the wrong theme. This used to be handled by blanking
+ * the entire app until React had mounted, which cost a server render of every
+ * page to avoid a flash on one class.
+ */
+export const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('${STORAGE_KEY}');var d=t==='dark'||((!t||t==='system')&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.add(d?'dark':'light')}catch(e){document.documentElement.classList.add('light')}})()`;
 
 function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
@@ -34,32 +42,30 @@ function applyThemeToDOM(theme: 'light' | 'dark') {
   root.classList.add(theme);
 }
 
+function storedTheme(): Theme {
+  if (typeof window === 'undefined') return 'system';
+  const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
+  return stored && VALID_THEMES.includes(stored) ? stored : 'system';
+}
+
+/** Whatever THEME_SCRIPT already put on the element, so the first render agrees with it. */
+function paintedTheme(): 'light' | 'dark' {
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('system');
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
-  const [mounted, setMounted] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(storedTheme);
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(paintedTheme);
 
-  // Initialize theme from localStorage
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored && VALID_THEMES.includes(stored)) {
-      setThemeState(stored);
-    }
-    setMounted(true);
-  }, []);
-
-  // Update resolved theme and DOM
-  useEffect(() => {
-    if (!mounted) return;
-
     const resolved = theme === 'system' ? getSystemTheme() : theme;
     setResolvedTheme(resolved);
     applyThemeToDOM(resolved);
-  }, [theme, mounted]);
+  }, [theme]);
 
-  // Listen for system theme changes
   useEffect(() => {
-    if (!mounted || theme !== 'system') return;
+    if (theme !== 'system') return;
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
@@ -70,7 +76,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme, mounted]);
+  }, [theme]);
 
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
@@ -81,11 +87,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     () => ({ theme, resolvedTheme, setTheme }),
     [theme, resolvedTheme, setTheme]
   );
-
-  // Prevent flash of wrong theme
-  if (!mounted) {
-    return null;
-  }
 
   return (
     <ThemeContext.Provider value={contextValue}>

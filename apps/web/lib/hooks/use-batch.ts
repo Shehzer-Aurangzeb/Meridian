@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '@/lib/api/client';
 import { queryKeys } from './query-keys';
@@ -67,7 +67,11 @@ export function useBatch() {
   );
 
   const universe = FITTED_UNIVERSE.join(',');
-  const results = useQueries({
+  // `combine` rather than a memo over `results`: useQueries returns a new array
+  // identity on every render, so the honest dependency would defeat the memo
+  // and the dishonest one needed an eslint-disable. React Query memoises this
+  // against the queries themselves.
+  const { maps, loading, error } = useQueries({
     queries: FITTED_UNIVERSE.map((symbol) => ({
       queryKey: queryKeys.map(symbol, universe),
       queryFn: () => fetchApi<MarketMap>(`/api/map/${symbol}?universe=${universe}`),
@@ -77,17 +81,16 @@ export function useBatch() {
       refetchOnWindowFocus: false,
       retry: 1,
     })),
+    combine: (results) => {
+      const byCoin: Record<string, MarketMap> = {};
+      for (const r of results) if (r.data) byCoin[r.data.symbol] = r.data;
+      return {
+        maps: Object.keys(byCoin).length === 0 ? null : byCoin,
+        loading: results.some((r) => r.isPending),
+        error: (results.find((r) => r.error)?.error as Error | undefined)?.message ?? null,
+      };
+    },
   });
-
-  const loading = results.some((r) => r.isPending);
-  const error = (results.find((r) => r.error)?.error as Error | undefined)?.message ?? null;
-
-  const maps = useMemo(() => {
-    const byCoin: Record<string, MarketMap> = {};
-    for (const r of results) if (r.data) byCoin[r.data.symbol] = r.data;
-    return Object.keys(byCoin).length === 0 ? null : byCoin;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results.map((r) => r.dataUpdatedAt).join(',')]);
 
   const update = useCallback((symbol: string, patch: Partial<Draft>) => {
     setDrafts((prev) => prev.map((d) => (d.symbol === symbol ? { ...d, ...patch } : d)));

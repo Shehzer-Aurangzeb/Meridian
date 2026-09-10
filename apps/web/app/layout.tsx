@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, Antonio } from 'next/font/google';
 import { Providers } from '@/components/providers';
+import { THEME_SCRIPT } from '@/components/theme-provider';
 import './globals.css';
 
 const inter = Inter({
@@ -43,6 +44,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${antonio.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="bg-background text-text-primary font-inter">
         <Providers>{children}</Providers>
       </body>
