@@ -7,6 +7,7 @@ import { promptFor } from '@/lib/sim-prompt';
 import { useBatch, isBlank, type Draft } from '@/lib/hooks/use-batch';
 import { CopyButton } from '@/components/features/log/copy-button';
 import { DraftRow } from '@/components/features/log/draft-row';
+import { ReplyBox } from '@/components/features/log/reply-box';
 import type { MarketMap } from '@/types/map';
 
 /**
@@ -18,7 +19,8 @@ import type { MarketMap } from '@/types/map';
  * ten separate moments of a moving market.
  */
 export default function LogPage() {
-  const { maps, drafts, update, reset, reload, loading, error } = useBatch();
+  const { maps, drafts, update, reset, reload, fillFromReply, parsing, loading, error } =
+    useBatch();
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [saved, setSaved] = useState<{ batchId: string; count: number } | null>(null);
@@ -93,6 +95,8 @@ export default function LogPage() {
           <p className="mt-1.5 font-mono text-[12px] text-text-tertiary">{error}</p>
         </div>
       ) : null}
+
+      <ReplyBox onFill={fillFromReply} parsing={parsing} disabled={maps === null} />
 
       <div className="mt-6 space-y-4">
         {drafts.map((draft) => (

@@ -138,6 +138,14 @@ export function DraftRow({ draft, map, onChange }: DraftRowProps) {
         ))}
       </div>
 
+      {draft.planDespiteSkip ? (
+        <p className="mt-3 text-[12px] leading-relaxed text-text-tertiary">
+          The analyst marked this one a pass and still wrote out the plan. Both are kept:
+          the plan below is what it would have placed, and the verdict stays as it was
+          given, because the record compares the calls taken against the calls passed on.
+        </p>
+      ) : null}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-4">
         <Field
           label="Entry"

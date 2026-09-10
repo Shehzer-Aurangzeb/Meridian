@@ -1,12 +1,16 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SimService } from './sim.service';
+import { SimParseService, type ParseResult } from './sim.parse';
 import { validateBatch } from './sim.dto';
 
 @ApiTags('sim')
 @Controller('sim')
 export class SimController {
-  constructor(private readonly sim: SimService) {}
+  constructor(
+    private readonly sim: SimService,
+    private readonly parser: SimParseService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -17,6 +21,22 @@ export class SimController {
   })
   async create(@Body() body: unknown): Promise<{ batchId: string; trades: number }> {
     return this.sim.createBatch(validateBatch(body));
+  }
+
+  @Post('parse')
+  @ApiOperation({
+    summary: "Read an analyst's written reply back into draft rows",
+    description:
+      'Extraction only. A field the reply does not state comes back null for a person ' +
+      'to fill; nothing is inferred, computed or normalised. A SKIP that carries a plan ' +
+      'keeps both the plan and the SKIP.',
+  })
+  async parse(@Body() body: unknown): Promise<ParseResult> {
+    const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+    const symbols = Array.isArray(b.symbols)
+      ? b.symbols.filter((s): s is string => typeof s === 'string')
+      : [];
+    return this.parser.parse(typeof b.text === 'string' ? b.text : '', symbols);
   }
 
   @Get()

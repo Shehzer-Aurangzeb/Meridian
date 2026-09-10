@@ -33,6 +33,30 @@ export interface Draft {
   targets: DraftTarget[];
   rationale: string;
   usedOutsideData: boolean;
+  /** The reply marked this SKIP and gave a plan anyway. Shown, never acted on. */
+  planDespiteSkip?: boolean;
+}
+
+interface ParsedTarget {
+  price: number | null;
+  weightPercent: number | null;
+}
+
+interface ParsedRow {
+  symbol: string;
+  verdict: 'TAKE' | 'SKIP' | null;
+  direction: 'long' | 'short' | null;
+  entry: number | null;
+  stop: number | null;
+  targets: ParsedTarget[];
+  rationale: string | null;
+  planDespiteSkip: boolean;
+}
+
+export interface ParseOutcome {
+  filled: string[];
+  missing: string[];
+  incomplete: string[];
 }
 
 export const emptyDraft = (symbol: string): Draft => ({
@@ -92,6 +116,84 @@ export function useBatch() {
     },
   });
 
+  /**
+   * Apply one extracted row over a draft.
+   *
+   * A null means the reply did not state that field, so the existing value is
+   * kept rather than blanked — the extractor is not allowed to guess, and
+   * neither is this. Numbers become strings because the inputs are text: a
+   * price the analyst wrote as 0.4150 must not redisplay as 0.415.
+   */
+  const applyRow = useCallback((draft: Draft, row: ParsedRow): Draft => {
+    const targets = row.targets
+      .filter((t) => t.price !== null)
+      .map((t) => ({
+        price: String(t.price),
+        weightPercent: t.weightPercent === null ? '' : String(t.weightPercent),
+      }));
+
+    // One target closes the whole position, which the form states by hiding
+    // the weight. Say 100 so a saved single-target row is not rejected.
+    if (targets.length === 1 && targets[0].weightPercent === '') {
+      targets[0].weightPercent = '100';
+    }
+
+    return {
+      ...draft,
+      verdict: row.verdict ?? draft.verdict,
+      direction: row.direction ?? draft.direction,
+      entry: row.entry === null ? draft.entry : String(row.entry),
+      stop: row.stop === null ? draft.stop : String(row.stop),
+      targets: targets.length > 0 ? targets : draft.targets,
+      rationale: row.rationale ?? draft.rationale,
+      planDespiteSkip: row.planDespiteSkip,
+    };
+  }, []);
+
+  const [parsing, setParsing] = useState(false);
+
+  const fillFromReply = useCallback(
+    async (text: string): Promise<ParseOutcome> => {
+      setParsing(true);
+      try {
+        const got = await fetchApi<{ rows: ParsedRow[]; missing: string[] }>(
+          '/api/sim/parse',
+          {
+            method: 'POST',
+            body: JSON.stringify({ text, symbols: [...FITTED_UNIVERSE] }),
+          },
+        );
+
+        const byCoin = new Map(got.rows.map((r) => [r.symbol, r]));
+        const filled: string[] = [];
+        const incomplete: string[] = [];
+
+        setDrafts((prev) =>
+          prev.map((d) => {
+            const row = byCoin.get(d.symbol);
+            if (!row) return d;
+            const next = applyRow(d, row);
+            filled.push(d.symbol);
+            // Says which rows still need a person, so nothing is saved blind.
+            if (
+              next.entry.trim() === '' ||
+              next.stop.trim() === '' ||
+              next.targets.every((t) => t.price.trim() === '')
+            ) {
+              incomplete.push(d.symbol);
+            }
+            return next;
+          }),
+        );
+
+        return { filled, missing: got.missing, incomplete };
+      } finally {
+        setParsing(false);
+      }
+    },
+    [applyRow],
+  );
+
   const update = useCallback((symbol: string, patch: Partial<Draft>) => {
     setDrafts((prev) => prev.map((d) => (d.symbol === symbol ? { ...d, ...patch } : d)));
   }, []);
@@ -105,5 +207,5 @@ export function useBatch() {
     void client.invalidateQueries({ queryKey: ['map'] });
   }, [client]);
 
-  return { maps, drafts, update, reset, reload, loading, error };
+  return { maps, drafts, update, reset, reload, fillFromReply, parsing, loading, error };
 }

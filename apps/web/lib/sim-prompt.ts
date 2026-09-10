@@ -5,6 +5,10 @@ import type { MarketMap } from '@/types/map';
  *
  * A prompt that drifts between batches makes every batch its own experiment,
  * so this string is duplicated nowhere and edited only deliberately.
+ *
+ * The PLAN block at the end is the machine-readable half. Everything the
+ * journal stores appears in it, in a fixed order, so a reply can be read back
+ * without anyone deciding what the analyst "meant" — see sim.parse.ts.
  */
 export const SIM_PROMPT = [
   'Act as an expert trading analyst. Below is an analysis my system produced.',
@@ -14,6 +18,30 @@ export const SIM_PROMPT = [
   'mark it SKIP.',
   '',
   "I'm testing my system, so this trade goes into simulation.",
+  '',
+  'Reason in prose first, however you like. Then close each coin with this',
+  'block, on its own lines, using these exact labels:',
+  '',
+  'PLAN',
+  'symbol: BTC',
+  'verdict: TAKE',
+  'direction: long',
+  'entry: 84120',
+  'stop: 82400',
+  'targets: 87000 @ 50%, 90500 @ 50%',
+  'why: one line, your reason',
+  'END',
+  '',
+  'Rules for that block, because it is read by a machine:',
+  '- One block per coin, even for a SKIP.',
+  '- Plain numbers. No currency signs, no thousands separators, no ranges.',
+  '- A single price per target. If you want a zone, pick the number you would',
+  '  actually work the order at.',
+  '- Target percentages are how much of the position closes there, and they',
+  '  must add up to 100.',
+  '- The stop goes below the entry for a long and above it for a short.',
+  '- Entry, stop and at least one target are required. Do not leave them out,',
+  '  and do not write "market" — give the price you would use.',
 ].join('\n');
 
 /**
