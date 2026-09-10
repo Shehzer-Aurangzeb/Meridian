@@ -147,3 +147,36 @@ delta would go null — the scoreboard would not be wrong so much as gone.
 The row carries `planDespiteSkip`, and `/log` says so in plain words under that
 coin. Changing the verdict is one click, and it is a person's call, not the
 parser's.
+
+## When a trade is closed early
+
+A plan is written against a market in a particular state. Two things end it
+before the 96-hour window does, and both produce the outcome `SUPERSEDED`,
+scored at a real price on a real bar.
+
+**The state changes.** The regime the snapshot recorded — quiet, moving one
+way, drifting sideways — is the thesis. When the first bar after the decision
+carries a different label, the reasoning has expired and the trade is closed
+there. Read from the labelled bars, so it is a function of candles alone: ask
+the same question in a year and get the same moment, whether or not anyone
+loaded a page at the time. The check finds the FIRST disagreement, so a state
+that leaves and returns still counts — an age-of-current-run check would miss
+that entirely.
+
+**A newer call replaces it.** Logging a batch closes any still-open row for the
+same coin at the moment the new one was decided. Your decision supersedes your
+decision; holding two live plans for one coin measures neither.
+
+Three rules keep this from becoming a way to edit results:
+
+- A trade that already hit its stop or its last target keeps that outcome. A
+  thesis expiring afterwards does not reach back and change what happened.
+- A replaced trade that never filled is `MISSED`, not left pending. Nothing
+  will fill it now, and a row that can never settle is indistinguishable from
+  one still waiting.
+- It applies to `TAKE` and `SKIP` identically. Closing only the taken arm would
+  shorten one side's holding period and leave the other running, and the
+  comparison between the two arms is the entire point of the record.
+
+`SUPERSEDED` is terminal and carries real R, so it enters the scoreboard like
+any other settled row.

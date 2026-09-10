@@ -8,6 +8,7 @@ export type SimOutcome =
   | 'PARTIAL'
   | 'ALL_TARGETS'
   | 'EXPIRED'
+  | 'SUPERSEDED'
   | 'UNSCOREABLE';
 
 export interface SimTarget {

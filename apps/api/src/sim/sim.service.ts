@@ -3,6 +3,9 @@ import { randomUUID } from 'crypto';
 import { Prisma, SimTrade } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
+import { Candle } from '../common/types/candle.types';
+import { IndicatorsService } from '../indicators/indicators.service';
+import { MarketRegimeService } from '../market-regime/market-regime.service';
 import {
   SCORING_WINDOW_HOURS,
   MIN_AGE_HOURS,
@@ -11,9 +14,13 @@ import {
   scoreSimTrade,
 } from './sim.scoring';
 import { SimStats, simStats } from './sim.stats';
+import { firstRegimeChangeAfter, regimeOfSnapshot } from './sim.supersede';
 import { SimTradeInput } from './sim.dto';
 
 const HOUR_MS = 3_600_000;
+
+/** Enough history for the regime classifier to warm up before the decision. */
+const REGIME_CANDLES = 600;
 
 /**
  * Records analyst calls and resolves them against real bars.
@@ -31,6 +38,8 @@ export class SimService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly binance: BinanceService,
+    private readonly indicators: IndicatorsService,
+    private readonly regime: MarketRegimeService,
   ) {}
 
   async createBatch(trades: SimTradeInput[]): Promise<{ batchId: string; trades: number }> {
@@ -51,7 +60,38 @@ export class SimService {
         decidedAt: t.decidedAt ? new Date(t.decidedAt) : new Date(),
       })),
     });
+    await this.supersedeEarlier(
+      trades.map((t) => t.symbol),
+      trades[0]?.decidedAt ? new Date(trades[0].decidedAt) : new Date(),
+    );
     return { batchId, trades: trades.length };
+  }
+
+  /**
+   * A newer call on a coin replaces the older one still running on it.
+   *
+   * Your decision supersedes your decision: holding two live plans for the same
+   * coin measures neither. The old row is closed at the moment the new one was
+   * decided, so the two never overlap.
+   *
+   * Applied to TAKE and SKIP alike. Closing only the taken arm would shorten
+   * the holding period of one side and leave the other running, and the
+   * comparison between them is the whole point.
+   */
+  private async supersedeEarlier(symbols: string[], at: Date): Promise<void> {
+    const open = await this.prisma.simTrade.findMany({
+      where: {
+        symbol: { in: Array.from(new Set(symbols)) },
+        scoredAt: null,
+        decidedAt: { lt: at },
+      },
+    });
+    for (const row of open) {
+      await this.scoreOne(row, at.getTime(), at).catch((err: unknown) => {
+        this.logger.warn(`${row.id}: could not supersede — ${(err as Error).message}`);
+        return false;
+      });
+    }
   }
 
   /** The journal. Scores anything due first, so this read IS the scorer. */
@@ -118,7 +158,42 @@ export class SimService {
     return written;
   }
 
-  private async scoreOne(row: SimTrade, now: number): Promise<boolean> {
+  /**
+   * When the market left the state this plan was written against.
+   *
+   * Computed from candles, never from a stored reading: the answer has to be
+   * the same whenever it is asked, and readings only exist for the hours
+   * somebody happened to load a page.
+   */
+  private async regimeChangeAfter(row: SimTrade, candles: Candle[]): Promise<Date | null> {
+    const decisionRegime = regimeOfSnapshot(row.mapSnapshot);
+    if (decisionRegime === null) return null;
+
+    // Needs the bars BEFORE the decision too: the classifier warms up its
+    // indicators, and a series starting at the decision would label the first
+    // stretch from nothing.
+    let history: Candle[];
+    try {
+      history = await this.binance.getCandles(row.symbol, '1h', REGIME_CANDLES);
+    } catch (err) {
+      this.logger.warn(`${row.symbol}: regime history unavailable — ${(err as Error).message}`);
+      return null;
+    }
+
+    const merged = [...history];
+    const known = new Set(history.map((c) => c.time.getTime()));
+    for (const c of candles) if (!known.has(c.time.getTime())) merged.push(c);
+    merged.sort((a, b) => a.time.getTime() - b.time.getTime());
+
+    const context = this.indicators.buildContext(row.symbol, '1h', merged);
+    return firstRegimeChangeAfter(
+      this.regime.labelSeries(context),
+      row.decidedAt,
+      decisionRegime,
+    );
+  }
+
+  private async scoreOne(row: SimTrade, now: number, closeAt?: Date): Promise<boolean> {
     const plan = toPlanInput(row);
     if (plan === null) {
       this.logger.warn(`${row.id}: unusable plan, left unscored`);
@@ -138,7 +213,14 @@ export class SimService {
       return false;
     }
 
-    const result = scoreSimTrade(plan, candles, row.decidedAt, now);
+    // A newer batch closes the row where it was decided; otherwise the market
+    // itself closes it, at the bar the state changed. Whichever came first
+    // wins, because both mean the same thing: the reasoning stopped applying.
+    const flipped = closeAt ? null : await this.regimeChangeAfter(row, candles);
+    const cut =
+      closeAt ?? (flipped && flipped.getTime() <= now ? flipped : undefined);
+
+    const result = scoreSimTrade(plan, candles, row.decidedAt, now, undefined, cut);
     if (result.outcome === 'UNSCOREABLE') {
       this.logger.warn(`${row.id}: history does not reach the decision, will retry`);
       return false;

@@ -35,6 +35,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
   STOPPED: 'Stopped out',
   MISSED: 'Price never reached the entry',
   EXPIRED: 'Held the full time without resolving',
+  SUPERSEDED: 'Closed early — the reading it was based on no longer held',
   OPEN: 'Still open',
   PENDING: 'Waiting to start',
   UNSCOREABLE: 'Could not be scored',
@@ -50,6 +51,9 @@ export function bucketOf(row: SimTrade): Bucket {
     case 'STOPPED':
     case 'PARTIAL':
     case 'ALL_TARGETS':
+    // A real close at a real price, so a real result — not a "still running"
+    // row wearing a number.
+    case 'SUPERSEDED':
       return row.netR > 0 ? 'won' : 'lost';
     default:
       return 'waiting';
@@ -109,8 +113,16 @@ export function groupByBatch(rows: SimTrade[]): Batch[] {
  * has got. Never a running profit, because closing a live trade at the last
  * bar to reach a number produces a figure that is not a result.
  */
+/**
+ * Is this row finished? Not the same question as "does it have a number":
+ * MISSED and PENDING both carry no R, but one is over and one has not begun.
+ */
+export function isSettled(row: SimTrade): boolean {
+  return row.outcome !== null && row.outcome !== 'PENDING' && row.outcome !== 'OPEN';
+}
+
 export function progressOf(row: SimTrade): string {
-  if (row.outcome !== null && row.netR !== null) return '';
+  if (isSettled(row)) return '';
   // A null outcome means nobody has looked yet, which is not the same claim as
   // "the entry was not reached". Rows under an hour old have no forward bar to
   // judge against and are deliberately skipped.

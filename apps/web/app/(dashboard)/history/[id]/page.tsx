@@ -12,6 +12,7 @@ import {
   bucketOf,
   hoursRemaining,
   progressOf,
+  isSettled,
   BUCKET_TONE,
 } from '@/lib/sim-buckets';
 import { MapView } from '@/components/features/map/map-view';
@@ -122,13 +123,13 @@ export default function TradeDetailPage() {
         </div>
 
         <p className={cn('mt-2 text-[14px]', BUCKET_TONE[bucket])}>
-          {row.netR === null
-            ? `${progressOf(row)}${
+          {isSettled(row)
+            ? (OUTCOME_LABEL[row.outcome ?? ''] ?? row.outcome)
+            : `${progressOf(row)}${
                 left === null
                   ? '. Due to be scored on the next visit.'
                   : `. ${left} hours before it can be scored.`
-              }`
-            : (OUTCOME_LABEL[row.outcome ?? ''] ?? row.outcome)}
+              }`}
         </p>
       </header>
 

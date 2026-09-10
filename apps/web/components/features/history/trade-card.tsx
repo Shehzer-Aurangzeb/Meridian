@@ -9,6 +9,7 @@ import {
   bucketOf,
   hoursRemaining,
   progressOf,
+  isSettled,
   type Bucket,
 } from '@/lib/sim-buckets';
 import type { SimTrade } from '@/types/sim';
@@ -152,9 +153,9 @@ export function TradeCard({ row }: { row: SimTrade }) {
           <span className={cn('text-[13px]', BUCKET_TONE[bucket])}>
             {/* An unfinished call says how long it has left, never a number a
                 reader could total. */}
-            {row.netR === null
-              ? `${progressOf(row)}${left === null ? '' : ` · ${left}h before it can be scored`}`
-              : (OUTCOME_LABEL[row.outcome ?? ''] ?? row.outcome)}
+            {isSettled(row)
+              ? (OUTCOME_LABEL[row.outcome ?? ''] ?? row.outcome)
+              : `${progressOf(row)}${left === null ? '' : ` · ${left}h before it can be scored`}`}
           </span>
           <span className="font-mono text-[11px] tabular-nums text-text-tertiary">
             {new Date(row.decidedAt).toLocaleString('en-GB', {

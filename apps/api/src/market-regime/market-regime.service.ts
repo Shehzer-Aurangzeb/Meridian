@@ -11,6 +11,20 @@ import { classifyWithHysteresis, REGIME_HYSTERESIS } from './regime-hysteresis';
 import { TIMEFRAME_MS } from '../common/replay/plan-replay';
 import { Timeframe } from '../common/constants/timeframes';
 
+/**
+ * One bar's regime label, with the time of the bar it belongs to.
+ *
+ * Carries the time because a caller asking "when did the state change" cannot
+ * recover it from an index: the series drops the indicator warm-up, so its
+ * indices do not line up with the candles it came from.
+ */
+export interface LabelledBar {
+  time: Date;
+  regime: MarketRegime;
+  reason: string;
+  bandWidthPercentile: number;
+}
+
 /** The current regime and how long it has held. */
 export interface RegimeState {
   regime: MarketRegime;
@@ -84,18 +98,17 @@ export class MarketRegimeService {
    * candles this is called with, that is ~62,000 operations — cheaper than the
    * fetch that produced them.
    */
-  classifySeries(context: IndicatorContext): RegimeState | null {
-    const { candles, closes, highs, lows, bandWidthSeries, timeframe } = context;
+  labelSeries(context: IndicatorContext): LabelledBar[] {
+    const { candles, closes, highs, lows, bandWidthSeries } = context;
     const lookback = REGIME_HYSTERESIS.bandWidthLookback;
-    if (bandWidthSeries.length < lookback + 2) return null;
+    if (bandWidthSeries.length < lookback + 2) return [];
 
     // bandWidthSeries drops the Bollinger warm-up, so it is shorter than the
     // candles. Line them up by their common right edge, never by index 0.
     const offset = closes.length - bandWidthSeries.length;
 
-    const labels: MarketRegime[] = [];
+    const out: LabelledBar[] = [];
     let previous: MarketRegime | null = null;
-    let last: ReturnType<typeof classifyWithHysteresis> | null = null;
 
     for (let k = lookback; k < bandWidthSeries.length; k += 1) {
       const bar = k + offset;
@@ -106,12 +119,21 @@ export class MarketRegimeService {
       );
       if (!Number.isFinite(adx.adx)) continue;
       const history = bandWidthSeries.slice(k - lookback, k) as number[];
-      last = classifyWithHysteresis(bandWidthSeries[k], adx.adx, history, previous);
-      previous = last.regime;
-      labels.push(last.regime);
+      const label = classifyWithHysteresis(bandWidthSeries[k], adx.adx, history, previous);
+      previous = label.regime;
+      out.push({ time: candles[bar].time, ...label });
     }
 
-    if (last === null || labels.length === 0) return null;
+    return out;
+  }
+
+  classifySeries(context: IndicatorContext): RegimeState | null {
+    const { timeframe } = context;
+    const series = this.labelSeries(context);
+    if (series.length === 0) return null;
+
+    const labels = series.map((b) => b.regime);
+    const last = series[series.length - 1];
 
     let ageBars = 1;
     for (let i = labels.length - 2; i >= 0 && labels[i] === last.regime; i -= 1) ageBars += 1;

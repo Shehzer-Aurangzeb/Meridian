@@ -68,7 +68,14 @@ describe('scoreOutstanding: rows are resolved once, after their window closes', 
     const prisma = { simTrade: { findMany: jest.fn().mockResolvedValue(rows), update } };
     const binance = { getCandlesFrom: jest.fn().mockResolvedValue(candles) };
     return {
-      service: new SimService(prisma as never, binance as never),
+      service: new SimService(
+        prisma as never,
+        binance as never,
+        // The regime trigger needs neither: labelSeries on an empty series
+        // returns nothing, so these tests exercise the unsuperseded path.
+        { buildContext: () => ({}) } as never,
+        { labelSeries: () => [] } as never,
+      ),
       prisma,
       binance,
       update,
