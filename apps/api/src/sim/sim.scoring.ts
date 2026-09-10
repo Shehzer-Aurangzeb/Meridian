@@ -121,8 +121,21 @@ export function scoreSimTrade(
         : 'OPEN'
       : (scored.status as SimOutcome);
 
-  // OPEN is not a verdict, so it must not carry numbers a reader would total.
-  if (outcome === 'OPEN') return UNRESOLVED('OPEN');
+  // OPEN is not a verdict, so it carries no R: `scoreTrade` closes the
+  // remainder at the last bar to reach a number, and that is a "if I closed
+  // now" figure, not a result. What the candles HAVE settled is kept — whether
+  // the entry filled, how many targets were reached, how long it has been held
+  // — because those are facts about the past, not a running total.
+  if (outcome === 'OPEN') {
+    return {
+      outcome,
+      grossR: null,
+      netR: null,
+      targetsHit: scored.targetsHit,
+      barsHeld: scored.barsHeld,
+      filledAt: forward[scored.fillIndex as number].time,
+    };
+  }
 
   return {
     outcome,
@@ -133,6 +146,12 @@ export function scoreSimTrade(
     filledAt: forward[scored.fillIndex as number].time,
   };
 }
+
+/**
+ * The earliest a row is worth looking at. Below one hour there is no forward
+ * bar to judge against, so a check would only cost a request.
+ */
+export const MIN_AGE_HOURS = 1;
 
 /** Outcomes the candles have already decided. They can never change again. */
 const TERMINAL = new Set<SimOutcome>([

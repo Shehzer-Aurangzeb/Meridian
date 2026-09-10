@@ -7,7 +7,13 @@ import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { fetchApi } from '@/lib/api/client';
 import { normaliseSnapshot } from '@/lib/snapshot';
-import { OUTCOME_LABEL, bucketOf, hoursRemaining, BUCKET_TONE } from '@/lib/sim-buckets';
+import {
+  OUTCOME_LABEL,
+  bucketOf,
+  hoursRemaining,
+  progressOf,
+  BUCKET_TONE,
+} from '@/lib/sim-buckets';
 import { MapView } from '@/components/features/map/map-view';
 import { PriceChart, type ChartLevel } from '@/components/features/map/price-chart';
 import type { SimTrade } from '@/types/sim';
@@ -116,11 +122,13 @@ export default function TradeDetailPage() {
         </div>
 
         <p className={cn('mt-2 text-[14px]', BUCKET_TONE[bucket])}>
-          {row.outcome === null
-            ? left === null
-              ? 'Due to be scored on the next visit.'
-              : `Still running — ${left} hours before it can be scored.`
-            : (OUTCOME_LABEL[row.outcome] ?? row.outcome)}
+          {row.netR === null
+            ? `${progressOf(row)}${
+                left === null
+                  ? '. Due to be scored on the next visit.'
+                  : `. ${left} hours before it can be scored.`
+              }`
+            : (OUTCOME_LABEL[row.outcome ?? ''] ?? row.outcome)}
         </p>
       </header>
 

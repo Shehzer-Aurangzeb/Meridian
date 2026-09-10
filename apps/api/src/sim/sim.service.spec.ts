@@ -1,6 +1,6 @@
 import { SimTrade } from '@prisma/client';
 import { SimService, toPlanInput } from './sim.service';
-import { SCORING_WINDOW_HOURS } from './sim.scoring';
+import { SCORING_WINDOW_HOURS, MIN_AGE_HOURS } from './sim.scoring';
 
 const HOUR = 3_600_000;
 const T0 = Date.parse('2026-09-01T00:00:00Z');
@@ -75,13 +75,18 @@ describe('scoreOutstanding: rows are resolved once, after their window closes', 
     };
   };
 
-  it('asks only for rows past the window and not already scored', async () => {
+  it('asks for every unsettled row old enough to have a bar, not only finished ones', async () => {
     const { service, prisma } = build([]);
     await service.scoreOutstanding(now);
 
     const where = prisma.simTrade.findMany.mock.calls[0][0].where;
     expect(where.scoredAt).toBeNull();
-    expect((where.decidedAt.lte as Date).getTime()).toBe(now - SCORING_WINDOW_HOURS * HOUR);
+    // Was SCORING_WINDOW_HOURS. That is the worst case — filled in the last
+    // minute of the fill window, then held the full 72 — and gating every row
+    // on it left a trade stopped out at hour 4 unread for another 92, its
+    // outcome already settled. `scoreOne` still writes scoredAt only when the
+    // candles can no longer change the answer, so nothing is finalised early.
+    expect((where.decidedAt.lte as Date).getTime()).toBe(now - MIN_AGE_HOURS * HOUR);
   });
 
   it('leaves a row unscored when its candles will not load', async () => {

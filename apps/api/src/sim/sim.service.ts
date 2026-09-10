@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BinanceService } from '../market-data/market-data.service';
 import {
   SCORING_WINDOW_HOURS,
+  MIN_AGE_HOURS,
   SimPlanInput,
   isTerminal,
   scoreSimTrade,
@@ -88,11 +89,22 @@ export class SimService {
    * A row whose candles will not load keeps `scoredAt: null`, so a failed fetch
    * is retried on the next read rather than frozen as a verdict.
    */
+  /**
+   * Bring every unsettled row up to date with what the candles now show.
+   *
+   * This used to wait for the full 96-hour window before looking at anything.
+   * That window is the WORST case — an entry filled in the last minute of the
+   * 24-hour fill window, then held the full 72 — and applying it to every row
+   * meant a trade stopped out at hour 4 sat unexamined for another 92, its
+   * outcome already decided and unreadable. A row is now read as soon as there
+   * are bars to read, and `scoreOne` still only marks it FINISHED when the
+   * candles can no longer change the answer.
+   */
   async scoreOutstanding(now = Date.now()): Promise<number> {
     const due = await this.prisma.simTrade.findMany({
       where: {
         scoredAt: null,
-        decidedAt: { lte: new Date(now - SCORING_WINDOW_HOURS * HOUR_MS) },
+        decidedAt: { lte: new Date(now - MIN_AGE_HOURS * HOUR_MS) },
       },
       orderBy: { decidedAt: 'asc' },
     });

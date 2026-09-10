@@ -14,6 +14,8 @@ import {
   ROUND_TRIP_PCT,
   FILL_WINDOW_HOURS,
   MAX_HOLD_HOURS,
+  isTerminal,
+  type SimPlanInput,
 } from './sim.scoring';
 
 const T0 = Date.parse('2026-09-01T00:00:00Z');
@@ -184,5 +186,90 @@ describe('unresolved outcomes carry no numbers', () => {
     const got = scoreSimTrade(plan, candles, decidedAt, NOW);
     expect(got.outcome).toBe('EXPIRED');
     expect(got.netR).not.toBeNull();
+  });
+});
+
+describe('a settled trade is readable as soon as the candles settle it', () => {
+  const plan: SimPlanInput = {
+    direction: 'long',
+    entry: 100,
+    stop: 95,
+    targets: [{ price: 110, weightPercent: 100 }],
+  };
+
+  // Fills on bar 1, stops on bar 2. Nothing after hour 3 can change that.
+  const candles = [
+    bar(0, 100, 100, 100, 100),
+    bar(1, 100, 101, 99, 100),
+    bar(2, 100, 100, 94, 95),
+    // Padded past the window: the point is that the ANSWER does not change,
+    // and isScoreable rightly refuses a 96-hour-old row with nine bars.
+    ...flat(3, FILL_WINDOW_HOURS + MAX_HOLD_HOURS, 95),
+  ];
+
+  it('is STOPPED at hour 4, not withheld until hour 96', () => {
+    const early = scoreSimTrade(plan, candles, decidedAt, T0 + 4 * HOUR);
+    expect(early.outcome).toBe('STOPPED');
+    expect(early.netR).not.toBeNull();
+    expect(isTerminal(early.outcome)).toBe(true);
+  });
+
+  it('reads the same at hour 96 as it did at hour 4', () => {
+    const early = scoreSimTrade(plan, candles, decidedAt, T0 + 4 * HOUR);
+    const late = scoreSimTrade(plan, candles, decidedAt, NOW);
+    expect(late.outcome).toBe(early.outcome);
+    expect(late.netR).toBe(early.netR);
+  });
+});
+
+describe('a trade still running reports what filled, but never a running total', () => {
+  const plan: SimPlanInput = {
+    direction: 'long',
+    entry: 100,
+    stop: 90,
+    targets: [
+      { price: 105, weightPercent: 50 },
+      { price: 130, weightPercent: 50 },
+    ],
+  };
+
+  // Fills on bar 1, first target on bar 2, then drifts. Second target unmet.
+  const candles = [
+    bar(0, 100, 100, 100, 100),
+    bar(1, 101, 101, 99, 100),
+    bar(2, 100, 106, 100, 105),
+    ...flat(3, 8, 104),
+  ];
+
+  const mid = scoreSimTrade(plan, candles, decidedAt, T0 + 10 * HOUR);
+
+  it('is OPEN and carries no R', () => {
+    expect(mid.outcome).toBe('OPEN');
+    expect(mid.grossR).toBeNull();
+    expect(mid.netR).toBeNull();
+    expect(isTerminal(mid.outcome)).toBe(false);
+  });
+
+  it('still says the entry filled and one target was reached', () => {
+    expect(mid.filledAt).not.toBeNull();
+    expect(mid.targetsHit).toBe(1);
+    expect(mid.barsHeld).not.toBeNull();
+  });
+});
+
+describe('a trade that has not filled reports nothing at all', () => {
+  const plan: SimPlanInput = {
+    direction: 'long',
+    entry: 50,
+    stop: 45,
+    targets: [{ price: 60, weightPercent: 100 }],
+  };
+
+  it('is PENDING inside the fill window, with every number null', () => {
+    const pending = scoreSimTrade(plan, flat(0, 6, 100), decidedAt, T0 + 5 * HOUR);
+    expect(pending.outcome).toBe('PENDING');
+    expect(pending.filledAt).toBeNull();
+    expect(pending.targetsHit).toBeNull();
+    expect(pending.netR).toBeNull();
   });
 });

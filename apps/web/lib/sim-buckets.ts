@@ -99,3 +99,29 @@ export function groupByBatch(rows: SimTrade[]): Batch[] {
     })
     .sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
 }
+
+/**
+ * What is known about a row that has no result yet.
+ *
+ * "Still running · 47h to go" reads as "filled and open", and it was neither —
+ * it only ever meant "not yet eligible to be scored". These say what the
+ * candles have actually settled: whether the entry was reached, and how far it
+ * has got. Never a running profit, because closing a live trade at the last
+ * bar to reach a number produces a figure that is not a result.
+ */
+export function progressOf(row: SimTrade): string {
+  if (row.outcome !== null && row.netR !== null) return '';
+  // A null outcome means nobody has looked yet, which is not the same claim as
+  // "the entry was not reached". Rows under an hour old have no forward bar to
+  // judge against and are deliberately skipped.
+  if (row.outcome === null) return 'Not checked yet';
+  if (row.filledAt === null) {
+    return row.outcome === 'PENDING' ? 'Entry not reached yet' : 'Entry never reached';
+  }
+  const held = row.barsHeld === null ? '' : ` · held ${row.barsHeld}h`;
+  const hit =
+    row.targetsHit === null || row.targetsHit === 0
+      ? ''
+      : ` · ${row.targetsHit} target${row.targetsHit === 1 ? '' : 's'} reached`;
+  return `Entry filled${hit}${held}`;
+}
